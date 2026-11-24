@@ -27,12 +27,19 @@ export { resolveClipTimingBasis } from "./gsapShared";
 export { fetchParsedAnimations, resolveSelectorElementIds } from "./keyframeCacheAstLoad";
 export { getAnimationsForElement } from "./gsapElementMatch";
 
+function changedCompositionPaths(change: string | readonly string[] | undefined, projectId: string | null) {
+  const paths = (typeof change === "string" ? [change] : change ?? [])
+    .map(path => projectCompositionPath(path, projectId));
+  return paths.length && paths.every((path): path is string => path !== null) ? paths : null;
+}
+
 export function useGsapAnimationsForElement(
   projectId: string | null,
   sourceFile: string,
   target: DomEditSelection | null,
   version: number,
   iframeRef?: React.RefObject<HTMLIFrameElement | null>,
+  changedPath?: string | readonly string[],
 ): {
   animations: GsapAnimation[];
   multipleTimelines: boolean;
@@ -41,20 +48,23 @@ export function useGsapAnimationsForElement(
   const [allAnimations, setAllAnimations] = useState<GsapAnimation[]>([]);
   const [multipleTimelines, setMultipleTimelines] = useState(false);
   const [unsupportedTimelinePattern, setUnsupportedTimelinePattern] = useState(false);
-  const lastFetchKeyRef = useRef("");
+  const sourceRead = useRef<{
+    projectId: string;
+    path: string;
+    version: number;
+    request: ReturnType<typeof fetchParsedAnimations>;
+  } | null>(null);
   // Re-run the per-element cache populate when sub-comp DOM children appear, so a
   // sub-comp element gets its host-relative keyframe percentages (not elDuration=1).
   const domClipChildrenKey = usePlayerStore((s) =>
     s.domClipChildren.map((c) => `${c.id}<${c.hostId}`).join("|"),
   );
 
+  const hasSelection = target !== null;
   useEffect(() => {
-    const targetKey = target?.id ?? target?.selector ?? "";
-    const fetchKey = `${projectId}:${sourceFile}:${version}:${targetKey}`;
-    if (fetchKey === lastFetchKeyRef.current) return;
-    lastFetchKeyRef.current = fetchKey;
-
-    if (!projectId) {
+    const path = projectCompositionPath(sourceFile, projectId);
+    if (!projectId || !path || !hasSelection) {
+      sourceRead.current = null;
       setAllAnimations([]);
       setMultipleTimelines(false);
       setUnsupportedTimelinePattern(false);
@@ -62,11 +72,18 @@ export function useGsapAnimationsForElement(
     }
 
     let cancelled = false;
-    fetchParsedAnimations(projectId, sourceFile).then((parsed) => {
+    const previous = sourceRead.current;
+    const scoped = changedCompositionPaths(changedPath, projectId);
+    const reusable = previous?.projectId === projectId && previous.path === path &&
+      (previous.version === version || (previous.version + 1 === version && scoped && !scoped.includes(path)));
+    const request = reusable ? previous.request : fetchParsedAnimations(projectId, path);
+    sourceRead.current = { projectId, path, version, request };
+    request.then((parsed) => {
       if (cancelled) {
         return;
       }
       if (!parsed) {
+        sourceRead.current = null;
         setAllAnimations([]);
         setMultipleTimelines(false);
         setUnsupportedTimelinePattern(false);
@@ -80,7 +97,7 @@ export function useGsapAnimationsForElement(
     return () => {
       cancelled = true;
     };
-  }, [projectId, sourceFile, version, target?.id, target?.selector]);
+  }, [projectId, sourceFile, version, changedPath, hasSelection, target?.id, target?.selector]);
 
   const targetId = target?.id ?? null;
   const targetSelector = target?.selector ?? null;
@@ -297,12 +314,11 @@ export function usePopulateKeyframeCacheForFile(
       // A request started before a write (or before leaving and reopening a
       // project) must not satisfy the new generation, even if still in flight.
       const previous = source.current;
-      const paths = (typeof changedPath === "string" ? [changedPath] : changedPath ?? [])
-        .map(path => projectCompositionPath(path, projectId));
+      const paths = changedCompositionPaths(changedPath, projectId);
       // Reuse other files only when the entire change since our last read is known.
-      const scoped = paths.length > 0 && paths.every(Boolean) && previous?.projectId === projectId && previous.version + 1 === version;
+      const scoped = paths && previous?.projectId === projectId && previous.version + 1 === version;
       const reads = scoped ? previous.reads : new Map();
-      if (scoped) for (const path of paths) reads.delete(path!);
+      if (scoped) for (const path of paths) reads.delete(path);
       source.current = { projectId, version, fresh: previous !== null, reads };
     }
     if (!projectId) return;

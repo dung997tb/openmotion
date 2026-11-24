@@ -13,7 +13,7 @@ import { CloudError, revisionConflict } from '../contracts/errors.ts';
 import type { JobCancelEvent, JobProgressEvent, ProjectEvent } from '../contracts/events.ts';
 import type { JobState } from '../contracts/jobs.ts';
 import type { StoragePort } from '../contracts/storage.ts';
-import { applyWorkspaceBlobRefDeltas } from '../db/cas.ts';
+import { freezeProjectSnapshot } from './project-snapshot.ts';
 import type { Database } from '../db/client.ts';
 import { asInsert, asUpdate } from '../db/helpers.ts';
 import { jobs } from '../db/schema/jobs.ts';
@@ -422,65 +422,7 @@ export class ExportService {
         }
 
         if (needsNewSnapshot || !snapshotVersionId) {
-          const nextVersionNumber = project.currentVersionNumber + 1;
-          const createdVersionId = randomUUID();
-          const now = new Date();
-
-          await tx.insert(projectVersions).values(
-            asInsert(projectVersions, {
-              id: createdVersionId,
-              workspaceId: ctx.workspaceId,
-              projectId,
-              versionNumber: nextVersionNumber,
-              revision: project.revision,
-              source: 'studio',
-              summary: 'Frozen export snapshot',
-              createdAt: now,
-            }),
-          );
-
-          if (liveFiles.length > 0) {
-            await tx.insert(projectVersionFiles).values(
-              liveFiles.map((file) =>
-                asInsert(projectVersionFiles, {
-                  versionId: createdVersionId,
-                  workspaceId: ctx.workspaceId,
-                  projectId,
-                  path: file.path,
-                  blobScope: file.blobScope,
-                  sha256: file.sha256,
-                  sizeBytes: Number(file.sizeBytes),
-                  mimeType: file.mimeType,
-                }),
-              ),
-            );
-
-            // Increment CAS refcounts for workspace-scoped blobs referenced by the frozen snapshot.
-            const workspaceDeltas = liveFiles
-              .filter((file) => file.blobScope === 'workspace')
-              .map((file) => ({
-                sha256: file.sha256,
-                delta: 1,
-                sizeBytes: Number(file.sizeBytes),
-                mimeType: file.mimeType,
-              }));
-            if (workspaceDeltas.length > 0) {
-              await applyWorkspaceBlobRefDeltas(tx, ctx.workspaceId, workspaceDeltas);
-            }
-          }
-
-          await tx
-            .update(projects)
-            .set(
-              asUpdate(projects, {
-                currentVersionId: createdVersionId,
-                currentVersionNumber: nextVersionNumber,
-                updatedAt: now,
-              }),
-            )
-            .where(and(eq(projects.id, projectId), eq(projects.workspaceId, ctx.workspaceId)));
-
-          snapshotVersionId = createdVersionId;
+          snapshotVersionId = await freezeProjectSnapshot(tx, project, liveFiles, 'Frozen export snapshot');
         }
 
         const outputName = sanitizeExportFilename(opts.outputName, project.title, format);

@@ -264,6 +264,20 @@ function findTagByAttribute(html: string, name: string, value?: string, selector
     : null;
 }
 
+/** Return the exact opening tag only when this ID is authored once in the file. */
+export function uniqueAuthoredHfTag(html: string, hfId: string): TagMatch | undefined {
+  const matches = scanHtmlOpeningTags(html).filter(tag => tag.closed && tag.attributes.some(
+    attr => attr.name === "data-hf-id" && attr.kind === "value" && decodeAuthoredAttribute(attr.value) === hfId,
+  ));
+  if (matches.length !== 1) return undefined;
+  const {start, bodyEnd: end} = matches[0]!;
+  return { start, end, tag: html.slice(start, end) };
+}
+
+export function replaceTagStyle(html: string, match: TagMatch, style: string): string {
+  return replaceTagAtMatch(html, match, patchTagAttribute(match.tag, "style", { kind: "value", value: style }));
+}
+
 function findTagByClass(html: string, target: PatchTarget): TagMatch | null {
   const classMatch = target.selector?.match(/^\.([a-zA-Z0-9_-]+)$/);
   if (!classMatch) return null;

@@ -1,3 +1,6 @@
+import { readVersionedSource } from "./readVersionedSource";
+import { confirmedSource, observeSourceRead } from "./confirmedTextSources";
+import { tryStudioTextEdit } from "./studioTextEdits";
 import type { RebasedFileEdit } from "./rebasedFileEdit";
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import { getCachedCloudDisklessMode } from "./cloudRuntime";
@@ -6,7 +9,6 @@ import { buildProjectApiPath } from "./projectRouting";
 import type { MutableRefObject } from "react";
 import { serializeStudioFileMutations } from "./studioFileMutationCoordinator";
 import { createStudioSaveHttpError } from "./studioSaveDiagnostics";
-import { studioApiFetch } from "./studioApiFetch";
 
 export type EditContextTarget = HistoryTarget;
 
@@ -29,7 +31,7 @@ export interface DomEditCommitBaseParams {
   clearDomSelection: () => void;
 }
 
-export type StudioWriteHistory = { label: string; windowId: string };
+export type StudioWriteHistory = { label: string; windowId: string; continuous?: boolean };
 export interface ProjectFileWriter {
   (path: string, content: string, expectedContent?: string): Promise<void>;
   (path: string, content: string, expectedContent: string | undefined, command: ProjectEditCommand | undefined, history?: StudioWriteHistory): Promise<void | RebasedFileEdit>;
@@ -38,31 +40,35 @@ export interface ProjectFileWriter {
 const lastWindow = new WeakMap<ProjectFileWriter, { key: string | undefined; id: string; startedAt: number }>();
 
 /** A writer belongs to one Studio project. A different gesture starts a new history entry. */
-export function studioHistoryForWrite(writer: ProjectFileWriter, label: string, key?: string, coalesceMs = 4000): StudioWriteHistory {
+export function studioHistoryForWrite(writer: ProjectFileWriter, label: string, key?: string, coalesceMs = 4000, continuous = false): StudioWriteHistory {
   const now = Date.now();
   const previous = lastWindow.get(writer);
-  if (key && previous?.key === key && now - previous.startedAt < coalesceMs) return { label, windowId: previous.id };
-  const id = crypto.randomUUID();
-  lastWindow.set(writer, { key, id, startedAt: now });
-  return { label, windowId: id };
+  const window = key && previous?.key === key && now - previous.startedAt < coalesceMs
+    ? previous : { key, id: crypto.randomUUID(), startedAt: now };
+  lastWindow.set(writer, window);
+  // Compound gestures already supply their own unique key and an unbounded time window.
+  return { label, windowId: window.id, ...((continuous || (key && coalesceMs === Infinity)) && { continuous: true }) };
 }
 
-type HistoryGesture = Pick<RecordEditInput, "label" | "coalesceKey" | "coalesceMs">;
+type HistoryGesture = Pick<RecordEditInput, "label" | "coalesceKey" | "coalesceMs"> & { continuous?: boolean };
 
 export function cloudHistoryForWrite(writer: ProjectFileWriter | undefined, gesture: HistoryGesture): StudioWriteHistory | undefined {
   if (!writer || !getCachedCloudDisklessMode()) return undefined;
-  return studioHistoryForWrite(writer, gesture.label, gesture.coalesceKey, gesture.coalesceMs);
+  return studioHistoryForWrite(writer, gesture.label, gesture.coalesceKey, gesture.coalesceMs, gesture.continuous);
 }
 
 interface SaveProjectFilesWithHistoryInput {
   projectId: string;
   label: string;
+  continuous?: boolean;
   coalesceKey?: string;
   coalesceMs?: number;
   files: Record<string, (contentInsideFileQueue: string) => string>;
   commandForWrite?: (path: string) => ProjectEditCommand | undefined;
   readFile: (path: string) => Promise<string>;
   writeFile: ProjectFileWriter;
+  /** Observe successful file writes, including a compensating write after a history failure. */
+  onFileWritten?: (path: string, submitted: string) => void;
   recordEdit: (entry: RecordEditInput) => Promise<void>;
   /**
    * What a path holds ON DISK right now, when that is not the same as the
@@ -82,8 +88,9 @@ interface SaveProjectFilesWithHistoryInput {
 }
 
 export async function readProjectFileContent(pid: string, path: string): Promise<string> {
-  const response = await studioApiFetch(
+  const response = await readVersionedSource(
     buildProjectApiPath(pid, `/files/${encodeURIComponent(path)}`),
+    confirmedSource(pid, path),
   );
   if (!response.ok) {
     throw await createStudioSaveHttpError(response, `Failed to read ${path}`);
@@ -92,6 +99,7 @@ export async function readProjectFileContent(pid: string, path: string): Promise
   if (typeof data.content !== "string") {
     throw new Error(`Missing file contents for ${path}`);
   }
+  observeSourceRead(pid, path, response, data);
   return data.content;
 }
 
@@ -138,9 +146,11 @@ export async function writeProjectFilesWithHistoryInQueue({
   label,
   coalesceKey,
   coalesceMs,
+  continuous,
   files,
   readFile,
   writeFile,
+  onFileWritten,
   recordEdit,
   diskContent,
   commandForWrite,
@@ -157,7 +167,15 @@ export async function writeProjectFilesWithHistoryInQueue({
   const changedPaths = Object.keys(snapshots);
   if (changedPaths.length === 0) return [];
 
-  const history = existingHistory ?? cloudHistoryForWrite(writeFile, { label, coalesceKey, coalesceMs });
+  const history = existingHistory ?? cloudHistoryForWrite(writeFile, { label, coalesceKey, coalesceMs, continuous });
+  if (changedPaths.length > 1 && !commandForWrite) {
+    const sources = changedPaths.map(path => ({ path, before: diskContent?.[path] ?? snapshots[path].before, after: snapshots[path].after }));
+    if (await tryStudioTextEdit(projectId, sources, history)) {
+      for (const path of changedPaths) onFileWritten?.(path, snapshots[path].after);
+      await recordEdit({ label, coalesceKey, coalesceMs, files: snapshots });
+      return changedPaths;
+    }
+  }
   if (changedPaths.length > 1 && commandForWrite) {
     const edits = changedPaths.flatMap(path => {
       const command = commandForWrite(path);
@@ -166,6 +184,7 @@ export async function writeProjectFilesWithHistoryInQueue({
     if (edits.length === changedPaths.length) {
       const { commitStudioEditBatch } = await import('./projectEditBatch');
       await commitStudioEditBatch(projectId, edits, history);
+      for (const edit of edits) onFileWritten?.(edit.path, edit.after);
       await recordEdit({ label, coalesceKey, coalesceMs, files: snapshots });
       return changedPaths;
     }
@@ -180,6 +199,7 @@ export async function writeProjectFilesWithHistoryInQueue({
       else if (command) await writeFile(path, snapshots[path].after, expected, command);
       else await writeFile(path, snapshots[path].after, expected);
       writtenPaths.push(path);
+      onFileWritten?.(path, snapshots[path].after);
     }
 
     await recordEdit({ label, coalesceKey, coalesceMs, files: snapshots });
@@ -187,6 +207,7 @@ export async function writeProjectFilesWithHistoryInQueue({
     try {
       for (const path of writtenPaths.reverse()) {
         await writeFile(path, snapshots[path].before, snapshots[path].after);
+        onFileWritten?.(path, snapshots[path].before);
       }
     } catch (rollbackError) {
       throw new AggregateError(

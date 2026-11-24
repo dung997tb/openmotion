@@ -10,7 +10,7 @@ import {
   type StudioVariables,
 } from '../context.ts';
 import { infoInMemory } from '../engine/inspect.ts';
-import { formatVersionFromSha256 } from '../etag.ts';
+import { formatFileVersion } from '../etag.ts';
 import { listVirtualCompositions } from '../virtual-project-store.ts';
 import { classifyPreviewProxyTarget } from '../../workers/media-ingest.ts';
 
@@ -294,7 +294,7 @@ export function createStudioProjectsRoutes(deps: DisklessStudioDeps): Hono<{ Var
         size: f.sizeBytes,
         type: f.mimeType,
         isText: f.isText,
-        version: formatVersionFromSha256(f.sha256),
+        version: formatFileVersion(f.blobScope, f.sha256),
         modifiedAt: f.updatedAt.toISOString(),
         metadata: f.metadata ?? null,
       })),

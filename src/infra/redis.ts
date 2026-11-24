@@ -157,21 +157,24 @@ export type EventBusListener = (payload: unknown, channel: string) => void;
 export class RedisEventBus {
   private readonly pub: Redis;
   private readonly sub: Redis;
-  private readonly listeners = new Map<string, Set<EventBusListener>>();
+  private readonly channels = new Map<string, {
+    ready: Promise<unknown>;
+    listeners: Map<EventBusListener, number>;
+  }>();
 
   constructor(redisUrl: string) {
     this.pub = createRedisClient(redisUrl, 'command');
     this.sub = createRedisClient(redisUrl, 'pubsub');
     this.sub.on('message', (channel: string, rawMessage: string) => {
-      const bucket = this.listeners.get(channel);
-      if (!bucket || bucket.size === 0) return;
+      const bucket = this.channels.get(channel);
+      if (!bucket) return;
       let parsed: unknown = rawMessage;
       try {
         parsed = JSON.parse(rawMessage);
       } catch {
         // Deliver raw string if publisher emitted non-JSON.
       }
-      for (const listener of bucket) {
+      for (const listener of bucket.listeners.keys()) {
         try {
           listener(parsed, channel);
         } catch {
@@ -186,25 +189,31 @@ export class RedisEventBus {
   }
 
   async subscribe(channel: string, listener: EventBusListener): Promise<() => Promise<void>> {
-    let bucket = this.listeners.get(channel);
-    const isFirst = !bucket || bucket.size === 0;
+    let bucket = this.channels.get(channel);
     if (!bucket) {
-      bucket = new Set();
-      this.listeners.set(channel, bucket);
+      bucket = { ready: this.sub.subscribe(channel), listeners: new Map() };
+      this.channels.set(channel, bucket);
     }
-    bucket.add(listener);
-    if (isFirst) {
-      await this.sub.subscribe(channel);
+    const listeners = bucket.listeners;
+    listeners.set(listener, (listeners.get(listener) ?? 0) + 1);
+    try {
+      await bucket.ready;
+    } catch (error) {
+      if (this.channels.get(channel) === bucket) this.channels.delete(channel);
+      throw error;
     }
+
     let released = false;
     return async () => {
       if (released) return;
       released = true;
-      const current = this.listeners.get(channel);
-      if (!current) return;
-      current.delete(listener);
-      if (current.size === 0) {
-        this.listeners.delete(channel);
+      const remaining = listeners.get(listener)! - 1;
+      if (remaining) listeners.set(listener, remaining);
+      else listeners.delete(listener);
+      if (!listeners.size && this.channels.get(channel) === bucket) {
+        // Issue UNSUBSCRIBE before yielding so a new subscriber's SUBSCRIBE
+        // follows it on this same Redis connection and waits for its own ACK.
+        this.channels.delete(channel);
         await this.sub.unsubscribe(channel);
       }
     };
@@ -250,7 +259,7 @@ export class RedisEventBus {
   }
 
   async close(): Promise<void> {
-    this.listeners.clear();
+    this.channels.clear();
     await Promise.allSettled([this.sub.quit(), this.pub.quit()]);
   }
 }
@@ -269,24 +278,29 @@ export interface RateLimitResult {
 
 const SLIDING_WINDOW_LUA = `
 local key = KEYS[1]
-local now = tonumber(ARGV[1])
-local windowMs = tonumber(ARGV[2])
-local limit = tonumber(ARGV[3])
+local windowMs = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local cost = tonumber(ARGV[3])
 local member = ARGV[4]
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
 
 redis.call('ZREMRANGEBYSCORE', key, '-inf', now - windowMs)
 local count = redis.call('ZCARD', key)
-if count >= limit then
-  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+local missing = count + cost - limit
+if missing > 0 then
   local resetAt = now + windowMs
-  if oldest[2] then
-    resetAt = tonumber(oldest[2]) + windowMs
+  if cost <= limit then
+    local release = redis.call('ZRANGE', key, missing - 1, missing - 1, 'WITHSCORES')
+    resetAt = tonumber(release[2]) + windowMs
   end
-  return {0, 0, resetAt}
+  return {0, limit - count, resetAt, math.ceil((resetAt - now) / 1000)}
 end
-redis.call('ZADD', key, now, member)
+for i = 1, cost do
+  redis.call('ZADD', key, now, member .. ':' .. i)
+end
 redis.call('PEXPIRE', key, windowMs)
-return {1, limit - count - 1, now + windowMs}
+return {1, limit - count - cost, now + windowMs, 0}
 `;
 
 export class RateLimiter {
@@ -298,24 +312,18 @@ export class RateLimiter {
     this.keyPrefix = keyPrefix;
   }
 
-  async consume(bucketKey: string, limit: number, windowMs: number): Promise<RateLimitResult> {
-    const now = Date.now();
+  async consume(bucketKey: string, limit: number, windowMs: number, cost = 1): Promise<RateLimitResult> {
+    if (!Number.isSafeInteger(cost) || cost < 1) throw new RangeError('Rate limit cost must be a positive integer');
     const key = `${this.keyPrefix}:${bucketKey}`;
-    const member = `${now}:${randomUUID()}`;
-    const reply = (await this.redis.eval(
+    const [allowed, remaining, resetAtMs, retryAfterSec] = (await this.redis.eval(
       SLIDING_WINDOW_LUA,
       1,
       key,
-      String(now),
       String(windowMs),
       String(limit),
-      member,
-    )) as [number, number, number];
-
-    const allowed = Number(reply[0]) === 1;
-    const remaining = Math.max(0, Number(reply[1]));
-    const resetAtMs = Number(reply[2]);
-    const retryAfterSec = allowed ? 0 : Math.max(1, Math.ceil((resetAtMs - now) / 1000));
-    return { allowed, remaining, limit, resetAtMs, retryAfterSec };
+      String(cost),
+      randomUUID(),
+    )) as [number, number, number, number];
+    return { allowed: allowed === 1, remaining: Math.max(0, remaining), limit, resetAtMs, retryAfterSec };
   }
 }

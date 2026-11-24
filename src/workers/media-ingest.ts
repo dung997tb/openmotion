@@ -1,3 +1,4 @@
+import type { BlobScope } from '../contracts/storage.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -1205,7 +1206,7 @@ async function promoteFileToLibraryOrProject(
           string,
           {
             path: string;
-            blobScope: 'workspace' | 'catalog';
+            blobScope: BlobScope;
             sha256: string;
             sizeBytes: number;
             mimeType: string;

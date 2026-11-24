@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isUtf8 } from 'node:buffer';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { stampHfIdsInPlace } from '@hyperframes/parsers/hf-ids';
 import type { AuthContext } from '../contracts/auth.ts';
@@ -42,11 +43,13 @@ import {
   type SessionDetail,
 } from '../../shared/session.ts';
 import { getMimeType, sha256Hex } from '../studio/etag.ts';
+import { prepareFullBaseline } from './text-patch-boundaries.ts';
 import {
   assertAgentProjectAccess,
   assertValidUuid,
   canonicalInputHash,
   loadProjectOrThrow,
+  MAX_TEXT_FILE_BYTES,
   normalizeSafeProjectPath,
   type HotTextCachePort,
   type ProjectFilesService,
@@ -68,7 +71,8 @@ export interface InitialProjectFile {
   readonly path: string;
   readonly content?: string;
   readonly data?: Buffer;
-  readonly blobScope?: BlobScope;
+  // A new project may share content-addressed blobs. Text revisions belong to their source project.
+  readonly blobScope?: 'workspace' | 'catalog';
   readonly sha256?: string;
   readonly sizeBytes?: number;
   readonly mimeType?: string;
@@ -251,6 +255,7 @@ function safeTitle(raw: unknown, fallback = 'Untitled Project'): string {
 export class WorkspaceService {
   private readonly db: Database;
   private readonly storage: StoragePort;
+  private readonly textPatchWrites: boolean;
   private readonly hotTextCache?: HotTextCachePort;
 
   private readonly onCatalogChange?: WorkspaceServiceDeps['onCatalogChange'];
@@ -259,6 +264,7 @@ export class WorkspaceService {
     this.onCatalogChange = deps.onCatalogChange;
     this.db = deps.db;
     this.storage = deps.storage;
+    this.textPatchWrites = deps.files.textPatchWrites;
     this.hotTextCache = deps.hotTextCache;
   }
 
@@ -552,6 +558,15 @@ export class WorkspaceService {
               revokedAt: null,
             }),
           });
+      }
+
+      if (this.textPatchWrites) {
+        for (const [id, upload] of toUpload) {
+          if (upload.textContent === undefined || upload.buffer.length > MAX_TEXT_FILE_BYTES || !isUtf8(upload.buffer)) continue;
+          await prepareFullBaseline(tx, {
+            projectId: createdProject.id, workspaceId: ctx.workspaceId, scope: 'workspace', id, bytes: upload.buffer,
+          });
+        }
       }
 
       // Apply +2 refcount per workspace blob (+1 live project_files +1 v1 project_version_files).

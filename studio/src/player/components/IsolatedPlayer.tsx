@@ -8,6 +8,8 @@ import { createPreviewAdapter } from "../lib/previewAdapter";
 import { bindPreviewLease } from "../lib/previewLease";
 import { rememberPreviewPosition } from "../lib/previewReconnect";
 import { announcePreviewDocumentLoaded } from "../sceneSwap";
+import { forgetPreviewHtmlSources, rememberPreviewHtmlSources } from "../lib/previewHtmlSources";
+import { rememberPeerTimingDocument } from "../peerTimingPreview";
 import { usePlayerStore } from "../store/playerStore";
 import { registerRetryFailedAssetsHandler } from "../store/readinessSlice";
 import type { PreviewAssetFailure, PreviewAssetProgress } from "../lib/previewAssetReadiness";
@@ -75,6 +77,7 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
       applyPreviewVariablesToUrl(url);
       let size = initialPortrait.current ? [1080, 1920] : [1920, 1080];
       let ready = false;
+      let receivedHtmlSources = false;
       let timelineLoaded = false;
       let runtimeTime: number | undefined;
       let bridge: ReturnType<typeof createPreviewAdapter> | undefined;
@@ -116,6 +119,14 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
       }
       function message(event: MessageEvent) {
         if (!bridge?.accepts(event)) return;
+        if (event.data.type === "preview-ready") {
+          if (!receivedHtmlSources) {
+            rememberPreviewHtmlSources(iframe!, event.data.projectId, event.data.htmlSources);
+            receivedHtmlSources = true;
+          }
+          rememberPeerTimingDocument(iframe!, bridge.token, event.data.timingDocumentId, event.data.styleDocumentId);
+          return;
+        }
         if (event.data.type === "asset-readiness") {
           const parsed = parseBridgeAssetProgress(event.data);
           if (parsed && tracksAssets && !passive) {
@@ -205,6 +216,9 @@ export const IsolatedPlayer = forwardRef<HTMLIFrameElement, PlayerProps & { orig
         callbacks.current.onReadyToShowChange?.(false);
         callbacks.current.onCompositionLoadingChange?.(true);
         runtimeTime = undefined;
+        receivedHtmlSources = false;
+        forgetPreviewHtmlSources(iframe);
+        rememberPeerTimingDocument(iframe, null, null);
         iframe.src = next.href;
         bridge = createPreviewAdapter({ iframe, expectedOrigin: props.origin });
         if (tracksAssets && !passive) {

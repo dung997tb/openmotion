@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import {
+  changedFileVersion,
   mergeFileChangePayloads,
   readFileChangeAffectedCompositions,
   readFileChangeAffectsPreview,
   readFileTreeChanged,
   readFileChangeField,
   readStudioFileChangePath,
-} from "../components/editor/manualEdits";
+} from "../components/editor/manualEditsParsing";
 import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
 import type { ExternalConflictSnapshot } from "../utils/externalConflictStorage";
 import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
 import { onRebasedFileEdit } from "../utils/rebasedFileEdit";
-import { consumeStudioWriteToken } from "../utils/studioFileVersion";
+import { consumeStudioWriteToken, invalidateLatestSourceWrite, isLatestSourceWrite } from "../utils/studioFileVersion";
+import { useCloudDisklessMode } from "../utils/cloudRuntime";
 import { logReload } from "../utils/reloadDebug";
 import { notifyProjectActivity } from "../motion/workspaceRefresh";
 import {
@@ -52,8 +54,8 @@ interface ExternalFileChangeCoordinatorOptions {
   getPendingCandidate?: () => { path: string; content: string } | null;
   discardPendingChanges: () => void;
   reloadPreview: (path?: string) => void;
-  reloadSdkSession: (path: string) => void;
-  refreshOpenSource?: (path: string) => void;
+  /** Accept synchronously after capturing the displayed source and before opening the next revision. */
+  refreshFileViews: (payload: unknown, acceptChange: (unaffectedPreview?: string) => void) => Promise<boolean> | "unaffected" | void;
   persistConflictSnapshot: (projectId: string, conflict: StudioFileConflictError) => Promise<void>;
   persistFailureSnapshot?: (
     projectId: string,
@@ -75,9 +77,10 @@ interface ExternalFileChangeCoordinatorOptions {
   onAcceptedPersistedFileChange: (
     path: string,
     affectedCompositions: readonly string[] | null,
+    ownWrite?: { token: string; version: string },
   ) => void;
   /**
-   * Called alongside `reloadPreview`/`reloadSdkSession` on every accepted
+   * Called alongside `reloadPreview`/`refreshFileViews` on every accepted
    * external change. The file tree (`useFileTree`) is only ever refreshed
    * from Studio's OWN file operations (create/delete/rename/upload) — an
    * external change (an agent writing outside Studio) reloads the preview
@@ -147,6 +150,10 @@ export function sseFileChangeChannel(
     const eventSource = new EventSource(studioProjectUrl('/api/events'));
     eventSource.addEventListener("file-change", onDelivery);
     eventSource.addEventListener("history-changed", onHistoryChanged);
+    eventSource.addEventListener("connected", event => {
+      const projectId = readFileChangeField(decodeFileChange(event), "projectId");
+      if (projectId) notifyProjectActivity(projectId, "connected");
+    });
     eventSource.addEventListener("catalog-changed", (event) => {
       const projectId = readFileChangeField(decodeFileChange(event), "projectId");
       if (projectId) notifyProjectActivity(projectId, "catalog-changed");
@@ -199,6 +206,8 @@ export function sseFileChangeChannel(
 }
 
 function eventIdentity(path: string, payload: unknown): string | null {
+  const revision = readFileChangeField(payload, "revision");
+  if (revision) return `${path}\0${revision}\0${readFileChangeWriteToken(payload) ?? ""}`;
   const version = readFileChangeVersion(payload);
   if (version) return `${path}\0${version}`;
   const content = readFileChangeContent(payload);
@@ -214,8 +223,7 @@ export function useExternalFileChangeCoordinator({
   getPendingCandidate,
   discardPendingChanges,
   reloadPreview,
-  reloadSdkSession,
-  refreshOpenSource,
+  refreshFileViews,
   persistConflictSnapshot,
   persistFailureSnapshot,
   loadConflictSnapshot,
@@ -228,8 +236,12 @@ export function useExternalFileChangeCoordinator({
   refreshFileTree,
   onHistoryChanged,
 }: ExternalFileChangeCoordinatorOptions): ExternalFileChangeCoordinatorHandle {
+  const cloud = useCloudDisklessMode();
+  // Vite can serve a cloud project through its development proxy. That backend publishes SSE.
+  const useHotChannel = !cloud && Boolean(import.meta.hot || testHotAdapter());
   const [blocked, setBlockedState] = useState<ExternalFileChangeBlockedState | null>(null);
   const generationRef = useRef(0);
+  const previewGeneration = useRef(0);
   const mountedRef = useRef(true);
   const lastEventIdentityRef = useRef<string | null>(null);
   const blockedRef = useRef<ExternalFileChangeBlockedState | null>(null);
@@ -262,6 +274,7 @@ export function useExternalFileChangeCoordinator({
   useEffect(() => {
     generationRef.current += 1;
     setBlocked(null);
+    previewGeneration.current++;
     lastEventIdentityRef.current = null;
   }, [projectId, activeCompPath, setBlocked]);
 
@@ -313,15 +326,24 @@ export function useExternalFileChangeCoordinator({
   const deliverOwed = useCallback(
     (owed: unknown, accept = true) => {
       const path = readStudioFileChangePath(owed) ?? ".";
-      const affectsPreview = readFileChangeAffectsPreview(owed);
-      if (accept) onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(owed));
+      const inPlace = refreshFileViews(owed, unaffectedPreview => {
+        const compositions = readFileChangeAffectedCompositions(owed);
+        if (accept) onAcceptedPersistedFileChange(path, unaffectedPreview && compositions
+          ? compositions.filter(item => item !== unaffectedPreview) : compositions);
+      });
+      const affectsPreview = readFileChangeAffectsPreview(owed) && inPlace !== "unaffected";
       logReload(affectsPreview ? "reload" : "file-tree only", {
         path,
         by: "external-change coordinator",
       });
-      if (affectsPreview) reloadPreview(path);
-      reloadSdkSession(path);
-      refreshOpenSource?.(path);
+      if (affectsPreview) {
+        const ticket = ++previewGeneration.current;
+        if (inPlace) {
+          void inPlace.catch(() => false).then(applied => {
+            if (!applied && mountedRef.current && previewGeneration.current === ticket) reloadPreview(path);
+          });
+        } else reloadPreview(path);
+      }
       // Fire-and-forget: a failed refresh leaves the tree as stale as it was,
       // which is the status quo this exists to improve on, not a new failure
       // mode to surface. The `absent`-triggered fallback in useSdkSession
@@ -329,7 +351,7 @@ export function useExternalFileChangeCoordinator({
       // a watcher event the SSE never delivered).
       if (readFileTreeChanged(owed)) void refreshFileTree?.();
     },
-    [onAcceptedPersistedFileChange, reloadPreview, reloadSdkSession, refreshFileTree, refreshOpenSource],
+    [onAcceptedPersistedFileChange, reloadPreview, refreshFileViews, refreshFileTree],
   );
 
   const persistSnapshotInOrder = useCallback(async (write: () => Promise<void>) => {
@@ -510,8 +532,11 @@ export function useExternalFileChangeCoordinator({
 
       const ownWriteToken = consumeStudioWriteToken(token);
       const ownContentEcho = content != null && isSelfWriteEcho(path, content);
+      if (!ownWriteToken) invalidateLatestSourceWrite();
       if (ownWriteToken || ownContentEcho) {
-        onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(payload));
+        const version = changedFileVersion(payload, path);
+        const ownWrite = ownWriteToken && token && version && isLatestSourceWrite(token) ? { token, version } : undefined;
+        onAcceptedPersistedFileChange(path, readFileChangeAffectedCompositions(payload), ownWrite);
         logReload("suppressed", {
           path,
           why: ownWriteToken ? "own write token" : "own content echo",
@@ -536,11 +561,12 @@ export function useExternalFileChangeCoordinator({
     processChangeRef.current({ projectId: pid, path: file.path, fileTreeChanged: false });
   }), []);
   const processHistoryChange = useCallback(
-    (delivery?: unknown) => {
+    (delivery?: unknown, publishActivity = true) => {
       const payload = decodeFileChange(delivery);
       if (!payload || !projectId) return;
       const deliveredProjectId = readFileChangeField(payload, "projectId");
       if (deliveredProjectId && deliveredProjectId !== projectId) return;
+      if (publishActivity) notifyProjectActivity(projectId, "history-changed");
       void Promise.resolve(onHistoryChanged?.(readFileChangeField(payload, "writeToken") ?? undefined)).catch((error) => {
         console.warn("Studio could not refresh project history after an external change.", error);
       });
@@ -553,12 +579,12 @@ export function useExternalFileChangeCoordinator({
     // One decoder for all three transports; the rungs only choose the channel.
     const handler = (delivery?: unknown) => processChangeRef.current(decodeFileChange(delivery));
     const historyHandler = (delivery?: unknown) => processHistoryChangeRef.current(delivery);
-    const adapter = testHotAdapter();
+    const adapter = useHotChannel && testHotAdapter();
     if (adapter) {
       adapter.on("hf:file-change", handler);
       return () => adapter.off("hf:file-change", handler);
     }
-    if (import.meta.hot) {
+    if (useHotChannel && import.meta.hot) {
       import.meta.hot.on("hf:file-change", handler);
       import.meta.hot.on("hf:history-changed", historyHandler);
       return () => {
@@ -569,10 +595,10 @@ export function useExternalFileChangeCoordinator({
     const catchUp = () => {
       if (projectId) notifyProjectActivity(projectId, "reconnected");
       processChangeRef.current({ path: "." });
-      processHistoryChangeRef.current({ projectId });
+      processHistoryChangeRef.current({ projectId }, false);
     };
     return sseFileChangeChannel(handler, catchUp, historyHandler);
-  }, [projectId]);
+  }, [projectId, useHotChannel]);
 
   const retry = useCallback(async () => {
     const current = blockedRef.current;

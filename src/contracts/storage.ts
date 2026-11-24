@@ -1,6 +1,6 @@
 import type { Readable } from 'node:stream';
 
-export const BLOB_SCOPES = ['workspace', 'catalog'] as const;
+export const BLOB_SCOPES = ['workspace', 'catalog', 'patch'] as const;
 export type BlobScope = (typeof BLOB_SCOPES)[number];
 
 export const BLOB_GC_STATES = ['active', 'deleting'] as const;
@@ -124,6 +124,8 @@ export const S3_CANONICAL_CORS_SPEC = {
 } as const;
 
 export interface StoragePort {
+  /** Materialize one immutable text revision as a workspace CAS blob and return its content digest. */
+  ensureTextCheckpoint?(workspaceId: string, id: string): Promise<string>;
   putObject(
     key: string,
     body: Buffer | Uint8Array | Readable | string,

@@ -213,6 +213,7 @@ export function useInlineTextEdit({
     if (!element) return;
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
       // Shift+Enter is a line break in a multi-line element, and is left alone.
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();

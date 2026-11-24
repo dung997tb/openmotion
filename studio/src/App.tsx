@@ -70,6 +70,8 @@ import { useStudioSessionStart } from "./hooks/useStudioSessionStart";
 import { useTimelineAddAtPlayhead } from "./hooks/useTimelineAddAtPlayhead";
 import { readStudioUrlStateFromWindow, resolveMasterCompositionPath } from "./utils/studioUrlState";
 import { useActiveComposition } from "./hooks/useActiveComposition";
+import { forgetPreviewHtmlSources } from "./player/lib/previewHtmlSources";
+import { whenTimelineIdle } from "./player/components/timelineMotion";
 import { requestPreviewReload } from "./player/previewReloading";
 import { useStudioHost } from "./motion/StudioHost";
 import { preloadFontLists } from "./components/editor/propertyPanelFont";
@@ -125,16 +127,17 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
   const isGestureRecordingRef = useRef(false);
   const invalidateGsapCacheRef = useRef<(path?: string | readonly string[]) => void>(() => {});
   const refreshPreviewFrame = useCallback((next: SetStateAction<number>) => {
+    forgetPreviewHtmlSources(previewIframeRef.current);
     requestPreviewReload();
     setRefreshKeyState(next);
   }, []);
-  const setRefreshKey = useCallback((next: SetStateAction<number>, path?: string) => {
+  const setRefreshKey = useCallback((next: SetStateAction<number>, path?: string | readonly string[]) => {
     invalidateGsapCacheRef.current(path);
     refreshPreviewFrame(next);
   }, [refreshPreviewFrame]);
   const reloadHistoryPreview = useCallback(() => refreshPreviewFrame(k => k + 1), [refreshPreviewFrame]);
   const invalidateHistoryCompositions = useCallback((paths: readonly string[]) => invalidateGsapCacheRef.current(paths), []);
-  const reloadPreview = useCallback((path?: string) => setRefreshKey((k) => k + 1, path), [setRefreshKey]);
+  const reloadPreview = useCallback((path?: string | readonly string[]) => setRefreshKey((k) => k + 1, path), [setRefreshKey]);
   const fileManagerResult = useFileManager({
     projectId,
     showToast,
@@ -180,6 +183,7 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
   const previewPersistence = useStableHandlers(previewPersistenceResult, projectId);
   const externalFileChanges = useStudioExternalFileChanges({
     projectId,
+    previewIframeRef,
     activeCompPath,
     masterCompPath,
     fileManager,
@@ -209,13 +213,23 @@ export function StudioApp({ readOnlyPreview = false, readOnlyPreviewReason, reso
     invalidateGsapCache,
     handleDomZIndexReorderCommitRef,
   });
+  const timelineReady = activeCompPathHydrated && !compositionLoading && !readOnlyPreview
+    && !previewPersistence.domEditSaveQueuePaused && !externalFileChanges.blocked && !renderQueue.isRendering;
+  useEffect(() => {
+    if (!mvpEditor || !projectId || !timelineReady) return;
+    let active = true;
+    // Load the same chunk used by the first edit after the project is visible and the timeline is idle.
+    void whenTimelineIdle().then(() => {
+      if (active) return import("../../packages/edit-core/timeline-commands");
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [mvpEditor, projectId, timelineReady]);
   useTimelineSessionLocks({
     projectId,
     activeCompPath,
     elements: timelineElements,
     iframe: previewIframe,
-    ready: activeCompPathHydrated && !compositionLoading && !readOnlyPreview
-      && !previewPersistence.domEditSaveQueuePaused && !externalFileChanges.blocked && !renderQueue.isRendering,
+    ready: timelineReady,
     save: timelineEditing.setElementFxAttribute.setMany,
   });
   const handleTimelineElementsMove = useTimelineMoveEditsHandler(

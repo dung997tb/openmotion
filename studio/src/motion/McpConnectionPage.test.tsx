@@ -6,7 +6,7 @@ import englishReadme from '../../../README.md?raw';
 import chineseReadme from '../../../README.zh-CN.md?raw';
 import { I18nProvider, type Locale } from '../i18n/I18n';
 import { McpConnectionPage } from './McpConnectionPage';
-import { containerIntegration, type IntegrationInfo } from '../../../shared/integration';
+import { buildCloudIntegrationInfo, containerIntegration, type IntegrationInfo } from '../../../shared/integration';
 
 // Reporting is covered separately. Its lazy initialization/retries must not
 // add transport requests to this page's discovery and read-only assertions.
@@ -30,6 +30,19 @@ async function mount(locale: Locale = 'en', projectId?: string) {
   await act(async () => root!.render(<I18nProvider initialLocale={locale}><McpConnectionPage projectId={projectId} openLibrary={openLibrary} openProviders={openProviders} /></I18nProvider>));
   return { openLibrary, openProviders };
 }
+
+it('copies single-file calls for the current project from the cloud handbook', async () => {
+  const cloud = buildCloudIntegrationInfo({ publicOrigin: 'https://motion.example.com', version: '1', workspaceId: 'w', authMode: 'dev', tools: info.tools });
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [] } : cloud)));
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  await mount('zh-CN', 'project');
+  const card = document.querySelector('[data-mcp-scenario="project-file"]')!;
+  expect(card.textContent).toContain('读取单个工程文件');
+  await act(async () => card.querySelector('button')!.click());
+  const instruction = copy.mock.calls[0][0];
+  expect(instruction).toContain('链接过期后');
+  expect(instruction).toContain('openmotion_get_project({"projectId":"project","file":{"path":"index.html","mode":"sync"');
+});
 
 it.each(['en', 'zh-CN'] as const)('copies a workspace-bound review read plan and exposes raw-data/action guidance in %s', async locale => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [] } : info)));
@@ -144,7 +157,6 @@ it('switches client-specific setup, copies exact template instructions and perfo
 });
 
 it('explains HTTPS requirement for ChatGPT Cloud on non-HTTPS workspaces and enables it on HTTPS OAuth 2.1', async () => {
-  const { buildCloudIntegrationInfo } = await import('../../../shared/integration');
   vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [template] } : info)));
   const previousUrl = location.href;
   history.replaceState(null, '', '?page=mcp&host=chatgpt');

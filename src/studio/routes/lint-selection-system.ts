@@ -212,12 +212,13 @@ export function createStudioSystemRoutes(deps: StudioSystemRouteDeps): Hono<{ Va
     await deps.workspace.getProject(auth, projectId, { allowTrashed: true });
 
     return streamSSE(c, async (stream) => {
-      await stream.writeSSE({
+      const connected = () => stream.writeSSE({
         event: 'connected',
         data: JSON.stringify({ projectId, ts: Date.now() }),
       });
 
       if (!deps.eventBus) {
+        await connected();
         return;
       }
 
@@ -277,6 +278,10 @@ export function createStudioSystemRoutes(deps: StudioSystemRouteDeps): Hono<{ Va
             event: 'catalog-changed', data: JSON.stringify({ projectId }),
           }).catch(() => {});
         }));
+
+        // Clients reconcile after this acknowledgement, including edits made while subscribing.
+        if (stream.aborted) return;
+        await connected();
 
         keepalive = setInterval(() => {
           if (stream.aborted) return;

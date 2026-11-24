@@ -101,7 +101,7 @@ export const PREVIEW_LAYERS = `
       return {element: layerHandles.get(el) || '@' + domIndex, domIndex, selected: el === element,
         stepCandidate: overlaps && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0.01, zIndex: Number.parseInt(style.zIndex,10) || 0,
         makeRelative: style.position === 'static', locked: !!el.closest('[data-timeline-locked]'),
-        sourceFile, sha256: sourceVersions[sourceFile], elementId: el.id || undefined, hfId: el.getAttribute('data-hf-id') || undefined};
+        sourceFile, ...sourceIdentity(sourceVersions[sourceFile]), elementId: el.id || undefined, hfId: el.getAttribute('data-hf-id') || undefined};
     });
   }
 

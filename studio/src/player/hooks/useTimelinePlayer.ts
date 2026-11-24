@@ -1,3 +1,4 @@
+import { hasPendingHistoryTimeline } from "../timelineRestorePending";
 import { applyHeldTimelineChanges } from "../lib/isolatedTimelineEdits";
 import { useRef, useCallback, useEffect } from "react";
 import { usePlayerStore, liveTime, type TimelineElement } from "../store/playerStore";
@@ -89,7 +90,7 @@ export function useTimelinePlayer({
   const syncTimelineElements = useCallback(
     // fallow-ignore-next-line complexity
     (elements: TimelineElement[], nextDuration?: number) => {
-      if (hasTimelinePerformanceFixtureLease()) return;
+      if (hasTimelinePerformanceFixtureLease() || hasPendingHistoryTimeline(iframeRef.current)) return;
       const state = usePlayerStore.getState();
       const resolvedDuration = nextDuration ?? state.duration;
       // applyCachedSourceDurations re-applies the cached probe duration: re-derived

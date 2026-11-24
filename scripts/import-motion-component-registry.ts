@@ -4,6 +4,9 @@ import { execFileSync } from 'node:child_process';
 import { copyFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RegistryItem } from '@hyperframes/core/registry';
+import { componentOverlaySource } from '../shared/registry-material-compat.ts';
+import { mountableSnippet, primaryFile } from '../src/services/motion-component-source.ts';
+import { sha256Hex } from '../src/studio/etag.ts';
 import { projectPath } from '../shared/project-validation.ts';
 
 const checkout = process.argv[2];
@@ -30,6 +33,17 @@ for (const { name, type } of manifest.items) {
     projectPath(file.path, true);
     projectPath(file.target, true);
     if (file.url) assert.equal(new URL(file.url).origin, 'https://static.heygen.ai');
+  }
+  if (type === 'hyperframes:component') {
+    const primary = primaryFile(item);
+    assert(!primary.url, 'The overlay HTML must come from the pinned registry');
+    const raw = await readFile(path.join(registry, directory, name, primary.path));
+    const installed = primary.type === 'hyperframes:snippet' ? mountableSnippet(name, raw) : raw;
+    const source = installed.toString('utf8');
+    if (componentOverlaySource(source) !== source) {
+      items.push({ ...item, opaqueSourceSha256: sha256Hex(installed) });
+      continue;
+    }
   }
   items.push(item);
 }

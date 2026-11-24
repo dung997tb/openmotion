@@ -1,7 +1,7 @@
 // Only scalar presentation facts cross the frame boundary. The host supplies its
 // curated style-property list and persists edits against the authored file.
 export const PREVIEW_INSPECTOR = `
-  function inspectPreviewElement(message) {
+  function inspectorElement(message) {
     const id = typeof message.elementId === 'string' && message.elementId;
     const hf = typeof message.hfId === 'string' && message.hfId;
     if (!id && !hf) return null;
@@ -13,6 +13,11 @@ export const PREVIEW_INSPECTOR = `
     // shared composition. Ambiguous lookups from the timeline fail closed.
     const el = matches.includes(picked) ? picked : matches.length === 1 ? matches[0] : null;
     if (!(el instanceof HTMLElement) || el === document.body || el === document.documentElement) return null;
+    return el;
+  }
+  function inspectPreviewElement(message) {
+    const el = inspectorElement(message);
+    if (!el) return null;
     const detail = describe(el);
     const sha256 = sourceVersions[detail.sourceFile];
     if (!sha256) return null;
@@ -36,7 +41,7 @@ export const PREVIEW_INSPECTOR = `
       el.textContent.length + el.childElementCount <= 16384;
     const leafText = text ? Array.from(el.childNodes, n => n.nodeName === 'BR' ? '\\n' : n.textContent || '').join('') : null;
     const src = el.getAttribute('src');
-    return {elementId: detail.elementId, hfId: detail.hfId, sourceFile: detail.sourceFile, sha256,
+    return {elementId: detail.elementId, hfId: detail.hfId, sourceFile: detail.sourceFile, ...sourceIdentity(sha256),
       tag: el.localName, geometry: detail.geometry, inline, computed, data, leafText, lineBreaks: text && el.childElementCount > 0, binding: binding || undefined,
       compositionHost: el.matches('[data-composition-src],[data-composition-file]'),
       compositionRoot: el === document.querySelector('[data-composition-id]'),

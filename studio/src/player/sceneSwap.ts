@@ -12,8 +12,28 @@ export const SCENE_SWAP_MS = 5000;
 
 const PREVIEW_DOCUMENT_LOADED = "hf-preview-document-loaded";
 
+// A preview fetch races both local writes and remote edits. Each advances this
+// monotonic clock; the local writer's own clock remains independent.
+let externalPreviewRevision = 0;
+export function notePeerPreviewChange(): void { externalPreviewRevision++; }
+export function previewSourceRevision(): number { return externalPreviewRevision + studioFileRevision(); }
+
+const contentGeneration = new WeakMap<HTMLIFrameElement, number>();
+export function previewContentGeneration(iframe: HTMLIFrameElement): number {
+  return contentGeneration.get(iframe) ?? 0;
+}
+function announceContentReplaced(iframe: HTMLIFrameElement, event: string): void {
+  contentGeneration.set(iframe, previewContentGeneration(iframe) + 1);
+  iframe.dispatchEvent(new Event(event));
+}
+
 export function announcePreviewDocumentLoaded(iframe: HTMLIFrameElement): void {
-  iframe.dispatchEvent(new Event(PREVIEW_DOCUMENT_LOADED));
+  announceContentReplaced(iframe, PREVIEW_DOCUMENT_LOADED);
+}
+
+/** The existing document now represents the confirmed source after a swap or rebind. */
+export function announcePreviewScenesSwapped(iframe: HTMLIFrameElement): void {
+  announceContentReplaced(iframe, SCENES_SWAPPED);
 }
 
 export function onPreviewDocumentLoaded(
@@ -90,14 +110,15 @@ export function swapFreshly(
   reloadWholeFilm: (url: string) => void,
   attempt = 0,
 ): void {
-  const at = studioFileRevision();
-  const fresh = () => studioFileRevision() === at;
+  const at = previewSourceRevision();
+  const remoteAt = externalPreviewRevision;
+  const fresh = () => previewSourceRevision() === at;
   const again = () => {
     url.searchParams.set("_t", String(Date.now()));
     swapFreshly(swap, url, isCurrent, cancel, reloadWholeFilm, attempt + 1);
   };
   const retries = attempt < SWAP_REFETCHES_BEFORE_THE_COPY_IN_HAND_WINS;
-  const gate = retries ? () => isCurrent() && fresh() : isCurrent;
+  const gate = () => isCurrent() && externalPreviewRevision === remoteAt && (!retries || fresh());
   void whileScriptWrites(() => swap(url.toString(), gate, cancel)
     .then(() => {
       if (isCurrent() && !fresh() && retries) again();
@@ -153,6 +174,9 @@ export function sceneSwapFor(
       clearTimeout(timer);
       cancel?.removeEventListener("abort", onCancel);
     }
-    iframe.dispatchEvent(new Event(SCENES_SWAPPED));
+    // Another accepted edit may have arrived while the runtime was mounting
+    // scenes. That obsolete swap must not release the file-backed timeline.
+    if (!isCurrent()) throw supersededByNewerEdit();
+    announcePreviewScenesSwapped(iframe);
   };
 }
