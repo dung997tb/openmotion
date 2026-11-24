@@ -237,6 +237,8 @@ it('offers Free and Go accounts an upgrade through the registered entry source, 
     const guide = page.querySelector<HTMLElement>('[data-guide="upgrade"]')!;
     expect(guide.querySelector('h2')?.textContent).toBe('7 days of unlimited use on select models');
     expect(guide.querySelector('p')?.textContent).toBe('GPT image 2.0｜Nano banana 2｜Seedream5.0｜Seedream5.5');
+    const modelIcons = guide.querySelectorAll('p [data-brand="true"]');
+    expect([...modelIcons].map(icon => icon.getAttribute('data-provider'))).toEqual(['openai', 'nano-banana', 'bytedance', 'bytedance']);
     expect(guide.textContent).not.toContain('Current plan');
     expect(page.querySelector('.om-account-metrics h3')?.textContent).toBe(plan === 'free' ? 'Free plan' : 'go');
     expect(actions(guide)).toEqual(['Upgrade to Plus']);

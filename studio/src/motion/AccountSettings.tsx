@@ -57,6 +57,13 @@ const featuredModels = [
   { id: 'elevenlabs-v3', name: 'ElevenLabs V3' },
 ] as const;
 
+const subscriptionImageModels = [
+  { id: 'gpt-image-2', name: 'GPT image 2.0' },
+  { id: 'nano-banana-2', name: 'Nano banana 2' },
+  { id: 'seedream-5.0', name: 'Seedream5.0' },
+  { id: 'seedream-5.5', name: 'Seedream5.5' },
+] as const;
+
 function SubscriptionUpgradeTitle() {
   const { t } = useI18n();
   const [before, after] = t('{offer} on select models').split('{offer}');
@@ -66,7 +73,14 @@ function SubscriptionUpgradeTitle() {
 function SubscriptionUpgradeBenefits() {
   const { t } = useI18n();
   return <>
-    <p className={offerStyles.modelSummary}>GPT image 2.0｜Nano banana 2｜Seedream5.0｜Seedream5.5</p>
+    <p className={offerStyles.modelSummary}>
+      {subscriptionImageModels.map(({ id, name }, index) => (
+        <span className={offerStyles.modelItem} key={id}>
+          <ModelAvatar modelId={id} name={name} />{name}
+          {index < subscriptionImageModels.length - 1 && <span className={offerStyles.modelSeparator} aria-hidden="true">｜</span>}
+        </span>
+      ))}
+    </p>
     <ul className={offerStyles.dealTags} aria-label={t('Subscription offers')}>
       <li>{t('Go Max annual from')} <strong>{t('$100/mo')}</strong></li>
       <li>Claude / GPT <strong>{t('up to 20% off')}</strong></li>

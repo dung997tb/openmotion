@@ -146,6 +146,19 @@
   line-height: var(--motion-leading-body);
 }
 
+.modelSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--motion-space-6) 0;
+}
+
+.modelItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--motion-space-4);
+  white-space: nowrap;
+}
+
 .dealTags {
   display: flex;
   flex-wrap: wrap;
@@ -199,7 +212,7 @@
   padding-inline: var(--motion-space-10);
 }
 
-.subscriptionCard .models :global(.om-provider-avatar) {
+.subscriptionCard :is(.models, .modelSummary) :global(.om-provider-avatar) {
   width: var(--motion-space-16);
   height: var(--motion-space-16);
   border: 0;
@@ -232,6 +245,8 @@
 
 @container subscription-offer (max-width: 32rem) {
   .benefits { grid-column: 1 / -1; }
+  .modelSummary { column-gap: var(--motion-space-12); }
+  .modelSeparator { display: none; }
   .upgradeAction { grid-row: 1; }
   .subscriptionCard .upgradeAction > :is(button, a) {
     gap: var(--motion-space-6);
