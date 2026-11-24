@@ -4,7 +4,7 @@ import * as tracking from './pageTracking';
 import type { StudioDestination } from './creativeStudios';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
 import { Tooltip } from "../components/ui/Tooltip";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AccountSummary } from '../../../shared/provider-directory';
 import { RemixIcon } from '../icons/RemixIcons';
 import { useI18n } from '../i18n/I18n';
@@ -15,7 +15,7 @@ import { gatewayRequest } from './gatewayClient';
 import { GITHUB_REPOSITORY } from './githubRepository';
 import { notifyProvidersChanged } from './useProviderDirectory';
 import { AccountOfferBadge } from './AccountOfferBadge';
-import { MultimodalUpgradeButton, MultimodalUpgradeCard } from './MultimodalOfferCard';
+import { MultimodalUpgradeButton } from './MultimodalOfferCard';
 import { activeAccountOffer, MULTIMODAL_CAPABILITIES } from './accountOffer';
 import { ModelAvatar, SettingsError, SettingsLoading } from './settingsPrimitives';
 import offerStyles from './GenerationOffer.module.css';
@@ -90,9 +90,10 @@ function SubscriptionUpgradeBenefits() {
 
 function SubscriptionGuide({ kind, children }: { kind: 'sign-in' | 'upgrade'; children: ReactNode }) {
   const { t } = useI18n();
-  return <section className={offerStyles.subscriptionCard} data-guide={kind}>
+  const headingId = useId();
+  return <section className={offerStyles.subscriptionCard} data-guide={kind} aria-labelledby={headingId}>
     <div className={offerStyles.subscriptionHeading}>
-      <h2>{kind === 'sign-in' ? t('Sign in to unlock popular AI models') : <SubscriptionUpgradeTitle />}</h2>
+      <h2 id={headingId}>{kind === 'sign-in' ? t('Sign in to unlock popular AI models') : <SubscriptionUpgradeTitle />}</h2>
       {kind === 'sign-in' && <span className="om-badge">{t('Plus and above')}</span>}
     </div>
     <div className={offerStyles.benefits}>
@@ -244,7 +245,9 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
         <h1 className="om-title">{subscription ? t('Subscription & usage') : named ? name : email || t('Your OpenDesign account')}</h1>
         <p className="om-muted">{(subscription || named) && email ? email : t('Your creative workspace, connected.')}</p>
       </div>
-      {!subscription && plan && <MultimodalUpgradeCard subscription={subscriptionOpener} />}
+      {plan && <SubscriptionGuide kind="upgrade">
+        <MultimodalUpgradeButton subscription={subscriptionOpener} label={t('Upgrade to Plus', undefined, 'subscription offer')} />
+      </SubscriptionGuide>}
       {(!subscription || !signedIn) && <AccountStatus account={account} busy={busy} action={action} showToast={toast.showToast}
         renderSignIn={() => <SubscriptionGuide kind="sign-in">
           <Button variant="plain" title={t('Sign in with OpenDesign')} disabled={busy} onClick={() => void action('login')}>
@@ -252,9 +255,6 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
           </Button>
         </SubscriptionGuide>} />}
       {subscription ? <>
-        {plan && <SubscriptionGuide kind="upgrade">
-          <MultimodalUpgradeButton subscription={subscriptionOpener} label={t('Upgrade to Plus', undefined, 'subscription offer')} />
-        </SubscriptionGuide>}
         <section className="om-settings-section"><div className="om-settings-row"><h2 className="om-subtitle">{t('Subscription & usage')}</h2>{signedIn && <Tooltip label={t('Refresh account')} wrap><IconButton variant="ghost" className="motion-icon-button" aria-label={t('Refresh account')} disabled={refreshing} aria-busy={refreshing} onClick={() => void refreshUsage()} icon={<RemixIcon name={refreshing ? 'loader-4-line' : 'refresh-line'} size={17} className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined} />} /></Tooltip>}</div>
           {!(signedIn && account.billingUnavailable) && <div className="om-account-metrics"><div className="om-card"><span className="om-muted">{t('Current plan')}</span><h3 className="om-title">{signedIn && account.plan ? account.plan === 'free' ? t('Free plan') : account.plan : '—'}</h3><p className="om-muted">{t(signedIn ? 'Managed by OpenDesign' : 'Sign in to view your plan')}</p></div><div className="om-card"><span className="om-muted">{t('Available balance')}</span><h3 className="om-title">{signedIn && account.balance != null ? `$${account.balance}` : '—'}</h3><p className="om-muted">{t(signedIn ? 'Account credits in USD' : 'Sign in to view usage')}</p></div></div>}
           {signedIn && account.billingUnavailable && <div className="om-settings-row"><p className="om-muted">{t(account.billingError?.status === 403 ? "The billing service declined this request. Open Manage subscription to check your plan in OpenDesign." : "Couldn't load your plan and balance. Account models are unaffected and can be used as usual.")}</p><Button variant="ghost" className="om-button h-auto" disabled={refreshing} aria-busy={refreshing} onClick={() => void refreshUsage()}><RemixIcon name={refreshing ? 'loader-4-line' : 'refresh-line'} size={15} className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined} />{t('Refresh')}</Button></div>}

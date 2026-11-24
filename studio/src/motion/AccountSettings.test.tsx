@@ -160,7 +160,7 @@ it('replaces missing billing metrics with a dashboard link on 403 and restores t
 
 it.each(['free', 'go'])('offers an upgrade above the connected account for the %s plan and refreshes after checkout', async plan => {
   const page = await open({ state: 'signed-out' });
-  const offer = () => page.querySelector<HTMLElement>('section[aria-label="Unlock multimodal creation"]');
+  const offer = () => page.querySelector<HTMLElement>('section[data-guide="upgrade"]');
   expect(actions(page)).toEqual(['Sign in now']);
   expect(offer()).toBeNull();
   await act(async () => button(page, 'Sign in now')!.click());
@@ -168,7 +168,7 @@ it.each(['free', 'go'])('offers an upgrade above the connected account for the %
 
   hooks.account = { state: 'signed-in', plan, balance: '12.00' };
   await act(async () => window.dispatchEvent(new Event('motion:account-changed')));
-  expect(actions(page)).toEqual(['Sign out']);
+  expect(actions(page)).toEqual(['Upgrade to Plus', 'Sign out']);
   expect(page.querySelector('.om-account-metrics, .om-plan-guide')).toBeNull();
   expect(page.textContent).toContain('Model providers');
   expect(offer()).not.toBeNull();
@@ -223,8 +223,8 @@ it('starts login from the signed-out subscription offer and switches to upgrade 
   expect(actions(upgrade)).toEqual(['Upgrade to Plus']);
 });
 
-it('highlights the seven-day offer and labels the upgrade action in Chinese', async () => {
-  const page = await open({ state: 'signed-in', plan: 'free' }, 'zh-CN', 'subscription');
+it.each(['account', 'subscription'] as const)('shows the localized seven-day upgrade offer on the %s page', async section => {
+  const page = await open({ state: 'signed-in', plan: 'free' }, 'zh-CN', section);
   const guide = page.querySelector<HTMLElement>('[data-guide="upgrade"]')!;
   expect(guide.querySelector('h2')?.textContent).toBe('精选模型7天无限用');
   expect(guide.querySelector('h2 span')?.textContent).toBe('7天无限用');
