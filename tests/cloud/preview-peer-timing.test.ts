@@ -74,6 +74,20 @@ it('updates text and placement on the same live nodes without seeking or replaci
   assert.equal(send(message), false);
 });
 
+it('applies a solid fill without installing a new image URL through the live bridge', () => {
+  const { document, send } = preview();
+  const tile = document.getElementById('title')!;
+  const fill = (image: string) => ({
+    type: 'peer-presentation',
+    changes: [{ id:'title', tag:'div', attributes:[], styles:[['background-color', '', 'red'], ['background-image', '', image]] }],
+  });
+  assert.equal(send(fill('url(asset.png)')), false);
+  assert.equal(tile.style.getPropertyValue('background-color') || '', '');
+  assert.equal(send(fill('none')), true);
+  assert.equal(tile.style.getPropertyValue('background-color'), 'red');
+  assert.equal(tile.style.getPropertyValue('background-image'), 'none');
+});
+
 it('shows a confirmed nested style on the old scripted document while keeping its loaded revision for rebuild', () => {
   const { send, document, hooks } = preview(false);
   const path = 'scenes/intro.html';
@@ -191,6 +205,9 @@ it('enables the fast path only for declarative documents with no user startup co
     assert.equal(title.textContent, String(start));
   }
   assert.equal((await build(2)).allowed, true);
+  assert.equal((await build(2, '<canvas id="decoration"></canvas>')).allowed, true);
+  assert.equal((await build(2, '<canvas id="decoration"></canvas>' + startup)).allowed, false);
+  assert.equal((await build(2, '<canvas onclick="paint()"></canvas>')).allowed, false);
   assert.equal((await build(2, '<img onload="paint()" src="p.png">')).allowed, false);
   assert.equal((await build(2, '<div data-composition-src="scene.html"></div>')).allowed, false);
   assert.equal((await build(2, '', { '.hyperframes/studio-manual-edits.json': '{}' })).allowed, false);

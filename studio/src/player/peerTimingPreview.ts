@@ -1,7 +1,7 @@
 import { isLiveMediaMove } from "../../../shared/preview-live-media";
 import { createPreviewAdapter } from "./lib/previewAdapter";
 import { capturePresentedTimelineChanges } from "./lib/isolatedTimelineEdits";
-import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange, type PreviewLiveEdits, isLivePositionEdit } from "../../../shared/preview-timing";
+import { MAX_PEER_PREVIEW_SOURCE_LENGTH, TIMING_ATTRIBUTES, PRESENTATION_STYLES, PRESENTATION_TAGS, MAX_PREVIEW_TEXT_LENGTH, type PreviewChange, type PreviewLiveEdits, isLivePositionEdit, canPatchPresentationValue } from "../../../shared/preview-timing";
 
 type FileSnapshot = { content: string; version: string };
 
@@ -62,7 +62,7 @@ function changedStyles(left: HTMLElement, right: HTMLElement): PreviewChange["st
     const from = left.style.getPropertyValue(name);
     const to = next.getPropertyValue(name);
     if (from === to) continue;
-    if (left.style.getPropertyPriority(name) || next.getPropertyPriority(name)) return null;
+    if (!canPatchPresentationValue(name, to) || left.style.getPropertyPriority(name) || next.getPropertyPriority(name)) return null;
     styles.push([name, from, to]);
     if (to) projected.style.setProperty(name, to);
     else projected.style.removeProperty(name);

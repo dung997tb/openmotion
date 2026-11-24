@@ -1,11 +1,12 @@
 import { isLiveMediaMove } from '../../../shared/preview-live-media.ts';
-import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH, isLivePositionEdit } from '../../../shared/preview-timing.ts';
+import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH, isLivePositionEdit, canPatchPresentationValue } from '../../../shared/preview-timing.ts';
 
 // Runs inside the token-scoped iframe. Each change targets a verified live node and file revision.
 export const PREVIEW_PEER_TIMING = `
   const timingAttributes = new Set(${JSON.stringify(TIMING_ATTRIBUTES)});
   const presentationTags = new Set(${JSON.stringify(PRESENTATION_TAGS)});
   const presentationStyles = new Set(${JSON.stringify(PRESENTATION_STYLES)});
+  const canPatchPresentationValue = ${canPatchPresentationValue.toString()};
   const styleDocumentId = globalThis.crypto?.randomUUID?.();
   const timingDocumentId = settings.canRebindTiming === true ? styleDocumentId : undefined;
   function timingVersion(tag) {
@@ -22,7 +23,7 @@ export const PREVIEW_PEER_TIMING = `
         const actual = node.style.getPropertyValue(name) || '';
         const applied = pending?.element === node ? pending.applied?.[name] : undefined;
         const newer = newerDragStyle(pending, node, name);
-        if (!presentationStyles.has(name) || typeof from !== 'string' || typeof to !== 'string' ||
+        if (!presentationStyles.has(name) || typeof from !== 'string' || typeof to !== 'string' || !canPatchPresentationValue(name, to) ||
             (newer !== undefined && actual !== newer) ||
             Math.max(from.length,to.length) > 256 || (actual !== from && !(local && (actual === to || actual === applied || actual === newer))) ||
             (typeof node.style.getPropertyPriority === 'function' && node.style.getPropertyPriority(name))) return false;

@@ -45,6 +45,15 @@ describe("peer timing classification", () => {
     ]);
   });
 
+  it("clears a fill image in place while loading a new image through the asset pipeline", () => {
+    const before = '<div id="tile" style="background-color:red"></div>';
+    const filled = '<div id="tile" style="background-color:blue;background-image:none"></div>';
+    expect(diffPreviewChanges(before, filled)?.[0]?.styles).toEqual([
+      ["background-color", "red", "blue"], ["background-image", "", "none"],
+    ]);
+    expect(diffPreviewChanges(filled, filled.replace("none", "url(asset.png)"))).toBeNull();
+  });
+
   it("falls back for a changed tween, markup, source, label, style or expression in the same edit", () => {
     const trimmed = source.replace('data-start="2"', 'data-start="3"');
     for (const next of [trimmed.replace('run(1)', 'run(2)'), trimmed.replace('</audio>', '</audio><b></b>'),
