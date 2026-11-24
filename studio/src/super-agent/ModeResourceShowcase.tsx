@@ -997,7 +997,7 @@ export function ModeResourceShowcase({
         const portraitCount = publishedGameTemplates.filter(g => g.orientation === 'portrait').length;
         return [
           { id: 'all', label: 'All games', count: publishedGameTemplates.length },
-          ...(topGames.length > 0 ? [{ id: 'top100', label: 'Top 100', count: topGames.length }] : []),
+          ...(topGames.length > 0 ? [{ id: 'top100', label: 'Top 100 earners' }] : []),
           ...(myGames.length > 0 ? [{ id: 'mine', label: 'My games', count: myGames.length }] : []),
           ...gameGenres
             .map(g => ({
@@ -1976,22 +1976,25 @@ export function ModeResourceShowcase({
               columnClassName="om-sa-game-masonry-column"
               render={game => {
                 const title = localizedGameTitle(game, locale);
-                const cover = coverUrl(game) ?? (game.source === 'mine' ? genreCovers[game.genre] : null);
+                // Top 100 entries play through the bundled original template that shares their core loop.
+                const topEntry = topGameFor(game.id);
+                const playable = topEntry?.template ? gameCatalog.find(item => item.id === topEntry.template && item.source !== 'mine') ?? null : null;
+                const cover = coverUrl(playable ?? game) ?? (game.source === 'mine' ? genreCovers[game.genre] : null);
                 const isMine = game.source === 'mine';
                 const mineAttachment = isMine ? toGameResourceAttachment(game, title) : null;
                 const isSelected = isMine
                   ? Boolean(mineAttachment && selectedKeys.has(resourceKey(mineAttachment)))
                   : modeOptions?.gameTemplate?.id === game.id;
-                const isPlaying = playingGameId === game.id;
+                const isPlaying = playingGameId === (playable ?? game).id;
                 const status = isMine ? GAME_STATUS_LABELS[game.status] : undefined;
                 // Top 100 entries have no gameplay of their own here: a ranked text card stands in for the cover.
-                const top = topGameFor(game.id);
+                const top = topEntry;
 
                 return (
                   <article
                     key={game.id}
                     className="om-sa-game-tile om-sa-game-showcase-card"
-                    data-orientation={!top && game.orientation === 'portrait' ? 'portrait' : undefined}
+                    data-orientation={(top ? playable?.orientation : game.orientation) === 'portrait' ? 'portrait' : undefined}
                     data-top={top ? true : undefined}
                     data-selected={isSelected || undefined}
                     data-playing={isPlaying || undefined}
@@ -2009,12 +2012,17 @@ export function ModeResourceShowcase({
                       onClick={() => game.multiplayer ? onPlayGame?.(game) : selectGameForAgent(game)}
                     >
                       {/* Portrait games share the 16:9 card: the cover sits whole in the middle over a blurred copy of itself. */}
-                      {cover && game.orientation === 'portrait' && (
+                      {cover && (top ? playable?.orientation : game.orientation) === 'portrait' && (
                         <img className="om-sa-game-tile-backdrop" src={cover} alt="" loading="lazy" decoding="async" />
                       )}
-                      {top ? (
+                      {top && cover ? (
+                        <>
+                          <img src={cover} alt="" loading="lazy" decoding="async" />
+                          {top.rank <= 3 && <span className="om-sa-game-top-badge" data-rank={top.rank}><RemixIcon name="fire-line" size={12} />TOP {top.rank}</span>}
+                        </>
+                      ) : top ? (
                         <div className="om-sa-game-top-cover" data-genre={top.genre}>
-                          <span className="om-sa-game-top-rank">{top.rank}</span>
+                          {top.rank <= 3 && <span className="om-sa-game-top-badge" data-rank={top.rank}><RemixIcon name="fire-line" size={12} />TOP {top.rank}</span>}
                           <span className="om-sa-game-top-loop">{locale === 'zh-CN' ? top.loop : top.loopEn || top.loop}</span>
                           <span className="om-sa-game-top-tags">
                             <span>{top.monetization === 'IAA' ? t('Ad revenue') : top.monetization === 'IAP' ? t('In-app purchases') : t('Hybrid')}</span>
@@ -2072,7 +2080,7 @@ export function ModeResourceShowcase({
                             icon={<RemixIcon name="share-forward-line" size={13} />}
                           />
                         )}
-                        {onPlayGame && (
+                        {onPlayGame && (!top || playable) && (
                           <Button
                             variant="plain"
                             type="button"
@@ -2080,7 +2088,7 @@ export function ModeResourceShowcase({
                             data-playing={isPlaying || undefined}
                             title={t('Try game: {title}', { title })}
                             aria-label={t('Try game: {title}', { title })}
-                            onClick={() => onPlayGame(game)}
+                            onClick={() => onPlayGame(playable ?? game)}
                           >
                             <RemixIcon name="play-fill" size={12} />
                             <span>{t('Try game')}</span>

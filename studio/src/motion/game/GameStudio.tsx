@@ -268,7 +268,7 @@ export function GameStudio({
   const rows = [
     ...(browsing ? [
       { id: 'featured', title: t('Templates'), icon: 'gamepad-line', games: visible },
-    ] : [{ id: 'all', title: category === 'all' ? t('All games') : category === 'top100' ? t('Top 100') : category === 'portrait' ? t('Portrait games') : t('{genre} games', { genre: t(genreLabels[category]) }), icon: 'gamepad-line', games: visible }]),
+    ] : [{ id: 'all', title: category === 'all' ? t('All games') : category === 'top100' ? t('Top 100 earners') : category === 'portrait' ? t('Portrait games') : t('{genre} games', { genre: t(genreLabels[category]) }), icon: 'gamepad-line', games: visible }]),
   ];
 
   const options: { id: string; label: string; cover?: string | null; selected: boolean; pick: () => void }[] = menu === 'genre'
@@ -328,7 +328,7 @@ export function GameStudio({
           <div className="om-game-genres" role="tablist" aria-label={t('Category')}>
             {(['all', ...gameGenres] as const).map(id => <Button key={id} variant="plain" role="tab" className="om-game-genre-chip" aria-selected={category === id} onClick={() => { if (category !== id) reportGameClick('game_market', 'category_select', null, optionFilter(id)); setCategory(id); }}>
               {id === 'all' ? <RemixIcon name="layout-grid-line" size={15} /> : genreCovers[id] && <img src={genreCovers[id]!} alt="" />}{id === 'all' ? t('All') : t(genreLabels[id])}</Button>)}
-            {topGames.length > 0 && <Button variant="plain" role="tab" className="om-game-genre-chip" data-variant="top" aria-selected={category === 'top100'} onClick={() => { if (category !== 'top100') reportGameClick('game_market', 'category_select', null, optionFilter('top100')); setCategory('top100'); }}><RemixIcon name="fire-line" size={15} />{t('Top 100')}</Button>}
+            {topGames.length > 0 && <Button variant="plain" role="tab" className="om-game-genre-chip" data-variant="top" aria-selected={category === 'top100'} onClick={() => { if (category !== 'top100') reportGameClick('game_market', 'category_select', null, optionFilter('top100')); setCategory('top100'); }}><RemixIcon name="fire-line" size={15} />{t('Top 100 earners')}</Button>}
             <Button variant="plain" role="tab" className="om-game-genre-chip" aria-selected={category === 'portrait'} onClick={() => { if (category !== 'portrait') reportGameClick('game_market', 'category_select', null, optionFilter('portrait')); setCategory('portrait'); }}><RemixIcon name="smartphone-line" size={15} />{t('Portrait')}</Button>
           </div>
           <span className="om-game-selects">

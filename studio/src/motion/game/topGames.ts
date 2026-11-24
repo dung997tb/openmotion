@@ -10,6 +10,8 @@ export type TopGame = {
   rank: number; id: string; name: string; nameEn: string; platform: string; monetization: 'IAP' | 'IAA' | '混合' | string;
   genre: GameGenre; loop: string; loopEn: string; signal: string; signalEn: string; sourceUrl: string; sourceNote: string;
   webFeasible: 'high' | 'medium' | 'low'; orientation: 'portrait' | 'landscape'; templateBrief: string;
+  /** The bundled original template with the same core loop, played from the card; null when none fits. */
+  template?: string | null;
 };
 
 const files = import.meta.glob('./community/top100.json', { eager: true, import: 'default' }) as Record<string, TopGame[]>;

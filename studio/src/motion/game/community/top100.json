@@ -15,7 +15,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Defend the bottom of a vertical lane with an auto-firing cannon against escalating waves of undead; after each wave choose 1 of 3 random upgrades (split shot, pierce, fire rate); survive 20 waves to win, lose if enemies reach the wall."
+    "templateBrief": "Defend the bottom of a vertical lane with an auto-firing cannon against escalating waves of undead; after each wave choose 1 of 3 random upgrades (split shot, pierce, fire rate); survive 20 waves to win, lose if enemies reach the wall.",
+    "template": "lane-turret"
   },
   {
     "rank": 2,
@@ -33,7 +34,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "low",
     "orientation": "portrait",
-    "templateBrief": "Grow a frostbound settlement: tap to collect heat and resources, upgrade buildings, train three troop types and send squads to conquer map tiles; keep the furnace alive through timed blizzards; lose if the furnace goes out."
+    "templateBrief": "Grow a frostbound settlement: tap to collect heat and resources, upgrade buildings, train three troop types and send squads to conquer map tiles; keep the furnace alive through timed blizzards; lose if the furnace goes out.",
+    "template": "banner-rush"
   },
   {
     "rank": 3,
@@ -51,7 +53,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Build and run a splash park: place slides and pools on a grid, guests pay per ride, tap to collect coins and upgrade rides before queues overflow; reach a target daily income to win."
+    "templateBrief": "Build and run a splash park: place slides and pools on a grid, guests pay per ride, tap to collect coins and upgrade rides before queues overflow; reach a target daily income to win.",
+    "template": "meadow-market"
   },
   {
     "rank": 4,
@@ -69,7 +72,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "low",
     "orientation": "portrait",
-    "templateBrief": "Manage a snowbound camp: assign workers to wood, coal and food, keep the central heater above freezing as temperature drops each night, and defend against wolf raids; survive 30 nights to win."
+    "templateBrief": "Manage a snowbound camp: assign workers to wood, coal and food, keep the central heater above freezing as temperature drops each night, and defend against wolf raids; survive 30 nights to win.",
+    "template": "banner-rush"
   },
   {
     "rank": 5,
@@ -87,7 +91,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Colored pixel cubes ride a looping conveyor; tap shooters of matching color to fire and fill a hidden pixel-art picture; limited queue slots, clear the picture before the queue jams."
+    "templateBrief": "Colored pixel cubes ride a looping conveyor; tap shooters of matching color to fire and fill a hidden pixel-art picture; limited queue slots, clear the picture before the queue jams.",
+    "template": "pixel-parade"
   },
   {
     "rank": 6,
@@ -105,7 +110,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Place three random polyomino pieces at a time on an 8x8 grid; filling a row or column clears it with combo bonuses; game ends when no piece fits."
+    "templateBrief": "Place three random polyomino pieces at a time on an 8x8 grid; filling a row or column clears it with combo bonuses; game ends when no piece fits.",
+    "template": "grid-drop"
   },
   {
     "rank": 7,
@@ -123,7 +129,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Tiles are stacked in overlapping layers; tap an uncovered tile to move it to a 7-slot tray; three identical tiles in the tray vanish; clear the board to win, fill the tray to lose; offer undo and shuffle boosters."
+    "templateBrief": "Tiles are stacked in overlapping layers; tap an uncovered tile to move it to a 7-slot tray; three identical tiles in the tray vanish; clear the board to win, fill the tray to lose; offer undo and shuffle boosters.",
+    "template": "teacup-tower"
   },
   {
     "rank": 8,
@@ -141,7 +148,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Drag colored polyomino blocks around a cramped board and push each out through a wall gate of the same color before the move timer ends; clear all blocks to win."
+    "templateBrief": "Drag colored polyomino blocks around a cramped board and push each out through a wall gate of the same color before the move timer ends; clear all blocks to win.",
+    "template": "color-gate-jam"
   },
   {
     "rank": 9,
@@ -159,7 +167,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Draw-to-summon RPG: drag a stroke on the field to summon ink creatures that auto-fight waves of monsters; collect pigment to unlock new creature types; beat the stage boss to advance."
+    "templateBrief": "Draw-to-summon RPG: drag a stroke on the field to summon ink creatures that auto-fight waves of monsters; collect pigment to unlock new creature types; beat the stage boss to advance.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 10,
@@ -177,7 +186,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Idle mountain sanctuary: energy accrues over time, spend it to upgrade halls and train disciples, then attempt a tier breakthrough mini-fight; reach the 9th tier to win."
+    "templateBrief": "Idle mountain sanctuary: energy accrues over time, spend it to upgrade halls and train disciples, then attempt a tier breakthrough mini-fight; reach the 9th tier to win.",
+    "template": "meadow-market"
   },
   {
     "rank": 11,
@@ -195,7 +205,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A heap of physics-simulated 3D objects fills a bowl; tap items to send them to a 7-slot tray, three matches clear; empty the bowl within the timer to win."
+    "templateBrief": "A heap of physics-simulated 3D objects fills a bowl; tap items to send them to a 7-slot tray, three matches clear; empty the bowl within the timer to win.",
+    "template": "teacup-tower"
   },
   {
     "rank": 12,
@@ -213,7 +224,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Planks are pinned by colored screws; tap a screw to move it into a matching color box; boxes fill and leave; free all planks without running out of spare holes."
+    "templateBrief": "Planks are pinned by colored screws; tap a screw to move it into a matching color box; boxes fill and leave; free all planks without running out of spare holes.",
+    "template": "bolt-drop"
   },
   {
     "rank": 13,
@@ -231,7 +243,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Defend a wasteland outpost: place up to 5 turrets on fixed pads, enemies march down; earn scrap per kill to merge turrets into stronger tiers; survive the final boss wave to win."
+    "templateBrief": "Defend a wasteland outpost: place up to 5 turrets on fixed pads, enemies march down; earn scrap per kill to merge turrets into stronger tiers; survive the final boss wave to win.",
+    "template": "lane-turret"
   },
   {
     "rank": 14,
@@ -249,7 +262,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Plot-grid farm: plant seeds with timers, harvest for coins, expand plots and unlock crops; a neighbor farm can be raided for bonus crops while guard dogs block you; reach farm level 20 to win."
+    "templateBrief": "Plot-grid farm: plant seeds with timers, harvest for coins, expand plots and unlock crops; a neighbor farm can be raided for bonus crops while guard dogs block you; reach farm level 20 to win.",
+    "template": "meadow-market"
   },
   {
     "rank": 15,
@@ -267,7 +281,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Merge-2 board: drag two identical items together to make the next tier; customers request specific dishes; complete orders to earn stars that renovate the dining room; finish all renovations to win."
+    "templateBrief": "Merge-2 board: drag two identical items together to make the next tier; customers request specific dishes; complete orders to earn stars that renovate the dining room; finish all renovations to win.",
+    "template": "merge-bakery"
   },
   {
     "rank": 16,
@@ -285,7 +300,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Grow and merge flowers on a garden grid, sell bouquets to visitors, spend earnings on decorations that unlock new garden zones; fill the garden showcase to win."
+    "templateBrief": "Grow and merge flowers on a garden grid, sell bouquets to visitors, spend earnings on decorations that unlock new garden zones; fill the garden showcase to win.",
+    "template": "merge-bakery"
   },
   {
     "rank": 17,
@@ -303,7 +319,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A lone guardian carries a baby through a battlefield lane; tap to place barricades and swing attacks as enemies converge; reach the far gate with the baby unharmed to win."
+    "templateBrief": "A lone guardian carries a baby through a battlefield lane; tap to place barricades and swing attacks as enemies converge; reach the far gate with the baby unharmed to win.",
+    "template": "lane-turret"
   },
   {
     "rank": 18,
@@ -321,7 +338,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Day-night survival: by day send survivors to scavenge and build walls, by night fend off raids with turrets; food and morale drain daily; survive 33 days to win."
+    "templateBrief": "Day-night survival: by day send survivors to scavenge and build walls, by night fend off raids with turrets; food and morale drain daily; survive 33 days to win.",
+    "template": "meadow-market"
   },
   {
     "rank": 19,
@@ -339,7 +357,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Farm-yard defense: place hens on a grid that lay eggs as currency and shoot at incoming foxes; merge two hens into a stronger one; protect the coop for 15 waves."
+    "templateBrief": "Farm-yard defense: place hens on a grid that lay eggs as currency and shoot at incoming foxes; merge two hens into a stronger one; protect the coop for 15 waves.",
+    "template": "lane-turret"
   },
   {
     "rank": 20,
@@ -357,7 +376,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Drag a black hole around a city block; objects smaller than the hole fall in and grow it; swallow the listed target items within 90 seconds to clear the level."
+    "templateBrief": "Drag a black hole around a city block; objects smaller than the hole fall in and grow it; swallow the listed target items within 90 seconds to clear the level.",
+    "template": "slime-swell"
   },
   {
     "rank": 21,
@@ -375,7 +395,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Descend floor by floor through a cursed catacomb; tap to swing a talisman blade at ghosts, open coffins for loot that may be traps; reach floor 10 and seal the source to win."
+    "templateBrief": "Descend floor by floor through a cursed catacomb; tap to swing a talisman blade at ghosts, open coffins for loot that may be traps; reach floor 10 and seal the source to win.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 22,
@@ -393,7 +414,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Arrows sit on a grid pointing in fixed directions; tap one to fly it off the board, but it stops if another arrow is in its path; clear every arrow with limited mistakes."
+    "templateBrief": "Arrows sit on a grid pointing in fixed directions; tap one to fly it off the board, but it stops if another arrow is in its path; clear every arrow with limited mistakes.",
+    "template": "arrow-out"
   },
   {
     "rank": 23,
@@ -411,7 +433,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Countryside homestead: farm plots feed a kitchen, cooked dishes serve visiting guests for coins, coins unlock new rooms; reach a 5-star homestead rating to win."
+    "templateBrief": "Countryside homestead: farm plots feed a kitchen, cooked dishes serve visiting guests for coins, coins unlock new rooms; reach a 5-star homestead rating to win.",
+    "template": "meadow-market"
   },
   {
     "rank": 24,
@@ -429,7 +452,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Vertical mall tycoon: build stores floor by floor, shoppers walk in and pay, hire staff to speed checkout, upgrade stock to raise prices; hit the revenue target to unlock the rooftop."
+    "templateBrief": "Vertical mall tycoon: build stores floor by floor, shoppers walk in and pay, hire staff to speed checkout, upgrade stock to raise prices; hit the revenue target to unlock the rooftop.",
+    "template": "meadow-market"
   },
   {
     "rank": 25,
@@ -447,7 +471,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Tap tiles to dig down through layered earth with limited stamina; uncover gems, artifacts and traps; spend loot to upgrade the shovel; reach depth 100 to win."
+    "templateBrief": "Tap tiles to dig down through layered earth with limited stamina; uncover gems, artifacts and traps; spend loot to upgrade the shovel; reach depth 100 to win.",
+    "template": null
   },
   {
     "rank": 26,
@@ -465,7 +490,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Node-capture strategy: each castle grows soldiers over time; drag from your castle to another to send half its troops; capture all enemy castles to win, lose your last one and you lose."
+    "templateBrief": "Node-capture strategy: each castle grows soldiers over time; drag from your castle to another to send half its troops; capture all enemy castles to win, lose your last one and you lose.",
+    "template": "banner-rush"
   },
   {
     "rank": 27,
@@ -483,7 +509,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Hold to accelerate and swipe to change lanes on a winding track; overtake 5 rival cars, avoid barriers and hit boost pads; finish first to win and earn upgrades."
+    "templateBrief": "Hold to accelerate and swipe to change lanes on a winding track; overtake 5 rival cars, avoid barriers and hit boost pads; finish first to win and earn upgrades.",
+    "template": "sky-runner"
   },
   {
     "rank": 28,
@@ -501,7 +528,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Drag a cannon left and right to launch little runners through gates that multiply (x2, +10) or subtract; your crowd collides with enemy crowds; break the enemy tower before yours falls."
+    "templateBrief": "Drag a cannon left and right to launch little runners through gates that multiply (x2, +10) or subtract; your crowd collides with enemy crowds; break the enemy tower before yours falls.",
+    "template": "gate-legion"
   },
   {
     "rank": 29,
@@ -519,7 +547,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Colored bolts pin overlapping boards; tap a bolt to move it into a matching color case; three fill a case; free every board without filling the spare tray."
+    "templateBrief": "Colored bolts pin overlapping boards; tap a bolt to move it into a matching color case; three fill a case; free every board without filling the spare tray.",
+    "template": "bolt-drop"
   },
   {
     "rank": 30,
@@ -537,7 +566,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A chain of one-screen trick puzzles: each poses a question and hides the answer behind a non-obvious interaction (drag the sun, rub a sticker, tilt objects); solve 30 levels with 3 hints."
+    "templateBrief": "A chain of one-screen trick puzzles: each poses a question and hides the answer behind a non-obvious interaction (drag the sun, rub a sticker, tilt objects); solve 30 levels with 3 hints.",
+    "template": "pin-rescue"
   },
   {
     "rank": 31,
@@ -555,7 +585,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Match-3 battle: swap gems to make lines; each color charges a hero's skill that damages the enemy; defeat the enemy before your HP hits zero within limited moves."
+    "templateBrief": "Match-3 battle: swap gems to make lines; each color charges a hero's skill that damages the enemy; defeat the enemy before your HP hits zero within limited moves.",
+    "template": "glyph-garden"
   },
   {
     "rank": 32,
@@ -573,7 +604,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Modern army auto-battler: place infantry, tanks and anti-air on a grid; units auto-fight an enemy formation using rock-paper-scissors counters; win 3 rounds to take the sector."
+    "templateBrief": "Modern army auto-battler: place infantry, tanks and anti-air on a grid; units auto-fight an enemy formation using rock-paper-scissors counters; win 3 rounds to take the sector.",
+    "template": "banner-rush"
   },
   {
     "rank": 33,
@@ -591,7 +623,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Place bombs to blow open walls in a tomb maze, collect relics, avoid falling rocks and mummies; reach the vault within limited bombs to win."
+    "templateBrief": "Place bombs to blow open walls in a tomb maze, collect relics, avoid falling rocks and mummies; reach the vault within limited bombs to win.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 34,
@@ -609,7 +642,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Formation strategy: drag 5 units onto a 3x3 grid before each round; units auto-attack by range and type; buy and merge units between rounds; outlast 10 opponents."
+    "templateBrief": "Formation strategy: drag 5 units onto a 3x3 grid before each round; units auto-attack by range and type; buy and merge units between rounds; outlast 10 opponents.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 35,
@@ -627,7 +661,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Groups of colored figures stand on a grid; tap a hole to call figures of that color along open paths; blocked figures wait; clear every group with limited moves."
+    "templateBrief": "Groups of colored figures stand on a grid; tap a hole to call figures of that color along open paths; blocked figures wait; clear every group with limited moves.",
+    "template": "color-gate-jam"
   },
   {
     "rank": 36,
@@ -645,7 +680,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Deal stacks of numbered coins onto slots; move top coins onto matching values; 10 of a value merge into the next value; reach the target coin before slots fill."
+    "templateBrief": "Deal stacks of numbered coins onto slots; move top coins onto matching values; 10 of a value merge into the next value; reach the target coin before slots fill.",
+    "template": "sort-stack"
   },
   {
     "rank": 37,
@@ -663,7 +699,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Tap parked vehicles to drive them out of a jammed lot along their facing direction; each docks at a station where same-colored passengers board; clear the queue before stations run out."
+    "templateBrief": "Tap parked vehicles to drive them out of a jammed lot along their facing direction; each docks at a station where same-colored passengers board; clear the queue before stations run out.",
+    "template": "color-gate-jam"
   },
   {
     "rank": 38,
@@ -681,7 +718,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Merge-and-cook street stall: merge raw ingredients into dishes, serve queued customers before patience runs out, use profits to open more stalls; open the full street to win."
+    "templateBrief": "Merge-and-cook street stall: merge raw ingredients into dishes, serve queued customers before patience runs out, use profits to open more stalls; open the full street to win.",
+    "template": "merge-bakery"
   },
   {
     "rank": 39,
@@ -699,7 +737,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Eerie shooting gallery: paper charms and lanterns sweep across a haunted temple; tap to throw a nail at the moving target's center; three misses wake the spirit and end the run."
+    "templateBrief": "Eerie shooting gallery: paper charms and lanterns sweep across a haunted temple; tap to throw a nail at the moving target's center; three misses wake the spirit and end the run.",
+    "template": "scope-spot"
   },
   {
     "rank": 40,
@@ -717,7 +756,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "low",
     "orientation": "portrait",
-    "templateBrief": "Sword-flying adventure: tap to dash and strike demons in short arena stages, collect spirit stones to upgrade a flying sword, defeat the demon lord on stage 10."
+    "templateBrief": "Sword-flying adventure: tap to dash and strike demons in short arena stages, collect spirit stones to upgrade a flying sword, defeat the demon lord on stage 10.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 41,
@@ -735,7 +775,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Pick 4 hero cards with element tags; battles auto-resolve with element advantages; earn shards to upgrade cards between stages; clear 20 stages."
+    "templateBrief": "Pick 4 hero cards with element tags; battles auto-resolve with element advantages; earn shards to upgrade cards between stages; clear 20 stages.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 42,
@@ -753,7 +794,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Martial dojo idle battler: train fighters who auto-duel rival schools; spend earnings on technique scrolls; win the tournament bracket of 8 schools."
+    "templateBrief": "Martial dojo idle battler: train fighters who auto-duel rival schools; spend earnings on technique scrolls; win the tournament bracket of 8 schools.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 43,
@@ -771,7 +813,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "low",
     "orientation": "portrait",
-    "templateBrief": "Stone-age hunter: tap to strike beasts, craft better clubs from bones, tame a mount; defeat the mammoth chief to win."
+    "templateBrief": "Stone-age hunter: tap to strike beasts, craft better clubs from bones, tame a mount; defeat the mammoth chief to win.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 44,
@@ -789,7 +832,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Choose a lineup of 5 generals on a front and back row; battle auto-plays; between stages pick 1 of 3 buffs; beat 15 stages."
+    "templateBrief": "Choose a lineup of 5 generals on a front and back row; battle auto-plays; between stages pick 1 of 3 buffs; beat 15 stages.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 45,
@@ -807,7 +851,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Tap to make a small runner hop between moving platforms; collect coins to buy upgrades like double jump; reach the summit flag of each stage."
+    "templateBrief": "Tap to make a small runner hop between moving platforms; collect coins to buy upgrades like double jump; reach the summit flag of each stage.",
+    "template": "skyline-courier"
   },
   {
     "rank": 46,
@@ -825,7 +870,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Two kingdoms face off in a lane; spend gold to spawn runners, archers and rams that march forward; upgrade your castle between waves; topple the enemy castle."
+    "templateBrief": "Two kingdoms face off in a lane; spend gold to spawn runners, archers and rams that march forward; upgrade your castle between waves; topple the enemy castle.",
+    "template": "banner-rush"
   },
   {
     "rank": 47,
@@ -843,7 +889,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Collect immortal cards across five elements, deploy 3 per battle, auto-combat with element chains; ascend nine realms of bosses."
+    "templateBrief": "Collect immortal cards across five elements, deploy 3 per battle, auto-combat with element chains; ascend nine realms of bosses.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 48,
@@ -861,7 +908,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Tame spirit beasts by beating them in quick fights; each beast grants a skill; build a party of 3 and clear a mountain path of boss gates."
+    "templateBrief": "Tame spirit beasts by beating them in quick fights; each beast grants a skill; build a party of 3 and clear a mountain path of boss gates.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 49,
@@ -879,7 +927,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Merge gifts and silks on a board to complete court requests; each request advances a branching palace story and unlocks character portraits; reach the final chapter."
+    "templateBrief": "Merge gifts and silks on a board to complete court requests; each request advances a branching palace story and unlocks character portraits; reach the final chapter.",
+    "template": "merge-bakery"
   },
   {
     "rank": 50,
@@ -897,7 +946,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Lead a monk-hunter party through three realms; tap skills when charged as demons approach; seal each realm's demon king."
+    "templateBrief": "Lead a monk-hunter party through three realms; tap skills when charged as demons approach; seal each realm's demon king.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 51,
@@ -915,7 +965,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Plant fruit trees on a grid, harvest ripening fruit before birds steal it, merge saplings into rarer trees; fill the market order book to win."
+    "templateBrief": "Plant fruit trees on a grid, harvest ripening fruit before birds steal it, merge saplings into rarer trees; fill the market order book to win.",
+    "template": "merge-bakery"
   },
   {
     "rank": 52,
@@ -933,7 +984,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Peek at a storage unit for 5 seconds, then bid against 3 AI rivals; open the unit, sell items to recover profit; reach $10,000 net to win."
+    "templateBrief": "Peek at a storage unit for 5 seconds, then bid against 3 AI rivals; open the unit, sell items to recover profit; reach $10,000 net to win.",
+    "template": null
   },
   {
     "rank": 53,
@@ -951,7 +1003,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A hero walks a looping path automatically; place tiles (forest, graveyard, village) that spawn enemies and loot; each loop gets harder; defeat the loop boss after 10 laps."
+    "templateBrief": "A hero walks a looping path automatically; place tiles (forest, graveyard, village) that spawn enemies and loot; each loop gets harder; defeat the loop boss after 10 laps.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 54,
@@ -969,7 +1022,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Steer a fish with drag or joystick; eat fish smaller than you to grow, avoid larger ones; reach size level 10 to become top predator, get eaten and you lose."
+    "templateBrief": "Steer a fish with drag or joystick; eat fish smaller than you to grow, avoid larger ones; reach size level 10 to become top predator, get eaten and you lose.",
+    "template": "slime-swell"
   },
   {
     "rank": 55,
@@ -987,7 +1041,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A target log spins at varying speeds; tap to throw knives; hitting an existing knife ends the run; land all knives to break the target and advance."
+    "templateBrief": "A target log spins at varying speeds; tap to throw knives; hitting an existing knife ends the run; land all knives to break the target and advance.",
+    "template": "scope-spot"
   },
   {
     "rank": 56,
@@ -1005,7 +1060,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "landscape",
-    "templateBrief": "Turn-based card duel vs 3 AI: draw 2 cards per turn, play Strike, Dodge and Heal cards, each hero has one passive; last one standing (or your hidden faction) wins."
+    "templateBrief": "Turn-based card duel vs 3 AI: draw 2 cards per turn, play Strike, Dodge and Heal cards, each hero has one passive; last one standing (or your hidden faction) wins.",
+    "template": null
   },
   {
     "rank": 57,
@@ -1023,7 +1079,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Scavenge ruined blocks for parts with a limited backpack, return to upgrade the shelter's walls and generator, defend against nightly mutants; survive 20 nights."
+    "templateBrief": "Scavenge ruined blocks for parts with a limited backpack, return to upgrade the shelter's walls and generator, defend against nightly mutants; survive 20 nights.",
+    "template": "meadow-market"
   },
   {
     "rank": 58,
@@ -1041,7 +1098,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Choose warrior, mage or archer; auto-attack hordes, tap skills, loot gear drops that auto-compare; defeat the dungeon boss within the time limit."
+    "templateBrief": "Choose warrior, mage or archer; auto-attack hordes, tap skills, loot gear drops that auto-compare; defeat the dungeon boss within the time limit.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 59,
@@ -1059,7 +1117,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "landscape",
-    "templateBrief": "Race 20 bean-shaped bots through a spinning obstacle course; jump, dive and grab; top half qualify each of 3 rounds; first across the final finish line wins."
+    "templateBrief": "Race 20 bean-shaped bots through a spinning obstacle course; jump, dive and grab; top half qualify each of 3 rounds; first across the final finish line wins.",
+    "template": "sky-runner"
   },
   {
     "rank": 60,
@@ -1077,7 +1136,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "portrait",
-    "templateBrief": "Pilgrim party auto-fights demons on a mountain road; collect relic beads to unlock skills; defeat 9 demon kings."
+    "templateBrief": "Pilgrim party auto-fights demons on a mountain road; collect relic beads to unlock skills; defeat 9 demon kings.",
+    "template": "lantern-brigade"
   },
   {
     "rank": 61,
@@ -1095,7 +1155,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "low",
     "orientation": "portrait",
-    "templateBrief": "Terraform a dying planet: place generators and greenhouses, send drones to scout, defend outposts from swarm attacks; restore 100% atmosphere to win."
+    "templateBrief": "Terraform a dying planet: place generators and greenhouses, send drones to scout, defend outposts from swarm attacks; restore 100% atmosphere to win.",
+    "template": "banner-rush"
   },
   {
     "rank": 62,
@@ -1113,7 +1174,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A cluttered room is full of objects; tap three identical items to pack them into a box; clear the room before the timer runs out."
+    "templateBrief": "A cluttered room is full of objects; tap three identical items to pack them into a box; clear the room before the timer runs out.",
+    "template": "teacup-tower"
   },
   {
     "rank": 63,
@@ -1131,7 +1193,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Passengers of mixed colors wait in a crowd; tap to send them to cars of matching color; a full car drives off; clear all passengers before the parking slots fill."
+    "templateBrief": "Passengers of mixed colors wait in a crowd; tap to send them to cars of matching color; a full car drives off; clear all passengers before the parking slots fill.",
+    "template": "color-gate-jam"
   },
   {
     "rank": 64,
@@ -1149,7 +1212,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Cars are jammed in a lot; tap a car to drive it out to a 7-slot lane; three same-colored cars in the lane leave together; empty the lot to win."
+    "templateBrief": "Cars are jammed in a lot; tap a car to drive it out to a 7-slot lane; three same-colored cars in the lane leave together; empty the lot to win.",
+    "template": "color-gate-jam"
   },
   {
     "rank": 65,
@@ -1167,7 +1231,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Connect two identical tiles with a path of at most two turns to remove them; clear the board before time runs out; shuffle when stuck."
+    "templateBrief": "Connect two identical tiles with a path of at most two turns to remove them; clear the board before time runs out; shuffle when stuck.",
+    "template": "teacup-tower"
   },
   {
     "rank": 66,
@@ -1185,7 +1250,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Drag items from a messy pile into shelf compartments where three of a kind clear; race an AI organizer on a split screen; finish first to win."
+    "templateBrief": "Drag items from a messy pile into shelf compartments where three of a kind clear; race an AI organizer on a split screen; finish first to win.",
+    "template": "sort-stack"
   },
   {
     "rank": 67,
@@ -1203,7 +1269,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Tap groups of 3 identical icons as fast as possible within 60 seconds; combos multiply score; reach the star threshold to pass."
+    "templateBrief": "Tap groups of 3 identical icons as fast as possible within 60 seconds; combos multiply score; reach the star threshold to pass.",
+    "template": "teacup-tower"
   },
   {
     "rank": 68,
@@ -1221,7 +1288,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Same mechanic family as layered triple-tile match with a farm-animal theme; limited tray of 7; clear all layers to win."
+    "templateBrief": "Same mechanic family as layered triple-tile match with a farm-animal theme; limited tray of 7; clear all layers to win.",
+    "template": "teacup-tower"
   },
   {
     "rank": 69,
@@ -1239,7 +1307,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Slide rows of bricks so that matching bricks line up in pairs; matched pairs vanish; clear the wall within the move limit."
+    "templateBrief": "Slide rows of bricks so that matching bricks line up in pairs; matched pairs vanish; clear the wall within the move limit.",
+    "template": "glyph-garden"
   },
   {
     "rank": 70,
@@ -1257,7 +1326,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "30 one-screen riddles where the solution is an unexpected gesture (shake, drag the UI, combine objects); 3 hints total; finish all levels."
+    "templateBrief": "30 one-screen riddles where the solution is an unexpected gesture (shake, drag the UI, combine objects); 3 hints total; finish all levels.",
+    "template": "pin-rescue"
   },
   {
     "rank": 71,
@@ -1275,7 +1345,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A knitted figure is made of colored yarn; tap a visible strand to wind it onto a spool of the same color; spools fill and leave; unravel the whole figure before spare slots fill."
+    "templateBrief": "A knitted figure is made of colored yarn; tap a visible strand to wind it onto a spool of the same color; spools fill and leave; unravel the whole figure before spare slots fill.",
+    "template": "bolt-drop"
   },
   {
     "rank": 72,
@@ -1293,7 +1364,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Pick a room and lie in bed to earn coins every second; spend coins to reinforce the door and add turrets; a hunter attacks the weakest door; survive until dawn."
+    "templateBrief": "Pick a room and lie in bed to earn coins every second; spend coins to reinforce the door and add turrets; a hunter attacks the weakest door; survive until dawn.",
+    "template": "lane-turret"
   },
   {
     "rank": 73,
@@ -1311,7 +1383,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A dense illustrated scene hides 10 listed objects; pinch to zoom and tap to find them; wrong taps cost time; find all before the timer ends."
+    "templateBrief": "A dense illustrated scene hides 10 listed objects; pinch to zoom and tap to find them; wrong taps cost time; find all before the timer ends.",
+    "template": "teacup-tower"
   },
   {
     "rank": 74,
@@ -1329,7 +1402,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Colored riders queue at stops; tap a bus to bring it to the platform; only riders of its color board; manage limited platform slots to clear every queue."
+    "templateBrief": "Colored riders queue at stops; tap a bus to bring it to the platform; only riders of its color board; manage limited platform slots to clear every queue.",
+    "template": "color-gate-jam"
   },
   {
     "rank": 75,
@@ -1347,7 +1421,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Slide blocking objects on a grid to clear a route for a target item to exit; fewest moves earns 3 stars."
+    "templateBrief": "Slide blocking objects on a grid to clear a route for a target item to exit; fewest moves earns 3 stars.",
+    "template": "color-gate-jam"
   },
   {
     "rank": 76,
@@ -1365,7 +1440,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Enemies walk a path toward your base; drag letter tiles onto slots to spell words; each valid word becomes a tower whose power matches word length; hold 15 waves."
+    "templateBrief": "Enemies walk a path toward your base; drag letter tiles onto slots to spell words; each valid word becomes a tower whose power matches word length; hold 15 waves.",
+    "template": "lane-turret"
   },
   {
     "rank": 77,
@@ -1383,7 +1459,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A bubbling hot pot is full of floating ingredients; tap to scoop items into a 7-slot plate; three identical clear; empty the pot to win."
+    "templateBrief": "A bubbling hot pot is full of floating ingredients; tap to scoop items into a 7-slot plate; three identical clear; empty the pot to win.",
+    "template": "teacup-tower"
   },
   {
     "rank": 78,
@@ -1401,7 +1478,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Drop falling tetromino-shaped piles of colored sand; sand settles with physics; a continuous band of one color spanning wall to wall dissolves; survive as long as possible."
+    "templateBrief": "Drop falling tetromino-shaped piles of colored sand; sand settles with physics; a continuous band of one color spanning wall to wall dissolves; survive as long as possible.",
+    "template": "glyph-garden"
   },
   {
     "rank": 79,
@@ -1419,7 +1497,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Colored ropes are tangled over pegs; tap a rope end to pull it free only if nothing lies on top; route each rope to the matching animal; free all animals to win."
+    "templateBrief": "Colored ropes are tangled over pegs; tap a rope end to pull it free only if nothing lies on top; route each rope to the matching animal; free all animals to win.",
+    "template": "pin-rescue"
   },
   {
     "rank": 80,
@@ -1437,7 +1516,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Each arrow travels along a fixed bent path when tapped; it is blocked by any arrow crossing its route; clear all arrows within the mistake limit."
+    "templateBrief": "Each arrow travels along a fixed bent path when tapped; it is blocked by any arrow crossing its route; clear all arrows within the mistake limit.",
+    "template": "arrow-out"
   },
   {
     "rank": 81,
@@ -1455,7 +1535,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Tubes hold stacked colored liquid layers; tap a tube then another to pour the top layer if colors match or space is empty; sort all colors to win."
+    "templateBrief": "Tubes hold stacked colored liquid layers; tap a tube then another to pour the top layer if colors match or space is empty; sort all colors to win.",
+    "template": "sort-stack"
   },
   {
     "rank": 82,
@@ -1473,7 +1554,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Fruits pile up in a bowl with physics; tap three of the same fruit to collect them; clear the bowl before the timer."
+    "templateBrief": "Fruits pile up in a bowl with physics; tap three of the same fruit to collect them; clear the bowl before the timer.",
+    "template": "teacup-tower"
   },
   {
     "rank": 83,
@@ -1491,7 +1573,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Each round draft 1 of 3 office items and place it on a 4x4 desk grid; items score KPI and buff neighbors; hit the rising KPI target each round for 10 rounds to get promoted."
+    "templateBrief": "Each round draft 1 of 3 office items and place it on a 4x4 desk grid; items score KPI and buff neighbors; hit the rising KPI target each round for 10 rounds to get promoted.",
+    "template": null
   },
   {
     "rank": 84,
@@ -1509,7 +1592,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Pan a sniper scope over a crowd; aliens have subtle tells (glowing eyes, odd shadows); shoot only aliens; three civilian hits fail the mission."
+    "templateBrief": "Pan a sniper scope over a crowd; aliens have subtle tells (glowing eyes, odd shadows); shoot only aliens; three civilian hits fail the mission.",
+    "template": "scope-spot"
   },
   {
     "rank": 85,
@@ -1527,7 +1611,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "landscape",
-    "templateBrief": "Grid-based snake under gravity: move one cell at a time, eating fruit adds a segment; body can rest on ledges; reach the portal without falling off-screen."
+    "templateBrief": "Grid-based snake under gravity: move one cell at a time, eating fruit adds a segment; body can rest on ledges; reach the portal without falling off-screen.",
+    "template": null
   },
   {
     "rank": 86,
@@ -1545,7 +1630,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A yard is littered with junk; drag items into recycling bins by type; correct bins grow a combo; clear the yard within 90 seconds."
+    "templateBrief": "A yard is littered with junk; drag items into recycling bins by type; correct bins grow a combo; clear the yard within 90 seconds.",
+    "template": "teacup-tower"
   },
   {
     "rank": 87,
@@ -1563,7 +1649,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Hold to eat a snack and fill the bar; release when the teacher starts turning around; getting caught three times ends the class; finish 5 snacks to win."
+    "templateBrief": "Hold to eat a snack and fill the bar; release when the teacher starts turning around; getting caught three times ends the class; finish 5 snacks to win.",
+    "template": null
   },
   {
     "rank": 88,
@@ -1581,7 +1668,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "A rotating playlist of 10-second micro-challenges (tap, swipe, hold); each success speeds up the next; three fails end the run."
+    "templateBrief": "A rotating playlist of 10-second micro-challenges (tap, swipe, hold); each success speeds up the next; three fails end the run.",
+    "template": null
   },
   {
     "rank": 89,
@@ -1599,7 +1687,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Enemies march down three lanes; spend coins to drop riflemen and grenadiers; merge two of a kind for a higher rank; protect the base for 20 waves."
+    "templateBrief": "Enemies march down three lanes; spend coins to drop riflemen and grenadiers; merge two of a kind for a higher rank; protect the base for 20 waves.",
+    "template": "lane-turret"
   },
   {
     "rank": 90,
@@ -1617,7 +1706,8 @@
     "sourceNote": "未读到原文",
     "webFeasible": "high",
     "orientation": "portrait",
-    "templateBrief": "Each screen gives a simple instruction that is a trap; find the alternate interaction to pass; 40 levels, hints refill over time."
+    "templateBrief": "Each screen gives a simple instruction that is a trap; find the alternate interaction to pass; 40 levels, hints refill over time.",
+    "template": "pin-rescue"
   },
   {
     "rank": 91,
@@ -1635,7 +1725,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "landscape",
-    "templateBrief": "Minimal platformer: reach the door on each one-screen level while the level trolls you with collapsing floors, moving spikes and fake exits; infinite retries, 20 levels."
+    "templateBrief": "Minimal platformer: reach the door on each one-screen level while the level trolls you with collapsing floors, moving spikes and fake exits; infinite retries, 20 levels.",
+    "template": "skyline-courier"
   },
   {
     "rank": 92,
@@ -1653,7 +1744,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "landscape",
-    "templateBrief": "One-button driving: a car moves forward on a floating zigzag road; hold to turn right, release to turn left; fall off the edge and it's over; score by distance."
+    "templateBrief": "One-button driving: a car moves forward on a floating zigzag road; hold to turn right, release to turn left; fall off the edge and it's over; score by distance.",
+    "template": "drift-dash"
   },
   {
     "rank": 93,
@@ -1671,7 +1763,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "landscape",
-    "templateBrief": "Hold to attach a rope to the nearest anchor and swing; release to fly with momentum; bounce pads and obstacles in between; reach the finish flag."
+    "templateBrief": "Hold to attach a rope to the nearest anchor and swing; release to fly with momentum; bounce pads and obstacles in between; reach the finish flag.",
+    "template": null
   },
   {
     "rank": 94,
@@ -1689,7 +1782,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "landscape",
-    "templateBrief": "Walk an animal shopkeeper around a store: pick crops, carry them to shelves, ring up customers at the till; spend coins to unlock new aisles and hire helpers."
+    "templateBrief": "Walk an animal shopkeeper around a store: pick crops, carry them to shelves, ring up customers at the till; spend coins to unlock new aisles and hire helpers.",
+    "template": "meadow-market"
   },
   {
     "rank": 95,
@@ -1707,7 +1801,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "landscape",
-    "templateBrief": "Pixel gridiron: on offense drag back to aim a pass and release to throw to an open receiver; between games spend points to sign players; win the season final."
+    "templateBrief": "Pixel gridiron: on offense drag back to aim a pass and release to throw to an open receiver; between games spend points to sign players; win the season final.",
+    "template": null
   },
   {
     "rank": 96,
@@ -1725,7 +1820,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "landscape",
-    "templateBrief": "Track sprint: alternate left and right taps in rhythm to run; a stride meter rewards steady timing over mashing; beat 7 AI runners over 100m."
+    "templateBrief": "Track sprint: alternate left and right taps in rhythm to run; a stride meter rewards steady timing over mashing; beat 7 AI runners over 100m.",
+    "template": "sky-runner"
   },
   {
     "rank": 97,
@@ -1743,7 +1839,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "landscape",
-    "templateBrief": "Three.js arena FPS vs bots: WASD move, mouse aim, click shoot; pick up weapons on the map; first to 20 eliminations in 5 minutes wins."
+    "templateBrief": "Three.js arena FPS vs bots: WASD move, mouse aim, click shoot; pick up weapons on the map; first to 20 eliminations in 5 minutes wins.",
+    "template": "harbor-skirmish"
   },
   {
     "rank": 98,
@@ -1761,7 +1858,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "landscape",
-    "templateBrief": "2D physics bike trials: arrow keys for throttle and lean; flips cut time; crash on head lands restart at checkpoint; finish under the 3-star time."
+    "templateBrief": "2D physics bike trials: arrow keys for throttle and lean; flips cut time; crash on head lands restart at checkpoint; finish under the 3-star time.",
+    "template": null
   },
   {
     "rank": 99,
@@ -1779,7 +1877,8 @@
     "sourceNote": "已读原文",
     "webFeasible": "medium",
     "orientation": "landscape",
-    "templateBrief": "Top-down kart arena vs bots: drive over item boxes for rockets, mines and shields; each hit scores a point; highest score after 3 minutes wins."
+    "templateBrief": "Top-down kart arena vs bots: drive over item boxes for rockets, mines and shields; each hit scores a point; highest score after 3 minutes wins.",
+    "template": "drift-dash"
   },
   {
     "rank": 100,
@@ -1797,6 +1896,7 @@
     "sourceNote": "已读原文",
     "webFeasible": "high",
     "orientation": "landscape",
-    "templateBrief": "Mouse-steer a blob on a large map; eat pellets and smaller AI blobs to grow, bigger means slower; split to lunge; reach the top of the leaderboard in 5 minutes."
+    "templateBrief": "Mouse-steer a blob on a large map; eat pellets and smaller AI blobs to grow, bigger means slower; split to lunge; reach the top of the leaderboard in 5 minutes.",
+    "template": "slime-swell"
   }
 ]

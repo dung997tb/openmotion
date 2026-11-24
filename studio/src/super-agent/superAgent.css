@@ -10784,17 +10784,6 @@
 .om-sa-game-top-cover[data-genre="casual"] { --top-tint: #f59e0b; }
 .om-sa-game-top-cover[data-genre="racing"] { --top-tint: #3b82f6; }
 .om-sa-game-top-cover[data-genre="horror"] { --top-tint: #64748b; }
-.om-sa-game-top-rank {
-  position: absolute;
-  top: var(--motion-space-8);
-  inset-inline-end: var(--motion-space-12);
-  font-size: 44px;
-  font-weight: 800;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  color: color-mix(in srgb, var(--top-tint) 70%, var(--motion-text));
-  opacity: 0.9;
-}
 .om-sa-game-top-loop {
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -10807,3 +10796,22 @@
 .om-sa-game-top-tags { display: flex; flex-wrap: wrap; gap: var(--motion-space-4); font-size: var(--motion-text-xs); }
 .om-sa-game-top-tags span { padding: 1px var(--motion-space-6); border-radius: var(--motion-radius-full); background: var(--motion-overlay-ink); color: var(--motion-video-ink); }
 .om-sa-game-top-tags span[data-tone="good"] { background: color-mix(in srgb, var(--motion-success) 80%, black); }
+.om-sa-game-top-badge {
+  position: absolute;
+  top: var(--motion-space-8);
+  inset-inline-start: var(--motion-space-8);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px var(--motion-space-8) 3px var(--motion-space-6);
+  border-radius: var(--motion-radius-full);
+  color: #3b2400;
+  font-size: var(--motion-text-xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.35);
+}
+.om-sa-game-top-badge[data-rank="1"] { background: linear-gradient(135deg, #ffe58a, #f5b301 55%, #d98a00); }
+.om-sa-game-top-badge[data-rank="2"] { background: linear-gradient(135deg, #f4f6fa, #c4cad6 55%, #9aa3b2); color: #222833; }
+.om-sa-game-top-badge[data-rank="3"] { background: linear-gradient(135deg, #ffd2a8, #d98b4c 55%, #a8602c); color: #331a06; }
