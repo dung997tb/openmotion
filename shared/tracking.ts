@@ -8,7 +8,7 @@ import type { Entry } from '../tracking/core.ts';
 import { createNodeTracking, loadIdentity } from '../tracking/node.ts';
 import { loadDeviceIdentity } from '../tracking/device.ts';
 import { omEvents } from '../tracking/events.ts';
-import { VERSION } from '../preview.ts';
+import { VERSION } from './version.ts';
 import type { HostContext } from '../tracking/host.ts';
 
 export type OmTracking = ReturnType<typeof createTracker<typeof omEvents>>;

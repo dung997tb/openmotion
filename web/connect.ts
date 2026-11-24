@@ -1,6 +1,6 @@
 import { iconSprite } from "../packages/design-system/index.js";
 import { mountFeedbackLayer } from './feedback-layer';
-import { integrationHost, isIntegrationInfo, hostNames, hostDescriptions, setupPrompt, manualConnection, agentGuide, apiDiscoveryCommand } from '../shared/integration';
+import { integrationHost, isIntegrationInfo, hostNames, hostDescriptions, setupPrompt, manualConnection, agentGuide, apiDiscoveryCommand, supportsChatgptCloud } from '../shared/integration';
 import type { IntegrationInfo } from '../shared/integration';
 import { mountTemplates } from './template-gallery';
 import type { TemplateGalleryEvent } from './template-gallery';
@@ -18,7 +18,7 @@ export function mountConnection(root: HTMLElement, options: { close: () => void;
   const copiedButtons = new Map<HTMLButtonElement, Node[]>();
   let galleryController: ReturnType<typeof mountTemplates> | undefined;
   const lifetime = new AbortController();
-  const blocked = () => host === 'chatgpt';
+  const blocked = () => host === 'chatgpt' && !supportsChatgptCloud(info);
 
   function glyph(name: string) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

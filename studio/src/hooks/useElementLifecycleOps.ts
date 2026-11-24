@@ -1,3 +1,6 @@
+import { isolatedSourceVersion } from "../components/editor/isolatedSourceTarget";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { acknowledgeFileEdit, isolatedEditVersion } from "../utils/isolatedEditVersions";
 import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback } from "react";
 import { assertSafeElementDeletion } from "../utils/deleteScriptDependencies";
@@ -124,7 +127,10 @@ export function useElementLifecycleOps({
         const hfIds = sameFile
           .map((member) => member.hfId)
           .filter((hfId): hfId is string => Boolean(hfId));
-        if (onTrySdkDelete && hfIds.length === sameFile.length) {
+        const shownVersions = new Set(sameFile.flatMap(member => member.isolatedTarget ? [isolatedSourceVersion(member.isolatedTarget)] : []));
+        if (shownVersions.size > 1) throw new Error("Preview changed before the elements could be deleted");
+        const [shownVersion] = shownVersions;
+        if (!getCachedCloudDisklessMode() && !shownVersion && onTrySdkDelete && hfIds.length === sameFile.length) {
           const originalContent = await readProjectFileContent(pid, targetPath);
           assertSafeElementDeletion(originalContent, patchTargets);
           // SDK members commit separately; validate each before the first write.
@@ -160,8 +166,9 @@ export function useElementLifecycleOps({
           label: "Delete element",
           writeFile: writeProjectFile,
           recordEdit: editHistory.recordEdit,
-          rewrite: async (originalContent) => {
+          rewrite: async (originalContent, history) => {
             assertSafeElementDeletion(originalContent, patchTargets);
+            const expected = shownVersion && isolatedEditVersion(pid, targetPath, shownVersion);
             const removeResponse = await studioApiFetch(
               buildProjectApiPath(
                 pid,
@@ -169,7 +176,8 @@ export function useElementLifecycleOps({
               ),
               {
                 method: "POST",
-                headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
+                headers: { "Content-Type": "application/json", ...studioWriteHeaders(history),
+                  ...(expected && { "If-Match": expected }) },
                 body: JSON.stringify({ targets: patchTargets }),
               },
             );
@@ -180,10 +188,12 @@ export function useElementLifecycleOps({
               );
             }
             const removeData = (await removeResponse.json()) as {
+              version?: string;
               changed?: boolean;
               content?: string;
             };
             if (!removeData.changed) return null;
+            acknowledgeFileEdit(pid, targetPath, expected, removeData.version);
             return {
               disk: typeof removeData.content === "string" ? removeData.content : originalContent,
             };

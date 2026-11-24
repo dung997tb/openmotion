@@ -1,8 +1,15 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { editMoment } from "./editMoment";
+import { stageCloudGroupOffset, type CanvasGroupWrite } from "./cloudGroupMove";
+import { gsapWriteFile } from "./gsapScriptCommitTypes";
 import { useCallback } from "react";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import type { DomEditGroupPathOffsetCommit } from "../components/editor/DomEditOverlay";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
-import type { CommitMutationCall, CommitMutationOptions } from "./gsapScriptCommitTypes";
+import type {
+  CommitMutationCall,
+  CommitMutationOptions,
+} from "./gsapScriptCommitTypes";
 import type { UseGsapAwareEditingParams } from "./useGsapAwareEditing";
 import { observeGsapGesture } from "./gsapGestureOutcome";
 import { editsPlainCss } from "./gsapRuntimeKeyframes";
@@ -18,6 +25,7 @@ import type { GeometryCommitResult } from "../utils/previewFeatureUsage";
 let groupDragCommitCounter = 0;
 
 export function useGsapAwareGroupMove({
+  commitCanvasGroup,
   gsapCommitMutation,
   activeCompPath,
   previewIframeRef,
@@ -27,6 +35,7 @@ export function useGsapAwareGroupMove({
   showToast,
 }: Pick<
   UseGsapAwareEditingParams,
+  | "commitCanvasGroup"
   | "gsapCommitMutation"
   | "activeCompPath"
   | "previewIframeRef"
@@ -49,7 +58,10 @@ export function useGsapAwareGroupMove({
       );
       const commitGroup = async (): Promise<GeometryCommitResult> => {
         const stamps = new Map(
-          updates.map((u) => [u.selection, freezeDragStamp(u.selection.element)]),
+          updates.map((u) => [
+            u.selection,
+            freezeDragStamp(u.selection.element),
+          ]),
         );
         const toastRefusal = options.refusalToast !== false;
         // One coalesce key across slow writes keeps the group drag in one undo entry.
@@ -57,7 +69,9 @@ export function useGsapAwareGroupMove({
         // Hold the render until every member is saved, or unwritten members snap back.
         let renderOnCommit = false;
         const previewFallbackLatch = { pending: false };
-        const withGroupOptions = (options: CommitMutationOptions): CommitMutationOptions => ({
+        const withGroupOptions = (
+          options: CommitMutationOptions,
+        ): CommitMutationOptions => ({
           ...options,
           coalesceKey,
           coalesceMs: Number.POSITIVE_INFINITY,
@@ -65,10 +79,23 @@ export function useGsapAwareGroupMove({
           previewFallbackLatch,
         });
         // Batch members in the same file to avoid repeating its read, parse, write and preview patch.
+        const cloudBatch = getCachedCloudDisklessMode()
+          ? commitCanvasGroup
+          : undefined;
+        const batch: CanvasGroupWrite[] = [];
+        const rollbacks: Array<() => void> = [];
         const queued: CommitMutationCall[] = [];
         const flushQueued = async () => {
           if (queued.length === 0) return;
           const calls = queued.splice(0, queued.length);
+          if (cloudBatch) {
+            for (const call of calls)
+              batch.push({
+                path: gsapWriteFile(call.selection, activeCompPath),
+                command: { kind: "editAnimation", mutations: [call.mutation] },
+              });
+            return;
+          }
           if (!writer.batch) {
             for (const call of calls) {
               await writer(call.selection, call.mutation, call.options);
@@ -76,15 +103,28 @@ export function useGsapAwareGroupMove({
             return;
           }
           await writer.batch(calls, {
-            ...(calls.at(-1)?.options ?? { label: "Move animated layer (group)" }),
+            ...(calls.at(-1)?.options ?? {
+              label: "Move animated layer (group)",
+            }),
             label: "Move animated layer (group)",
           });
         };
-        const coalescedCommit: typeof gsapCommitMutation = (selection, mutation, options) => {
-          queued.push({ selection, mutation, options: withGroupOptions(options) });
+        const coalescedCommit: typeof gsapCommitMutation = (
+          selection,
+          mutation,
+          options,
+        ) => {
+          queued.push({
+            selection,
+            mutation,
+            options: withGroupOptions(options),
+          });
           return Promise.resolve();
         };
-        const preflightAnimations = new Map<DomEditSelection, GsapAnimation[]>();
+        const preflightAnimations = new Map<
+          DomEditSelection,
+          GsapAnimation[]
+        >();
         // Members saved on themselves, each with its route: true for its CSS translate.
         const offsetMembers = new Map<DomEditSelection, boolean>();
         // Editability is user-atomic: prove every member can be written before the first source
@@ -93,10 +133,15 @@ export function useGsapAwareGroupMove({
         const preflightResults = await Promise.allSettled(
           updates.map(async ({ selection, next, plainTranslate }) => {
             if (plainTranslate ?? editsPlainCss(selection.element, "move")) {
-              refuseGsapTakeover(selection.element, toastRefusal ? showToast : () => {});
+              refuseGsapTakeover(
+                selection.element,
+                toastRefusal ? showToast : () => {},
+              );
               return void offsetMembers.set(selection, true);
             }
-            const animations = await makeFetchFallback(selection, { failOnFetchError: true })();
+            const animations = await makeFetchFallback(selection, {
+              failOnFetchError: true,
+            })();
             preflightAnimations.set(selection, animations);
             const outcome = await tryGsapDragIntercept(
               selection,
@@ -107,7 +152,8 @@ export function useGsapAwareGroupMove({
               undefined,
               { preflightOnly: true, group: true },
             );
-            if (outcome.status === "element-offset") offsetMembers.set(selection, false);
+            if (outcome.status === "element-offset")
+              offsetMembers.set(selection, false);
             assertGsapEditPersisted(outcome);
           }),
         );
@@ -116,6 +162,7 @@ export function useGsapAwareGroupMove({
           updates,
           offsetMembers,
           activeCompPath,
+          Boolean(cloudBatch),
         );
         if (preflightFailure) {
           trackGsapInteractionFailure(
@@ -130,52 +177,75 @@ export function useGsapAwareGroupMove({
         const lastScriptWrite = updates.findLastIndex(
           ({ selection }) => !offsetMembers.has(selection),
         );
-        for (const [index, { selection, next }] of updates.entries()) {
-          renderOnCommit = index === lastScriptWrite;
-          const plain = offsetMembers.get(selection);
-          if (plain !== undefined) {
-            const staged = writes.drawKeepingUndone(() =>
-              stageElementPositionOffset(selection, next, plain, coalesceKey),
-            );
-            const result = await staged.save();
-            writes.recordDomResult(result);
-            continue;
-          }
-          try {
-            const outcome = await tryGsapDragIntercept(
-              selection,
-              next,
-              preflightAnimations.get(selection) ?? [],
-              previewIframeRef.current,
-              coalescedCommit,
-              // The intercept re-reads the file to resolve a stale or shared tween.
-              // Anything already queued has to be on disk before that read, or it
-              // resolves against a file missing writes it is about to build on.
-              async () => {
-                await flushQueued();
-                return makeFetchFallback(selection, { fresh: true })();
-              },
-              { preflightPassed: true, stamp: stamps.get(selection) },
-            );
-            assertGsapEditPersisted(outcome);
-          } catch (error) {
-            trackGsapInteractionFailure(error, selection, "drag", "Move animated layer (group)");
-            throw error;
-          }
-        }
         try {
+          for (const [index, { selection, next }] of updates.entries()) {
+            renderOnCommit = index === lastScriptWrite;
+            const plain = offsetMembers.get(selection);
+            if (plain !== undefined) {
+              if (cloudBatch) {
+                const staged = stageCloudGroupOffset(selection, next, plain,
+                  gsapWriteFile(selection, activeCompPath), editMoment(stamps.get(selection)).time,
+                  coalesceKey, showToast, batch);
+                rollbacks.push(staged.rollback);
+                await staged.save();
+                continue;
+              }
+              const staged = writes.drawKeepingUndone(() =>
+                stageElementPositionOffset(selection, next, plain, coalesceKey),
+              );
+              const result = await staged.save();
+              writes.recordDomResult(result);
+              continue;
+            }
+            try {
+              const outcome = await tryGsapDragIntercept(
+                selection,
+                next,
+                preflightAnimations.get(selection) ?? [],
+                previewIframeRef.current,
+                coalescedCommit,
+                // The intercept re-reads the file to resolve a stale or shared tween.
+                // Anything already queued has to be on disk before that read, or it
+                // resolves against a file missing writes it is about to build on.
+                async () => {
+                  await flushQueued();
+                  return makeFetchFallback(selection, { fresh: true })();
+                },
+                { preflightPassed: true, stamp: stamps.get(selection) },
+              );
+              assertGsapEditPersisted(outcome);
+            } catch (error) {
+              trackGsapInteractionFailure(
+                error,
+                selection,
+                "drag",
+                "Move animated layer (group)",
+              );
+              throw error;
+            }
+          }
           await flushQueued();
+          if (cloudBatch && batch.length) {
+            return { ok: true, changed: await cloudBatch(batch) };
+          }
           return writes.finish();
         } catch (error) {
+          for (const rollback of rollbacks.reverse()) rollback();
           // The aggregate write has no uniquely failing member; do not misattribute
           // its telemetry to whichever member happened to be last in the array.
-          trackGsapInteractionFailure(error, null, "drag", "Move animated layer (group)");
+          trackGsapInteractionFailure(
+            error,
+            null,
+            "drag",
+            "Move animated layer (group)",
+          );
           throw error;
         }
       };
       return scripted ? whileScriptWrites(commitGroup) : commitGroup();
     },
     [
+      commitCanvasGroup,
       gsapCommitMutation,
       activeCompPath,
       previewIframeRef,

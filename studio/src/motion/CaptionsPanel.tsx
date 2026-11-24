@@ -19,6 +19,7 @@ import { belongsToCaptionTrack, captionTrackCode, captionTrackText, useCaptionWo
 import { useCaptionTracks } from './useCaptionTracks';
 import { useCaptionSurfaceActive } from './useCaptionSurfaceActive';
 import { transcriptRequest, type TranscriptList } from './transcriptClient';
+import { useTranscriptServiceAvailable } from './useTranscriptServiceAvailable';
 import { gatewayRequest } from './gatewayClient';
 
 export function CaptionsPanel() {
@@ -28,13 +29,14 @@ export function CaptionsPanel() {
 function CaptionControls() {
   const { t } = useI18n(), shell = useStudioShellContext(), files = useFileManagerContext();
   const visible = useCaptionSurfaceActive('captions');
+  const transcriptServiceAvailable = useTranscriptServiceAvailable();
   const { timelineElements, refreshKey } = useStudioPlaybackContext();
   const { tracks, loading, failed, refresh, change, disabled } = useCaptionTracks(visible, refreshKey);
   const selection = useCaptionWorkspace(s => s.selections[shell.projectId]);
   const request = useCaptionWorkspace(s => s.requests[shell.projectId]);
   const appliedRequest = useRef(0), pendingTrack = useRef<string | undefined>(undefined), pendingClip = useRef<string | undefined>(undefined);
   const epoch = useCaptionWorkspace(s => s.epoch);
-  const [mode, setMode] = useState<'auto' | 'manual' | 'style'>('auto');
+  const [mode, setMode] = useState<'auto' | 'manual' | 'style'>(() => transcriptServiceAvailable ? 'auto' : 'manual');
   const initialMode = useRef(false);
   const chooseMode = (next: typeof mode) => {
     // A newer user action supersedes selection waiting for a created clip to load.
@@ -63,7 +65,7 @@ function CaptionControls() {
     catch { if (alive.current) setListFailed(true); }
   };
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  useEffect(() => { if (visible) void loadDocuments(); }, [visible, epoch]);
+  useEffect(() => { if (visible && transcriptServiceAvailable) void loadDocuments(); }, [visible, transcriptServiceAvailable, epoch]);
   useEffect(() => {
     if (tracks.some(track => track.id === pendingTrack.current)) pendingTrack.current = undefined;
     if (!loading && !failed && !pendingTrack.current && target !== 'new' && !tracks.some(track => track.id === target)) setTarget(tracks[0]?.id || 'new');
@@ -76,9 +78,9 @@ function CaptionControls() {
     appliedRequest.current = request.nonce; initialMode.current = true;
     pendingTrack.current = request.trackId;
     pendingClip.current = request.selectClip ? request.trackId : undefined;
-    setMode(request.mode);
+    setMode(!transcriptServiceAvailable && request.mode === 'auto' ? 'manual' : request.mode);
     if (request.trackId) setTarget(request.trackId);
-  }, [visible, request, shell.activeCompPath]);
+  }, [visible, request, shell.activeCompPath, transcriptServiceAvailable]);
   useEffect(() => {
     if (!visible || !pendingClip.current) return;
     const clip = timelineElements.find(element => (!element.sourceFile || element.sourceFile === (shell.activeCompPath || 'index.html')) && belongsToCaptionTrack(element, pendingClip.current!));
@@ -115,13 +117,17 @@ function CaptionControls() {
     finally { active.current = false; if (alive.current) setWorking(false); }
   }
   useEffect(() => { if (!loading && !initialMode.current) { initialMode.current = true; if (tracks.length) setMode('style'); } }, [loading, tracks.length]);
+  useEffect(() => { if (!transcriptServiceAvailable && mode === 'auto') setMode(tracks.length ? 'style' : 'manual'); }, [transcriptServiceAvailable, mode, tracks.length]);
   const replacing = !current && tracks.some(track => track.id === source);
+  const modeTabs: readonly (readonly ['auto' | 'manual' | 'style', string])[] = transcriptServiceAvailable
+    ? [['auto', 'Auto captions'], ['manual', 'Add captions'], ['style', 'Style']]
+    : [['manual', 'Add captions'], ['style', 'Style']];
   return <section aria-label={t('Captions')} className="@container flex h-full min-h-0 flex-col overflow-hidden text-step-12 text-text-1" onKeyDown={event => event.stopPropagation()}>
     <div className="flex shrink-0 flex-wrap gap-1 border-b border-border p-2" role="tablist" aria-label={t('Caption tools')}>
-      {(['auto', 'manual', 'style'] as const).map((item, i) => <Button key={item} size="sm" role="tab" aria-selected={mode === item} variant={mode === item ? 'secondary' : 'ghost'} onClick={() => chooseMode(item)}>{t(['Auto captions', 'Add captions', 'Style'][i])}</Button>)}
+      {modeTabs.map(([item, label]) => <Button key={item} size="sm" role="tab" aria-selected={mode === item} variant={mode === item ? 'secondary' : 'ghost'} onClick={() => chooseMode(item)}>{t(label)}</Button>)}
     </div>
-    <div className={mode === 'auto' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}><AutoCaptionsPanel visible={mode === 'auto'} /></div>
-    {mode === 'manual' ? <ManualTextPanel kind="caption" /> : mode === 'style' ? <>
+    {transcriptServiceAvailable && <div className={mode === 'auto' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}><AutoCaptionsPanel visible={mode === 'auto'} /></div>}
+    {mode === 'manual' ? <ManualTextPanel kind="caption" allowSubtitleImport={!transcriptServiceAvailable} /> : mode === 'style' ? <>
     {(tracks.length > 0 || documents.length > 0 || loading || failed) && <div className="flex shrink-0 flex-col items-stretch gap-2 border-b border-border px-3 py-2 @min-[300px]:flex-row @min-[300px]:items-center" data-testid="caption-track-bar">
       <span className="text-step-11 font-medium text-text-2">{t('Caption track')}</span>
       <Select className="min-w-0 flex-1" label={t('Caption track')} value={current?.id || 'new'} disabled={blocked || loading || failed || (!tracks.length && !documents.length)} options={[...tracks.map(track => ({ value: track.id, label: `${captionTrackCode(track, tracks, timelineElements)} · ${captionTrackText(track, timelineElements) || t(track.label)}`, description: t('{count} caption cues', { count: track.cueCount }) })), ...(documents.length ? [{ value: 'new', label: t('Create from transcript') }] : [])]} onCommit={value => { pendingTrack.current = undefined; setTarget(value); if (value !== 'new') setSource(value); }} />
@@ -144,8 +150,8 @@ function CaptionControls() {
           <h2 className="text-step-13 font-semibold">{t(listFailed ? 'Could not load transcripts' : 'No caption tracks yet')}</h2>
           <p className="text-step-11 text-text-3">{t('Generate or add captions, then choose their style here.')}</p>
           <div className="flex flex-wrap justify-center gap-2">
-            <Button onClick={listFailed ? () => void loadDocuments() : () => chooseMode('auto')}>{t(listFailed ? 'Retry' : 'Auto captions')}</Button>
-            <Button variant="secondary" onClick={() => chooseMode('manual')}>{t('Add captions')}</Button>
+            {(listFailed || transcriptServiceAvailable) && <Button onClick={listFailed ? () => void loadDocuments() : () => chooseMode('auto')}>{t(listFailed ? 'Retry' : 'Auto captions')}</Button>}
+            <Button variant={transcriptServiceAvailable || listFailed ? 'secondary' : 'primary'} onClick={() => chooseMode('manual')}>{t('Add captions')}</Button>
           </div>
         </div> : <div className="flex flex-col gap-4">
           {!current && <div className="flex flex-col gap-2 border-b border-border pb-3">
@@ -164,7 +170,7 @@ function CaptionControls() {
         <Button className="min-w-0 flex-1" variant="primary" disabled={blocked || !doc || tracks.some(track => track.id === source && track.locked)} onClick={() => void apply()}>{t(working ? 'Adding captions…' : replacing ? 'Recreate captions' : 'Add captions to video')}</Button>
       </div>}
       {current && <Button size="sm" variant="ghost" disabled={!editableClip} onClick={editText}><RemixIcon name="text" size={14} />{t('Edit text')}</Button>}
-      {doc && <Button size="sm" variant="ghost" onClick={goTranscript}><RemixIcon name="file-text-line" size={14} />{t('Edit transcript')}</Button>}
+      {doc && transcriptServiceAvailable && <Button size="sm" variant="ghost" onClick={goTranscript}><RemixIcon name="file-text-line" size={14} />{t('Edit transcript')}</Button>}
     </div>}
     </> : null}
   </section>;

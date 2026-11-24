@@ -1,3 +1,5 @@
+import {KEYFRAME_PCT_MATCH} from "../../../packages/edit-core/playhead-edit";
+export {KEYFRAME_PCT_MATCH} from "../../../packages/edit-core/playhead-edit";
 /**
  * Shared GSAP primitives used across multiple hook files.
  * Centralises duplicated interfaces, constants, and small utilities
@@ -78,7 +80,6 @@ const SAFE_HASH_ID = /^-?[A-Za-z_][\w-]*$/;
  * while another decided "yes, edit that one", and a drag near a waypoint left two
  * keyframes a fraction of a percent apart.
  */
-export const KEYFRAME_PCT_MATCH = 1;
 
 /** Whether the keyframe at `percentage` plays within KEYFRAME_PCT_MATCH of the time where GSAP shows `progress`. */
 export function playsNear(anim: GsapAnimation, percentage: number, progress: number): boolean {

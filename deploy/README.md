@@ -1,100 +1,179 @@
-# Docker deployment
+# OpenMotion Cloud & Container Deployment
 
-Run OpenMotion in a container on the machine you work on. The image is built
-from this checkout and contains Node.js, Chromium, FFmpeg/ffprobe and CJK fonts,
-so the host needs only Docker.
+OpenMotion runs as a container-first, stateless cloud stack backed by **PostgreSQL 17**, **Redis 7** (`noeviction` for BullMQ), and **S3-compatible object storage** (RustFS locally, S3/R2 in cloud).
 
-This is a local deployment: the Studio is opened from the same machine at
-`http://127.0.0.1:4173`. Access from another machine is not supported yet.
+## Container Architecture
 
-## Start
+A single multi-target [Dockerfile](Dockerfile) (`node:26.11.1-bookworm-slim`, matching CI) produces four role-specific images from a shared build cache:
+
+| Target | Contents | Responsibility |
+| --- | --- | --- |
+| `api` | Node.js + Studio SPA + `/app/fonts/` (**no Chromium, no FFmpeg**) | Stateless HTTP/SSE Studio server, Motion API, and Streamable HTTP `/mcp` endpoint (`read_only` rootfs). |
+| `worker-media` | Node.js + `ffmpeg` / `ffprobe` (**no Chromium**) | BullMQ `media-ingest`, `media-generate`, and two-phase `blob-gc` worker (`WORKER_ROLE=media`). |
+| `worker-render` | Node.js + `chromium` + `ffmpeg` + Noto fonts + `/app/fonts/` | Isolated BullMQ `render-export` worker (`WORKER_ROLE=render`) with ephemeral `/tmp` hydration and strict env stripping. |
+| `catalog-sync` | Node.js + `template-library/` + `library/templates/catalog/` | One-shot Job syncing built-in and repository templates into S3 CAS (`catalog/blobs/{sha256}`) and PostgreSQL. |
+
+Both `api` and `worker-render` bake the exact same `/app/fonts/` catalog (bundled Studio/template fonts and Noto Core/CJK/Color Emoji) so preview typography matches headless Chromium exports without placing browser or media binaries on `api`.
+
+## Local Docker Compose Quick Start (`AUTH_MODE=dev`)
+
+### Prerequisites
+
+- Docker Engine + Docker Compose v2+.
+- **Memory recommendation (Colima / Docker Desktop):** Allocate at least **8 GiB RAM** to your Linux VM for smooth 1080p Chromium + FFmpeg exports (e.g., `colima start --cpu 4 --memory 8`). On smaller 3.8 GiB Colima dev VMs, the default Compose limits (`RENDER_SHM_SIZE=512m`, `RENDER_MEM_LIMIT=2g`) remain bootable; raise them to `RENDER_SHM_SIZE=1g` and `RENDER_MEM_LIMIT=4g` on `>= 8 GiB` hosts.
+
+### Start the Local Stack
 
 ```bash
-cd deploy
-cp .env.example .env
-docker compose build
-docker compose up -d
+cp deploy/.env.example deploy/.env
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-Open `http://127.0.0.1:4173`.
+Startup runs three one-shot bootstrap services automatically before `api` starts:
 
-Projects, exports and settings are stored in the `openmotion_data` volume,
-mounted at `/data` (`MOTION_DATA_DIR`); the OpenDesign account sign-in stays in the
-same volume under `/data/account` (`MOTION_ACCOUNT_DIR`). `docker compose down` keeps the volume;
-`docker compose down -v` deletes it together with every project in it.
+1. `s3-init` (`scripts/init-s3.ts`): Creates the `openmotion` bucket in RustFS and applies the canonical S3 CORS policy via `PutBucketCorsCommand` (`GET`, `HEAD`, `PUT` + `Range`/`ETag`/`Content-Range` headers) required for direct browser uploads and `302` presigned media playback.
+2. `db-migrate` (`src/db/migrate.ts`): Applies Drizzle SQL migrations under a PostgreSQL advisory lock.
+3. `catalog-sync` (`scripts/sync-catalog-cas.ts`): Ingests template blobs into `catalog/blobs/{sha256}` and upserts `catalog_templates` metadata.
 
-## Connect an Agent
+### Local Endpoints
 
-Install the primary OpenMotion Skill in your host Agent using the standard
-[Quick Start](../README.md#quick-start) command:
+| Service | Loopback URL | Notes |
+| --- | --- | --- |
+| OpenMotion Studio & API | `http://127.0.0.1:4173` | Runs with `AUTH_MODE=dev`, `MODEL_GATEWAY_MODE=mock`, and a read-only root filesystem (`tmpfs: /tmp:size=64m`). |
+| Remote MCP (Streamable HTTP) | `http://127.0.0.1:4173/mcp` | Authenticate with `Authorization: Bearer <DEV_PAT>` in local dev mode. |
+| RustFS S3 API | `http://127.0.0.1:9000` | Signed into browser presigned URLs via `S3_PUBLIC_ENDPOINT`. Internal containers talk to `http://s3:9000`. |
+| RustFS Console | `http://127.0.0.1:9001` | Sign in with `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` from `deploy/.env`. |
+| PostgreSQL 17 | `127.0.0.1:5432` | Database `openmotion` (credentials in `deploy/.env`). |
+
+Stop containers while keeping volumes (`pg_data`, `redis_data`, `s3_data`):
+
+```bash
+docker compose -f deploy/docker-compose.yml down
+```
+
+Remove all local state and volumes:
+
+```bash
+docker compose -f deploy/docker-compose.yml down -v
+```
+
+## Connect an AI Agent (Streamable HTTP MCP)
+
+OpenMotion exposes MCP directly over **Streamable HTTP** at `/mcp` without any local stdio process or container-exec wrapper.
+
+Install the OpenMotion product Skill in your host Agent:
 
 ```sh
 npx skills add nexu-io/openmotion --skill openmotion
 ```
 
-This installs Agent guidance. Reuse the running container for the application;
-do not install a second runtime on the host. Complete the Skill's onboarding in
-the current Agent after its actual MCP connection is verified.
-
-The MCP server is a stdio process. Start it inside the running container so it
-shares the Studio's data directory and service:
-
-The Studio's **MCP · Connect Agent** page detects this Compose deployment.
-Its copied commands and downloaded configurations run `docker exec` from the
-host, preserving the container's workspace and runtime. Use those instructions
-for Codex, Claude Code, DeepSeek Harness or another stdio client; do not run
-container paths such as `/app/mcp.ts` directly on the host. The Agent setup
-instruction and Connection guide also retain this Docker installation.
+Point your MCP client at the Streamable HTTP endpoint using the `DEV_PAT` from `deploy/.env` (default `om_pat_devlocal_000000000000000000000000`):
 
 ```json
 {
   "mcpServers": {
     "openmotion": {
-      "command": "docker",
-      "args": ["exec", "-i", "openmotion", "node", "--experimental-strip-types", "mcp.ts"]
+      "type": "http",
+      "url": "http://127.0.0.1:4173/mcp",
+      "headers": {
+        "Authorization": "Bearer om_pat_devlocal_000000000000000000000000"
+      }
     }
   }
 }
 ```
 
-Paths passed to MCP tools are container paths. To import local media with
-`openmotion_import_assets`, mount the folder into the container and pass the
-mounted path.
+In production (`AUTH_MODE=oidc`), remote MCP clients authenticate via **OAuth 2.1 + PKCE** (`/.well-known/oauth-protected-resource`) or workspace-scoped **Personal Access Tokens (PATs)** created in Studio.
 
-Compose sets `MOTION_CONTAINER_NAME=openmotion` to match `container_name`.
-If you rename the container, update both values so the generated host commands
-enter the right container. When running the image without Compose, set
-`MOTION_CONTAINER_NAME` to the actual container name to enable these commands.
+## Key Environment Variables
 
-## Settings
+All runtime variables are validated strictly by [`src/infra/config.ts`](../src/infra/config.ts):
 
-| Variable | Default | Purpose |
+| Variable | Default (Compose) | Purpose |
 | --- | --- | --- |
-| `OPENMOTION_PORT` | `4173` | Port on the host's `127.0.0.1` and inside the container. Both sides use the same value so returned URLs open on the host. |
-| `OPENMOTION_MEM_LIMIT` | `4g` | Container memory limit. Rendering runs Chromium and FFmpeg. |
-| `DO_NOT_TRACK` | empty | Set to `1` to disable analytics. |
+| `APP_PUBLIC_ORIGIN` | `http://127.0.0.1:4173` | Canonical external origin for OAuth metadata, MCP URLs, S3 CORS, and CSRF checks. |
+| `PREVIEW_PUBLIC_ORIGIN` | *(empty)* | Optional cookie-less preview origin (e.g. `https://preview.openmotion.example.com`). When configured on a distinct host, `api` isolates preview iframes from session cookies and blocks `/motion-api/*`, `/auth/*`, `/oauth/*`, `/mcp`, and mutations with `403 PREVIEW_ORIGIN_ISOLATED`. Leave empty for single-host local Compose dev. |
+| `PREVIEW_TOKEN_TTL_SEC` | `900` | Lifetime (seconds) of HS256 project-scoped preview tokens minted by `POST /api/projects/:id/preview-token`. |
+| `AUTH_MODE` | `dev` | `dev` for local Compose; `oidc` required in production (`NODE_ENV=production` refuses `AUTH_MODE=dev` unless `ALLOW_INSECURE_DEV_AUTH=true`). |
+| `DEV_PAT` | `om_pat_devlocal_...` | Synthetic local Bearer token for `/mcp` when `AUTH_MODE=dev`. |
+| `MCP_MAX_BODY_BYTES` | `10485760` | 10 MiB JSON-RPC body cap for large project edits on `/mcp`. |
+| `MODEL_GATEWAY_MODE` | `mock` | `mock` returns deterministic media fixtures locally; set `opendesign` + `OPENDESIGN_S2S_API_KEY` for live media generation. |
+| `S3_ENDPOINT` / `S3_PUBLIC_ENDPOINT` | `http://s3:9000` / `http://127.0.0.1:9000` | Dual S3 clients: internal container I/O vs browser-reachable presigned URLs. |
+| `S3_PRESIGN_CACHE_WINDOW_SEC` | `3600` | UTC time-window alignment (seconds) for cacheable `immutable` Presigned GET URLs on content-addressed blobs/proxies/thumbnails. |
+| `BLOB_GC_GRACE_SECONDS` | `604800` | 7-day grace period (seconds) before Mark-and-Sweep CAS GC physically deletes verified-unreferenced blobs. |
+| `HISTORY_COALESCE_WINDOW_MS` | `4000` | Edit-window duration (ms) for coalescing rapid interactive Studio edits into the head unpinned version (`0` disables coalescing). |
+| `SENTRY_WEB_DSN` | *(empty)* | Optional Sentry public DSN injected into Studio `index.html` at runtime by `api` (via `@openmotion/observability`). Leave empty to disable web Sentry completely. |
+| `SENTRY_ENVIRONMENT` / `SENTRY_RELEASE` | `NODE_ENV` / `openmotion@<version>` | Runtime Sentry environment and release labels injected alongside `SENTRY_WEB_DSN`. |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.1` | Browser performance tracing sample rate in `[0, 1]` (`0` disables performance traces while keeping error capture). |
+| `RENDER_SHM_SIZE` / `RENDER_MEM_LIMIT` | `512m` / `2g` | Chromium `/dev/shm` and container memory limit on `worker-render`. Raise to `1g`–`2g` / `4g` on `>= 8 GiB` hosts. |
 
-## How access is restricted
+### Web Sentry SourceMaps & Observability Guide
 
-The container sets `MOTION_BIND_HOST=0.0.0.0` so Docker can publish the port,
-and Compose publishes it on the host's `127.0.0.1` only. That loopback
-publication is what keeps other machines out. Keep it: do not change the
-`ports` entry to another interface or to `0.0.0.0`.
+Production images never ship `.map` files (`deploy/Dockerfile` strips `*.map` from `prod-base`, and `api` returns `404` for `*.map` when `NODE_ENV=production`). To build `api` with embedded deterministic Debug IDs, export matching hidden `.js.map` files from the shared BuildKit cache, and upload them externally via `sentry-cli`:
 
-The server also rejects requests whose `Host` header is not `localhost`,
-`127.0.0.1` or `[::1]`, and writes that do not come from its own origin. These
-checks protect a browser on this machine from other websites. They are not
-authentication: a client that is not a browser can send any `Host` and `Origin`,
-and the Studio has no sign-in.
+```bash
+SHA="$(git rev-parse --short HEAD)"
+IMAGE_TAG="openmotion-${SHA}"
+SENTRY_RELEASE="openmotion@${SHA}"
 
-`MOTION_BIND_HOST` accepts `127.0.0.1` (default), `0.0.0.0` and `::`. A specific
-interface address is rejected, because the readiness probe and the URLs returned
-to Agents use `127.0.0.1`.
+docker buildx build -f deploy/Dockerfile --target api --build-arg STUDIO_SOURCEMAP=hidden -t "openmotion-api:${IMAGE_TAG}" .
+docker buildx build -f deploy/Dockerfile --target studio-sourcemaps --build-arg STUDIO_SOURCEMAP=hidden --output type=local,dest=./dist/studio-sourcemaps .
 
-## Known limits
+sentry-cli sourcemaps upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT" --release "$SENTRY_RELEASE" --url-prefix "~/editor-assets" ./dist/studio-sourcemaps
+rm -rf ./dist/studio-sourcemaps
+```
 
-- The web browser tab inside the Studio starts Chromium with its sandbox, which
-  is not available to an unprivileged container. Video preview and export are
-  not affected.
-- Linux is not a pinned native runtime target; the image uses Debian's Chromium
-  and FFmpeg instead of the versions in `scripts/runtime-lock.json`.
+See the full configuration, privacy, metrics, and troubleshooting guide in [`docs/sentry-observability.md`](../docs/sentry-observability.md).
+
+## Kubernetes + KEDA Deployment (`deploy/k8s/`)
+
+Production manifests live under [`deploy/k8s/`](k8s/kustomization.yaml) and target Kubernetes with an Ingress controller (such as NGINX) and **KEDA v2** installed.
+
+### 1. Provision Secrets & Config
+
+1. Review [`deploy/k8s/configmap.yaml`](k8s/configmap.yaml) and update `APP_PUBLIC_ORIGIN`, `PREVIEW_PUBLIC_ORIGIN`, `OIDC_ISSUER` (OpenMotion supports both asymmetric JWKS IdPs and HS256 ID tokens issued by OpenDesign / Vela Better Auth with `disableJwtPlugin: true`; pair with `MCP_OAUTH_MODE=proxy`), `OIDC_CLIENT_ID`, `OIDC_CALLBACK_URL`, `MCP_OAUTH_ISSUER`, `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, and `S3_BUCKET` for your cluster.
+2. Provision both `openmotion-secrets` and `openmotion-keda-redis-auth` in namespace `openmotion` using [`deploy/k8s/secret.example.yaml`](k8s/secret.example.yaml) as a template (via External Secrets Operator, Sealed Secrets, or SOPS — never commit live credentials).
+3. Ensure your S3/R2 bucket has the canonical CORS policy applied for both `APP_PUBLIC_ORIGIN` and `PREVIEW_PUBLIC_ORIGIN` (run `scripts/init-s3.ts` with both origin settings or configure the same `GET`/`HEAD`/`PUT` + `Range`/`ETag`/`Content-Range` rules via Terraform).
+4. Update `deploy/k8s/ingress.yaml` with both your main Studio domain (`motion.example.com`) and dedicated cookie-less preview domain (`preview.openmotion.example.com`) plus TLS certificate secret, and update `deploy/k8s/networkpolicy.yaml` if PostgreSQL, Redis, or S3 run outside the cluster (pin exact PrivateLink / VPC endpoint CIDRs rather than opening `0.0.0.0/0` to `worker-render`).
+
+### 2. Render & Apply Manifests
+
+Preview the rendered Kustomize output:
+
+```bash
+kubectl kustomize deploy/k8s
+```
+
+Apply the stack:
+
+```bash
+kubectl apply -k deploy/k8s
+```
+
+Wait for pre-release schema migration and template catalog sync jobs:
+
+```bash
+kubectl -n openmotion wait --for=condition=complete job/openmotion-db-migrate --timeout=300s
+kubectl -n openmotion wait --for=condition=complete job/openmotion-catalog-sync --timeout=900s
+```
+
+#### Cloud Motion templates
+
+Configure the API with `PRISM_CONTENT_ENV=dev` for test and `prod` for production. Set `PRISM_PUBLIC_ORIGIN` to the public dev delivery origin in the test environment. Production defaults to the public Prism origin. Disable the repository catalog import job for this mode. Contributor checkouts, hosted npm template catalogs and the main-branch publishing workflow retain their existing source selection.
+
+Every catalog read serves the current in-memory snapshot immediately. A new API instance initially serves only the packaged built-ins. Exact published-template requests return HTTP 503 until this instance has a validated directory. After that, an unknown ID returns HTTP 404. The first catalog read that includes Prism triggers a background load, and later reads see the published entries once the complete directory passes validation. At most once per five minutes of activity, one background request per API process checks the manifest. An unchanged publication keeps the current snapshot. A failed refresh keeps serving it and allows a retry after 30 seconds. Studio requests a page of localized cards. Covers and reference media use the published CDN URLs.
+
+The directory does not use PostgreSQL template rows. The four built-in templates are packaged with the API. On an editable template's first clone, its verified files are copied to content-addressed storage and the usual project/version rows are created. Existing projects keep the files they were created from. To roll back to the database-backed catalog, restore its import job and clear the API's Prism settings.
+
+### 3. Autoscaling & Graceful Export Drain
+
+- **`api`**: Managed by `HorizontalPodAutoscaler` (`api-hpa.yaml`, 2–20 replicas) and `PodDisruptionBudget` (`minAvailable: 1`). Ingress disables proxy buffering (`proxy-buffering: "off"`) with 3600s read/send timeouts for SSE (`/api/events`, `/api/render/:id/progress`) and Streamable HTTP `/mcp`.
+- **`worker-render`**: Managed by KEDA `ScaledObject` (`worker-render-keda.yaml`) targeting BullMQ `render-export` (`minReplicaCount: 1`, `maxReplicaCount: 30`, `cooldownPeriod: 300`, scale-down stabilization `300s`), paired with `terminationGracePeriodSeconds: 1800` so in-flight video renders complete and upload cleanly before pod termination.
+  - *Prioritized BullMQ v5 note:* Because `QueueService.enqueueRenderExport` assigns BullMQ priorities (`export_render=1`, `render_thumbnail=5`), waiting jobs enter the `bull:render-export:prioritized` ZSET before transitioning to `bull:render-export:active`. KEDA's native `redis` scaler evaluates Redis Lists (`wait`/`active`), so `minReplicaCount` defaults to `1` (warm pool) to prevent prioritized jobs from deadlocking at zero replicas; lower `minReplicaCount` to `0` only after pairing with a Prometheus/BullMQ ZSET queue-depth trigger.
+
+### 4. Security Hardening Summary
+
+- **Cookie-less Preview Subdomain Isolation:** Setting `PREVIEW_PUBLIC_ORIGIN` (e.g. `https://preview.openmotion.example.com`) alongside the dedicated Ingress rule isolates rendered project HTML/JS previews onto a separate cookie-less origin. The `api` Preview Host Isolation middleware ignores all session cookies, authenticates preview documents via short-lived project-scoped HS256 preview tokens (`POST /api/projects/:id/preview-token`) and serves their assets through scoped URLs with the same TTL. Studio renews the asset lease through the main origin. Configure the Ingress access log to redact the `pt` query value and the credential after `/preview/~assets/`. The API applies `Content-Security-Policy: frame-ancestors 'self' <APP_PUBLIC_ORIGIN>;`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`, and immediately rejects `/motion-api/*`, `/auth/*`, `/oauth/*`, `/mcp`, and any mutating HTTP method with `403 PREVIEW_ORIGIN_ISOLATED`.
+- **Pod Security `restricted`:** All pods run non-root (`runAsUser: 1000`), drop `ALL` Linux capabilities, enforce `seccompProfile: RuntimeDefault`, disable `automountServiceAccountToken`, and mount `readOnlyRootFilesystem: true` with bounded `emptyDir` scratch mounts (`/tmp`, plus memory-backed `/dev/shm` on `worker-render`).
+- **Least-Privilege Secret Projection:** `worker-render` NEVER receives `OPENDESIGN_*`, `OIDC_*`, `SESSION_SECRET`, or `DEV_PAT` environment variables, and strips all remaining infrastructure credentials (`DATABASE_URL`, `REDIS_URL`, `S3_*`) before spawning Chromium/FFmpeg.
+- **Strict Default-Deny `NetworkPolicy`:** `deploy/k8s/networkpolicy.yaml` denies all ingress and egress by default across `openmotion`. `worker-render` permits egress **only** to cluster DNS and PostgreSQL, Redis, and S3 endpoints — blocking all public internet egress, cloud metadata (`169.254.169.254/32`), and the Kubernetes API server.

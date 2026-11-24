@@ -22,8 +22,9 @@ function cardTarget(card: McpGalleryCard, title: string): McpCaseTarget | null {
   return null;
 }
 
-export function McpTemplateShowcase({ enabled, initialCategory, onCopy, openLibrary, onOpenTarget, onCategory, onPreview }: {
+export function McpTemplateShowcase({ enabled, brandKitEnabled, initialCategory, onCopy, openLibrary, onOpenTarget, onCategory, onPreview }: {
   enabled: boolean;
+  brandKitEnabled: boolean;
   initialCategory: McpGalleryCategory;
   onCopy: (id: string, prompt: string) => Promise<boolean>;
   openLibrary: (trigger: HTMLElement) => void;
@@ -32,7 +33,8 @@ export function McpTemplateShowcase({ enabled, initialCategory, onCopy, openLibr
   onPreview: (id: string) => void;
 }) {
   const { t, locale } = useI18n();
-  const [category, setCategory] = useState(initialCategory);
+  const [selectedCategory, setCategory] = useState(initialCategory);
+  const category = !brandKitEnabled && selectedCategory === 'brandkit' ? 'all' : selectedCategory;
   const [preview, setPreview] = useState<McpGalleryCard | null>(null);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
@@ -42,7 +44,9 @@ export function McpTemplateShowcase({ enabled, initialCategory, onCopy, openLibr
   const latestCopy = useRef(0);
   const copyPromptLabel = t(locale === 'en' ? 'Copy prompt' : 'Copy example prompt');
   const content = (card: McpGalleryCard) => localizedMcpExample(card.content, t);
-  const visible = mcpGalleryCards.filter(card => category === 'all' || card.category === category);
+  const availableCards = brandKitEnabled ? mcpGalleryCards : mcpGalleryCards.filter(card => card.kind !== 'brand-kit');
+  const categories = brandKitEnabled ? mcpGalleryCategories : mcpGalleryCategories.filter(([id]) => id !== 'brandkit');
+  const visible = availableCards.filter(card => category === 'all' || card.category === category);
   const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 
   const kindLabel = (kind: McpGalleryCard['kind']) => {
@@ -58,8 +62,8 @@ export function McpTemplateShowcase({ enabled, initialCategory, onCopy, openLibr
   }, [copiedCardId]);
 
   useEffect(() => {
-    if (!enabled) setPreview(null);
-  }, [enabled]);
+    if (!enabled || (!brandKitEnabled && preview?.kind === 'brand-kit')) setPreview(null);
+  }, [enabled, brandKitEnabled, preview]);
 
   async function copyPrompt(card: McpGalleryCard) {
     const attempt = ++latestCopy.current;
@@ -79,14 +83,14 @@ export function McpTemplateShowcase({ enabled, initialCategory, onCopy, openLibr
   return <section className="om-mcp-section om-mcp-demo-gallery" aria-labelledby="mcp-templates" id="gallery">
     <h2 id="mcp-templates">{t('Explore more scene templates')}</h2>
     <Tabs value={category} onValueChange={value => {
-      const selected = mcpGalleryCategories.find(([key]) => key === value)?.[0];
+      const selected = categories.find(([key]) => key === value)?.[0];
       if (!selected) return;
       setCategory(selected);
       onCategory(selected);
     }}>
       <TabsList className="om-mcp-category-tabs" aria-label={t('Template categories')}>
-        {mcpGalleryCategories.map(([value, label]) => <Tab key={value} value={value}>
-          {t(label)}{' '}{value === 'all' ? mcpGalleryCards.length : '(' + mcpGalleryCards.filter(card => card.category === value).length + ')'}
+        {categories.map(([value, label]) => <Tab key={value} value={value}>
+          {t(label)}{' '}{value === 'all' ? availableCards.length : '(' + availableCards.filter(card => card.category === value).length + ')'}
         </Tab>)}
       </TabsList>
       <TabPanel value={category}>

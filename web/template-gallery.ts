@@ -1,7 +1,7 @@
 import { iconSprite } from "../packages/design-system/index.js";
 import { isEditableTemplate, collectionNames, formatTemplateViews, socialPlatform, templateCategoryLabel } from '../shared/catalog';
 import type { GalleryTemplate, TemplatePage } from '../shared/catalog';
-import { hostNames, templatePrompt } from '../shared/integration';
+import { hostNames, supportsChatgptCloud, templatePrompt } from '../shared/integration';
 import type { IntegrationHost, IntegrationInfo } from '../shared/integration';
 import { TemplatePlayback } from './template-playback';
 import type { FragmentI18n } from './i18n';
@@ -32,7 +32,7 @@ export function mountTemplates(root: HTMLElement, options: {
   let active = false, enabled = false, category = 'featured', loaded = false, next: number | null = 0;
   let request: AbortController | undefined, sequence = 0, shown = 0, preview: GalleryTemplate | undefined;
   let previewCleanup = () => {}, rotation: ReturnType<typeof setInterval> | undefined, debounce: ReturnType<typeof setTimeout> | undefined;
-  const canCopy = () => !!options.info() && options.host() !== 'chatgpt';
+  const canCopy = () => { const info = options.info(); return Boolean(info) && (options.host() !== 'chatgpt' || supportsChatgptCloud(info)); };
   // Measuring must never break the gallery.
   const report: TemplateGalleryEvent = event => { try { options.onEvent?.(event); } catch { /* ignore */ } };
   let searching = false;

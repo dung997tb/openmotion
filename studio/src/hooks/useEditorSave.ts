@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { createTypingSave } from "../utils/typingSave";
 import { addStudioPendingEditFlushListener } from "../utils/studioPendingEdits";
 import { saveProjectFilesWithHistory } from "../utils/studioFileHistory";
 import {
@@ -17,9 +18,8 @@ interface RecordEditInput {
 }
 
 interface UseEditorSaveOptions {
-  editingPathRef: React.RefObject<string | undefined>;
+  editingFileRef: React.RefObject<{ path: string; content: string | null } | null>;
   projectIdRef: React.RefObject<string | null>;
-  readProjectFile: (path: string) => Promise<string>;
   writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
   recordEdit: (input: RecordEditInput) => Promise<void>;
   setRefreshKey: React.Dispatch<React.SetStateAction<number>>;
@@ -32,11 +32,20 @@ export interface EditorSaveCandidate {
   content: string;
 }
 
+// Keystrokes buffered behind an in-flight save share the last accepted source.
+type SourceSession = {
+  queue: ReturnType<typeof createTypingSave>;
+  baseline: string;
+  writing?: { submitted: string; accepted: string };
+  draft: EditorSaveCandidate | null;
+  failure?: StudioSaveDrainResult;
+};
+
 export type EditorSaveDrainResult = StudioSaveDrainResult;
 
 export interface EditorSaveHandle {
-  saveRafRef: React.MutableRefObject<number | null>;
   handleContentChange: (content: string) => void;
+  acknowledgeSource: (projectId: string, path: string, submitted: string, accepted: string) => void;
   /** Read by the external-reload reconciliation introduced in stack PR #2993. */
   getPendingCandidate: () => EditorSaveCandidate | null;
   /** Wired into the external-reload drain by stack PR #2993. */
@@ -46,23 +55,22 @@ export interface EditorSaveHandle {
 }
 
 export function useEditorSave({
-  editingPathRef,
+  editingFileRef,
   projectIdRef,
-  readProjectFile,
   writeProjectFile,
   recordEdit,
   setRefreshKey,
   showToast,
 }: UseEditorSaveOptions): EditorSaveHandle {
-  const saveRafRef = useRef<number | null>(null);
   const refreshRafRef = useRef<number | null>(null);
   // One error toast per burst of failures — every keystroke retries the save,
   // and error toasts persist until dismissed, so don't stack duplicates.
   const lastFailureToastAtRef = useRef<number | null>(null);
   const lastFailureReportRef = useRef<{ fingerprint: string; emittedAt: number } | null>(null);
-  const pendingCandidateRef = useRef<EditorSaveCandidate | null>(null);
-  const inFlightRef = useRef<Promise<EditorSaveDrainResult> | null>(null);
-  const inFlightCandidateRef = useRef<EditorSaveCandidate | null>(null);
+  const sessions = useRef(new Map<string, SourceSession>());
+  const projectId = projectIdRef.current;
+  const path = editingFileRef.current?.path;
+  const fileKey = JSON.stringify([projectId, path]);
 
   const reportFailure = useCallback(
     (path: string, error: unknown) => {
@@ -102,93 +110,84 @@ export function useEditorSave({
     [showToast],
   );
 
-  const persistCandidate = useCallback(
-    (candidate: EditorSaveCandidate): Promise<EditorSaveDrainResult> => {
-      const task = saveProjectFilesWithHistory({
-        projectId: candidate.projectId,
-        label: "Edit source",
-        coalesceKey: `source:${candidate.path}`,
-        files: { [candidate.path]: () => candidate.content },
-        readFile: readProjectFile,
-        writeFile: writeProjectFile,
-        recordEdit,
-      })
-        .then<EditorSaveDrainResult>(() => {
-          if (pendingCandidateRef.current === candidate) pendingCandidateRef.current = null;
-          lastFailureReportRef.current = null;
-          if (refreshRafRef.current != null) cancelAnimationFrame(refreshRafRef.current);
-          refreshRafRef.current = requestAnimationFrame(() => setRefreshKey((k) => k + 1));
-          return { status: "clean" };
-        })
-        .catch<EditorSaveDrainResult>((error: unknown) => {
-          reportFailure(candidate.path, error);
-          return error instanceof StudioFileConflictError
-            ? { status: "conflict", error }
-            : { status: "failed", error };
-        })
-        .finally(() => {
-          if (inFlightRef.current === task) {
-            inFlightRef.current = null;
-            inFlightCandidateRef.current = null;
-          }
+  const handleContentChange = useCallback((content: string) => {
+    const pid = projectIdRef.current;
+    const open = editingFileRef.current;
+    if (!pid || open?.content == null) return;
+    const key = JSON.stringify([pid, open.path]);
+    const session: SourceSession = sessions.current.get(key) ?? {
+      queue: createTypingSave(), baseline: open.content, draft: null,
+    };
+    sessions.current.set(key, session);
+    const candidate = { projectId: pid, path: open.path, content };
+    session.draft = candidate;
+    session.failure = undefined;
+    // The closure owns the original file, project writer, and accepted baseline.
+    session.queue.schedule(async () => {
+      session.writing = { submitted: content, accepted: content };
+      try {
+        await saveProjectFilesWithHistory({
+          projectId: pid, label: "Edit source", coalesceKey: `source:${open.path}`,
+          continuous: true,
+          files: { [open.path]: () => content },
+          readFile: async () => session.baseline,
+          writeFile: writeProjectFile,
+          onFileWritten: (_, submitted) => {
+            const write = session.writing;
+            session.baseline = write?.submitted === submitted ? write.accepted : submitted;
+          },
+          recordEdit,
         });
-      inFlightRef.current = task;
-      inFlightCandidateRef.current = candidate;
-      return task;
-    },
-    [readProjectFile, recordEdit, reportFailure, setRefreshKey, writeProjectFile],
-  );
+        session.failure = undefined;
+        if (sessions.current.get(key) === session && session.draft === candidate) sessions.current.delete(key);
+        lastFailureReportRef.current = null;
+        if (refreshRafRef.current != null) cancelAnimationFrame(refreshRafRef.current);
+        refreshRafRef.current = requestAnimationFrame(() => setRefreshKey(k => k + 1));
+      } catch (error) {
+        if (error instanceof StudioFileConflictError && error.syncLatest) {
+          session.queue.cancel();
+          if (sessions.current.get(key) === session) sessions.current.delete(key);
+          showToast(error.message, "error");
+          return;
+        }
+        reportFailure(open.path, error);
+        session.failure = error instanceof StudioFileConflictError
+          ? { status: "conflict", error } : { status: "failed", error };
+      } finally {
+        session.writing = undefined;
+      }
+    });
+  }, [editingFileRef, projectIdRef, recordEdit, reportFailure, setRefreshKey, showToast, writeProjectFile]);
 
-  const handleContentChange = useCallback(
-    (content: string) => {
-      const pid = projectIdRef.current;
-      if (!pid) return;
-      const path = editingPathRef.current;
-      if (!path) return;
-
-      const candidate = { projectId: pid, path, content };
-      pendingCandidateRef.current = candidate;
-
-      if (saveRafRef.current != null) cancelAnimationFrame(saveRafRef.current);
-      saveRafRef.current = requestAnimationFrame(() => {
-        saveRafRef.current = null;
-        void persistCandidate(candidate);
-      });
-    },
-    [editingPathRef, projectIdRef, persistCandidate],
-  );
+  const getPendingCandidate = useCallback(() =>
+    sessions.current.get(JSON.stringify([projectIdRef.current, editingFileRef.current?.path]))?.draft ?? null,
+  [projectIdRef, editingFileRef]);
 
   const flushPendingSave = useCallback(async (): Promise<EditorSaveDrainResult> => {
-    if (saveRafRef.current != null) {
-      cancelAnimationFrame(saveRafRef.current);
-      saveRafRef.current = null;
-    }
-    const candidate = pendingCandidateRef.current;
-    if (candidate && candidate === inFlightCandidateRef.current && inFlightRef.current) {
-      return inFlightRef.current;
-    }
-    if (candidate) {
-      return persistCandidate(candidate);
-    }
-    return (await inFlightRef.current) ?? { status: "clean" };
-  }, [persistCandidate]);
+    const session = sessions.current.get(JSON.stringify([projectIdRef.current, editingFileRef.current?.path]));
+    if (!session) return { status: "clean" };
+    if (session.failure && session.draft && !session.queue.busy()) handleContentChange(session.draft.content);
+    await session.queue.flush();
+    return session.failure ?? { status: "clean" };
+  }, [projectIdRef, editingFileRef, handleContentChange]);
 
   const discardPendingSave = useCallback(() => {
-    if (saveRafRef.current != null) cancelAnimationFrame(saveRafRef.current);
-    saveRafRef.current = null;
-    pendingCandidateRef.current = null;
-  }, []);
+    const key = JSON.stringify([projectIdRef.current, editingFileRef.current?.path]);
+    sessions.current.get(key)?.queue.cancel();
+    sessions.current.delete(key);
+  }, [projectIdRef, editingFileRef]);
+
+  useEffect(() => () => { void sessions.current.get(fileKey)?.queue.flush(); }, [fileKey]);
 
   useEffect(() => addStudioPendingEditFlushListener(() => {
-    if (!pendingCandidateRef.current && !inFlightRef.current) return;
+    if (!getPendingCandidate()) return;
     return flushPendingSave().then(result => { if (result.status !== 'clean') throw result.error; });
-  }), [flushPendingSave]);
+  }), [flushPendingSave, getPendingCandidate]);
 
-  return {
-    saveRafRef,
-    handleContentChange,
-    getPendingCandidate: () => pendingCandidateRef.current,
-    flushPendingSave,
-    discardPendingSave,
-  };
+  const acknowledgeSource = useCallback((pid: string, path: string, submitted: string, accepted: string) => {
+    const session = sessions.current.get(JSON.stringify([pid, path]));
+    if (session?.writing) session.writing = { submitted, accepted };
+  }, []);
+
+  return { handleContentChange, acknowledgeSource, getPendingCandidate, flushPendingSave, discardPendingSave };
 }

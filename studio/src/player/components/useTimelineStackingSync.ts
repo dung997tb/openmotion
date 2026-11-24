@@ -1,3 +1,4 @@
+import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { resolveCssStackingContextId } from "@hyperframes/core/runtime/stacking-context";
 import { useCallback, type RefObject } from "react";
 import type { TimelineElement } from "../store/playerStore";
@@ -62,7 +63,11 @@ export function useTimelineStackingSync({
   const readClipZIndex = useCallback(
     (el: TimelineElement, asTarget = false): number => {
       const node = resolveIframeElement(el);
-      if (!node) return Number.NaN;
+      if (!node) {
+        // The isolated preview records the computed rank in the clip manifest.
+        return getCachedCloudDisklessMode() && !zSyncPreviewIframeRef?.current?.contentDocument
+          ? el.zIndex ?? Number.NaN : Number.NaN;
+      }
       // An unranked wrapper and its independent children share a paint scope.
       // Assigning a neighbour rank to the wrapper would create a context that
       // traps those children. A deliberate move of the wrapper itself remains
@@ -72,7 +77,7 @@ export function useTimelineStackingSync({
         return Number.NaN;
       return readEffectiveZIndex(node);
     },
-    [resolveIframeElement],
+    [resolveIframeElement, zSyncPreviewIframeRef],
   );
 
   const applyStackingPatches = useCallback(

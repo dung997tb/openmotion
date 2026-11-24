@@ -10,6 +10,7 @@ import { IconButton } from 'open-design-ui/icon-button';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
+import { isDeferredP2Error } from '../motion/p2Deferred';
 import { designClient } from './designClient';
 import { ScaledPreviewThumb } from './ScaledPreviewThumb';
 import './design.css';
@@ -31,6 +32,7 @@ export function DesignProjectList({
   const [projects, setProjects] = useState<DesignProject[]>([]);
   const [editors, setEditors] = useState<DesignEditorApp[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deferred, setDeferred] = useState(false);
   const [query, setQuery] = useState('');
   const [filterScenario, setFilterScenario] = useState<string>(scenario ?? 'all');
   const [trashed, setTrashed] = useState(false);
@@ -43,9 +45,15 @@ export function DesignProjectList({
     setLoading(true);
     try {
       const res = await designClient.listProjects({ scenario, trashed });
+      setDeferred(false);
       if (Array.isArray(res?.projects)) setProjects(res.projects);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not load design projects'), 'error', 'feedback');
+      if (isDeferredP2Error(err)) {
+        setDeferred(true);
+        setProjects([]);
+      } else {
+        showToast(err instanceof Error ? err.message : t('Could not load design projects'), 'error', 'feedback');
+      }
     } finally {
       setLoading(false);
     }
@@ -62,7 +70,12 @@ export function DesignProjectList({
       const { project } = await designClient.createProject({ scenario: scen });
       if (onCreate) onCreate(project.id); else onOpen(project.id);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not create project'), 'error', 'feedback');
+      if (isDeferredP2Error(err)) {
+        setDeferred(true);
+        showToast(t('Design Studio is coming in Phase 2.'), 'info', 'feedback');
+      } else {
+        showToast(err instanceof Error ? err.message : t('Could not create project'), 'error', 'feedback');
+      }
     }
   };
 
@@ -77,7 +90,12 @@ export function DesignProjectList({
       await load();
       if (res.projects[0]) onOpen(res.projects[0].id);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : t('Could not import ZIP'), 'error', 'feedback');
+      if (isDeferredP2Error(err)) {
+        setDeferred(true);
+        showToast(t('Design Studio is coming in Phase 2.'), 'info', 'feedback');
+      } else {
+        showToast(err instanceof Error ? err.message : t('Could not import ZIP'), 'error', 'feedback');
+      }
     } finally {
       setImporting(false);
     }
@@ -191,16 +209,16 @@ export function DesignProjectList({
           </div>
 
           <div className="om-design-header-group">
-            <Button type="button" size="sm" variant={trashed ? 'secondary' : 'ghost'} icon={<RemixIcon name="delete-bin-line" size={14} />} onClick={() => setTrashed(v => !v)}>
+            <Button type="button" size="sm" variant={trashed ? 'secondary' : 'ghost'} disabled={deferred} icon={<RemixIcon name="delete-bin-line" size={14} />} onClick={() => setTrashed(v => !v)}>
               {trashed ? t('Viewing Trash') : t('Trash')}
             </Button>
             <input ref={fileInputRef} type="file" accept=".zip" style={{ display: 'none' }} onChange={handleImportFile} />
-            <Button type="button" size="sm" variant="secondary" loading={importing} icon={<RemixIcon name="upload-2-line" size={14} />} onClick={() => fileInputRef.current?.click()}>
+            <Button type="button" size="sm" variant="secondary" loading={importing} disabled={deferred} icon={<RemixIcon name="upload-2-line" size={14} />} onClick={() => fileInputRef.current?.click()}>
               {t('Import ZIP')}
             </Button>
-            <Popover.Root modal={false} open={newMenuOpen} onOpenChange={setNewMenuOpen}>
+            <Popover.Root modal={false} open={!deferred && newMenuOpen} onOpenChange={open => { if (!deferred) setNewMenuOpen(open); }}>
               <Popover.Trigger render={
-                <Button type="button" size="sm" variant="primary" icon={<RemixIcon name="add-line" size={14} />}>
+                <Button type="button" size="sm" variant="primary" disabled={deferred} icon={<RemixIcon name="add-line" size={14} />}>
                   {t('New project')}
                 </Button>
               } />
@@ -222,6 +240,14 @@ export function DesignProjectList({
 
       {loading ? (
         <div className="om-design-muted">{t('Loading design projects…')}</div>
+      ) : deferred ? (
+        <div className="om-design-item-card" role="status" data-deferred-p2="true" style={{ padding: 28, alignItems: 'center', textAlign: 'center', gap: 10 }}>
+          <RemixIcon name="time-line" size={24} />
+          <strong>{t('Design Studio is coming in Phase 2')}</strong>
+          <p className="om-design-muted" style={{ margin: 0, maxWidth: 460 }}>
+            {t('Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.')}
+          </p>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="om-design-item-card" style={{ padding: 28, alignItems: 'center', textAlign: 'center' }}>
           <p className="om-design-muted" style={{ margin: 0 }}>

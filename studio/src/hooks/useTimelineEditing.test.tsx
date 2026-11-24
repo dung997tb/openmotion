@@ -1,8 +1,12 @@
+import { applyLegacyClipMove } from "../../../packages/edit-core";
+import { applyTimelineCommand } from "../../../packages/edit-core/timeline-commands";
 // fallow-ignore-file code-duplication
 // @vitest-environment happy-dom
 
 import React, { act, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { useProjectFileWriter } from "./useProjectFileWriter";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { openComposition } from "@hyperframes/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { usePlayerStore, type TimelineElement } from "../player";
@@ -124,6 +128,7 @@ function renderTimelineEditingHook(input: {
   iframe: HTMLIFrameElement;
   onZIndexCommit: (entries: ZIndexEntry[]) => Promise<void>;
   projectId?: string | null;
+  useFileWriter?: boolean;
   writeProjectFile?: (path: string, content: string) => Promise<void>;
   recordEdit?: (input: {
     label: string;
@@ -168,12 +173,13 @@ function renderTimelineEditingHook(input: {
   function Harness() {
     const commitRef = useRef(input.onZIndexCommit);
     commitRef.current = input.onZIndexCommit;
+    const writer = useProjectFileWriter({ projectId: input.projectId ?? null });
     const hook = useTimelineEditing({
       projectId: input.projectId ?? null,
       activeCompPath: input.activeCompPath ?? "index.html",
       timelineElements: input.timelineElements,
       showToast: input.showToast ?? vi.fn(),
-      writeProjectFile: input.writeProjectFile ?? vi.fn(),
+      writeProjectFile: input.writeProjectFile ?? (input.useFileWriter ? writer.writeProjectFile : vi.fn()),
       recordEdit: input.recordEdit ?? vi.fn(),
       reloadPreview: input.reloadPreview ?? vi.fn(),
       previewIframeRef: { current: input.iframe },
@@ -500,6 +506,127 @@ describe("useTimelineEditing timeline z-index reorder", () => {
     expect(write).toHaveBeenCalled();
     expect(usePlayerStore.getState().elements[0]).toMatchObject({ start: updates.start, duration: updates.duration });
     hook.unmount();
+  });
+
+  it("preserves descendant tween offsets with either single-clip or batch move commands", async () => {
+    const source = ROOT_DURATION_FALLBACK_SOURCE.replace("</div>\n</div>",
+      '<span class="word"></span></div><script>const tl=gsap.timeline();tl.to(".word",{x:20},0.5);</script></div>');
+    const legacy = await applyLegacyClipMove(source, { kind: "moveClip", hfId: "hf-clip", start: 1 });
+    expect(legacy).toContain('tl.to(".word",{x:20},1.5)');
+    expect(legacy).toBe(applyTimelineCommand(source, {kind: "moveClips", changes: [{hfId: "hf-clip", start: 1}]}));
+  });
+
+  it("commits an older clip's cross-track drag and the canvas order in one write", async () => {
+    const source = '<div data-composition-id="s" data-duration="5"><div id="back" data-start="0" data-duration="2" data-track-index="2"></div><div id="front" data-start="0" data-duration="2" data-track-index="1"></div></div>';
+    const iframe = createPreviewIframe();
+    iframe.contentDocument!.body.innerHTML = source;
+    const clip = { ...timelineElement({ id: "back", track: 2, zIndex: 0 }), hfId: undefined, duration: 2 };
+    const other = { ...timelineElement({ id: "front", track: 1, zIndex: 1 }), hfId: undefined, duration: 2 };
+    usePlayerStore.setState({elements:[clip, other], duration:5});
+    const zWrite = vi.fn();
+    let fail = false;
+    const write = vi.fn(async (url: RequestInfo | URL, init: RequestInit) => {
+      expect(requestUrl(url)).toBe("/api/projects/p1/edits/index.html");
+      expect(new Headers(init.headers).get("if-match")).toMatch(/^"sha256:/);
+      return fail ? new Response("save failed", {status:400}) : jsonResponse({version:"saved"});
+    });
+    const history = vi.fn(async () => {});
+    setCachedCloudDisklessMode(true);
+    vi.stubGlobal("fetch", (url: RequestInfo | URL, init?:RequestInit) =>
+      init?.method === "POST" ? write(url, init) : Promise.resolve(jsonResponse({content:source})));
+    const hook = renderTimelineEditingHook({timelineElements:[clip,other], iframe, projectId:"p1", useFileWriter: true, recordEdit:history, onZIndexCommit:zWrite});
+    try {
+      await act(() => hook.move(clip, {start: 1, track: 0, stackingReorder:{contextKey:"root",placement:{type:"above",layerId:"front"},zIndexChanges:[{key:"back",zIndex:2}]}}));
+      expect(zWrite).not.toHaveBeenCalled();
+      expect(write).toHaveBeenCalledTimes(1);
+      const command = JSON.parse(String(write.mock.calls[0]![1].body));
+      const after = applyTimelineCommand(source, command);
+      expect(history).toHaveBeenCalledWith(expect.objectContaining({files: {"index.html": {before:source,after}}}));
+      const saved = new DOMParser().parseFromString(after, "text/html").querySelector("#back") as HTMLElement;
+      expect(saved.style.zIndex).toBe("2");
+      expect(saved.getAttribute("data-track-index")).toBe("0");
+      expect(saved.getAttribute("data-start")).toBe("1");
+      expect(history).toHaveBeenCalledTimes(1);
+      fail = true;
+      const live = iframe.contentDocument!.querySelector("#back") as HTMLElement;
+      live.style.zIndex = "2";
+      const failed = hook.move(clip, { start:1, track:0, stackingReorder: {contextKey:"root", placement:{type:"above",layerId:"front"}, zIndexChanges:[{key:"back", zIndex:7}]} });
+      expect(live.style.zIndex).toBe("7");
+      await expect(failed).rejects.toThrow();
+      expect(live.style.zIndex).toBe("2");
+      await expect(hook.move({...clip,domId:"preview-only", selector:undefined}, {start:2,track:0})).rejects.toThrow(/preview-only/);
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(history).toHaveBeenCalledTimes(1);
+    } finally {
+      hook.unmount();
+      setCachedCloudDisklessMode(null);
+    }
+  });
+
+  it("saves a trim as one cloud command and derives the media in-point in core", async () => {
+    setCachedCloudDisklessMode(true);
+    const source = '<div data-composition-id="scene" data-duration="4"><video id="clip" data-hf-id="hf-clip" src="a.mp4" data-start="0" data-duration="4" data-media-start="1" data-playback-rate="2"></video></div>';
+    const iframe = createPreviewIframe();
+    iframe.contentDocument!.body.innerHTML = source;
+    const clip = { ...timelineElement({ id: "clip", tag: "video", track: 0, zIndex: 0 }), duration: 4 };
+    usePlayerStore.setState({ elements: [clip], duration: 4 });
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => jsonResponse(init?.method === "POST" ? {version:"saved"} : { content:source }));
+    vi.stubGlobal("fetch", fetchMock);
+    const history = vi.fn(async () => {});
+    const hook = renderTimelineEditingHook({ timelineElements:[clip], iframe, projectId:"p1", useFileWriter:true, onZIndexCommit:vi.fn(), recordEdit:history });
+    try {
+      await act(() => hook.resize(clip, {start: 1, duration:3}));
+      const writes = fetchMock.mock.calls.filter(([,init]) => init?.method === "POST");
+      expect(writes).toHaveLength(1);
+      expect(JSON.parse(String(writes[0]![1]?.body))).toEqual({kind:"trimClips", changes:[{hfId:"hf-clip",start:1,duration:3}]});
+      expect(history).toHaveBeenCalledWith(expect.objectContaining({files: {"index.html":{before:source, after:expect.stringContaining('data-media-start="3"')}}}));
+    } finally {
+      hook.unmount();
+      setCachedCloudDisklessMode(null);
+    }
+  });
+
+  it("shows a cloud move before the save completes and sends just the move command", async () => {
+    setCachedCloudDisklessMode(true);
+    const source = ROOT_DURATION_FALLBACK_SOURCE;
+    const iframe = createPreviewIframe();
+    iframe.contentDocument!.body.innerHTML = source;
+    const clip = timelineElement({ id: "clip", track: 0, zIndex: 0 });
+    usePlayerStore.setState({ elements: [clip], duration: 4 });
+    const session = await openComposition(source);
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        expect(requestUrl(input)).toBe("/api/projects/p1/edits/index.html");
+        expect(JSON.parse(String(init.body))).toEqual({ kind: "moveClip", hfId: "hf-clip", start: 1.23 });
+        expect(new Headers(init.headers).get("if-match")).toMatch(/^"sha256:/);
+        expect(new Headers(init.headers).get("idempotency-key")).toBeTruthy();
+        await pending;
+        return jsonResponse({ version: "saved" });
+      }
+      return jsonResponse({ content: source });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const history = vi.fn(async () => {});
+    const hook = renderTimelineEditingHook({ timelineElements: [clip], iframe, projectId: "p1", useFileWriter: true,
+      onZIndexCommit: vi.fn(), recordEdit: history, sdkSession: session,
+      publishSdkSession: () => "rejected-active-target" });
+    try {
+      const saving = hook.move(clip, { start: 1.234, track: 0 });
+      expect(iframe.contentDocument!.getElementById("clip")!.getAttribute("data-start")).toBe("1.23");
+      await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+      expect(history).not.toHaveBeenCalled();
+      release();
+      await act(() => saving);
+      expect(history).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    } finally {
+      release();
+      hook.unmount();
+      session.dispose();
+      setCachedCloudDisklessMode(null);
+    }
   });
 
   it("extends root duration through the fallback path when an SDK-backed move passes the end", async () => {

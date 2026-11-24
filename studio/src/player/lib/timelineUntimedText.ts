@@ -1,5 +1,5 @@
 import type { TimelineElement } from "../store/playerStore";
-import { isTextBearingTag } from "../../components/editor/domEditingDom";
+import { isUntimedRootText } from "../../../../packages/edit-core/text-tag";
 import { createTimelineElementFromManifestClip } from "./timelineDOM";
 
 /** Root text without an explicit window is visible for the whole composition.
@@ -16,9 +16,7 @@ export function appendUntimedText(
   const extra: TimelineElement[] = [];
   let track = -root.querySelectorAll("[data-hf-id], [id]").length;
   for (const node of Array.from(root.querySelectorAll("[data-hf-id], [id]"))) {
-    if (node.hasAttribute("data-start") || node.parentElement?.closest("[data-start]") && node.parentElement.closest("[data-start]") !== root) continue;
-    if (node.closest("[data-composition-id]") !== root || !isTextBearingTag(node.localName)) continue;
-    if (!node.textContent?.trim() || !Array.from(node.children).every(child => child.localName === "br")) continue;
+    if (!isUntimedRootText(node, root)) continue;
     if (elements.some(el => el.hfId === node.getAttribute("data-hf-id") || el.domId && el.domId === node.id)) continue;
     const id = node.id || node.getAttribute("data-hf-id")!;
     const element = createTimelineElementFromManifestClip({

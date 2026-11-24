@@ -1,75 +1,105 @@
-import { parseNativeRuntimeStatus, type NativeRuntimeStatus } from '../../../../shared/native-runtime';
+import type { NativeRuntimeStatus } from '../../../../shared/native-runtime';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { studioApiFetch } from "../../utils/studioApiFetch";
 
+export interface RenderWorkerHealthEntry {
+  workerId: string;
+  ffmpeg: boolean;
+  ffprobe: boolean;
+  chromium: boolean;
+  concurrency: number;
+  activeJobs: number;
+  updatedAt: number;
+}
+
 /**
- * What the dev server knows about this machine's FFmpeg, as reported by
- * `GET /api/environment/ffmpeg`. Studio asks when the Render panel opens so a
- * missing encoder is a prompt with an install command, not a failed export an
- * hour into the work.
+ * Render worker FFmpeg/Chromium readiness as reported by `GET /api/environment/ffmpeg`
+ * (backed by Redis `om:workers:render:health` worker-render heartbeats in cloud mode).
  */
 export interface FfmpegStatus {
   ok: boolean;
+  available?: boolean;
+  mode?: string;
+  version?: string | null;
+  workers?: RenderWorkerHealthEntry[];
   runtime?: NativeRuntimeStatus;
   runtimeUnavailable?: boolean;
-  /** Short headline, e.g. "FFmpeg not found". Absent when ok. */
+  /** Short headline, e.g. "Render worker unavailable" or "FFmpeg not found". Absent when ok. */
   title?: string;
   /** Why it cannot run, in the server's words. Absent when ok. */
   detail?: string;
   /** Prose remediation, including the manual route where one exists. */
   hint?: string;
-  /** A single pasteable install command, when this platform has one. */
+  /** A single pasteable install command, when a local host has one. */
   command?: string;
 }
 
 /**
- * `null` means "no answer", NOT "missing". An unreachable or older dev server
- * is not evidence that FFmpeg is absent, and blocking Export on a failed probe
+ * `null` means "no answer", NOT "missing". An unreachable or older server
+ * is not evidence that rendering is absent, and blocking Export on a failed probe
  * would lock out people whose setup is fine. Unknown always fails open.
  */
 type ProbeResult = FfmpegStatus | null;
 
 /**
  * One line naming the problem and the fix, for the render row Studio writes
- * when it refuses to start. Prefers the command over the prose hint: the row
- * is narrow, and the command is the part the user acts on.
+ * when it refuses to start.
  */
 export function ffmpegInstallMessage(status: FfmpegStatus | null): string {
+  if (status?.mode === 'remote-worker') {
+    return status.detail ?? 'Render worker is currently offline. Export will resume once worker-render reports a healthy heartbeat.';
+  }
   const title = status?.title ?? "FFmpeg not found";
   const remedy = status?.command ?? status?.hint;
   return remedy ? `${title}. Install it with: ${remedy}` : `${title}. Install FFmpeg to export.`;
 }
 
-// The Render panel unmounts on every right-panel tab switch, and each miss
-// re-probes the filesystem server-side. Remember the answer for the tab's life.
 let cached: ProbeResult = null;
 
 const asText = (value: unknown): string | undefined =>
   typeof value === "string" && value ? value : undefined;
 
-/** Parses the endpoint's answer, or `null` for anything that is not one. */
+/** Parses `/api/environment/ffmpeg`, supporting both cloud worker-render heartbeat and legacy payloads. */
 function parseStatus(body: unknown): ProbeResult {
   if (typeof body !== "object" || body === null) return null;
-  const { ok, title, detail, hint, command } = body as Record<string, unknown>;
-  if (typeof ok !== "boolean") return null;
+  const record = body as Record<string, unknown>;
+  const ok = typeof record.ok === "boolean"
+    ? record.ok
+    : typeof record.available === "boolean"
+      ? record.available
+      : null;
+  if (ok === null) return null;
+  const mode = asText(record.mode);
+  const workers = Array.isArray(record.workers) ? (record.workers as RenderWorkerHealthEntry[]) : undefined;
+  const version = typeof record.version === "string" ? record.version : null;
+
+  if (!ok && mode === "remote-worker") {
+    return {
+      ok: false,
+      available: false,
+      mode,
+      version,
+      workers,
+      title: asText(record.title) ?? "Render worker unavailable",
+      detail: asText(record.detail) ?? "No healthy render worker heartbeat is currently reported.",
+      hint: asText(record.hint) ?? "Check that the worker-render container is running, then click Recheck.",
+    };
+  }
+
   return {
     ok,
-    title: asText(title),
-    detail: asText(detail),
-    hint: asText(hint),
-    command: asText(command),
+    available: ok,
+    mode,
+    version,
+    workers,
+    title: asText(record.title),
+    detail: asText(record.detail),
+    hint: asText(record.hint),
+    command: asText(record.command),
   };
 }
 
 async function probe(): Promise<ProbeResult> {
-  try {
-    const native = await fetch('/motion-api/runtime', { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
-    const runtime = native.ok ? parseNativeRuntimeStatus(await native.json()) : null;
-    if (runtime?.managed) return { ok: runtime.capabilities.export, runtime };
-    if (cached?.runtime) return { ...cached, ok: false, runtimeUnavailable: true };
-  } catch {
-    if (cached?.runtime) return { ...cached, ok: false, runtimeUnavailable: true };
-  }
   try {
     const res = await studioApiFetch("/api/environment/ffmpeg");
     return res.ok ? parseStatus(await res.json()) : null;
@@ -95,18 +125,9 @@ export function useFfmpegStatus(): {
     };
   }, []);
 
-  const run = useCallback(async (retry = false) => {
+  const run = useCallback(async () => {
     const request = ++latestProbe.current;
     setChecking(true);
-    if (retry && cached?.runtime) {
-      try {
-        const response = await fetch('/motion-api/runtime', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retry: true }), signal: AbortSignal.timeout(15_000) });
-        if (!response.ok) throw new Error('Preparation retry was refused');
-      } catch {
-        if (mounted.current && request === latestProbe.current) { setStatus({ ...cached, ok: false, runtimeUnavailable: true }); setChecking(false); }
-        return;
-      }
-    }
     const next = await probe();
     if (request !== latestProbe.current) return;
     cached = next;
@@ -116,20 +137,16 @@ export function useFfmpegStatus(): {
   }, []);
 
   useEffect(() => {
-    let stopped = false, timer: ReturnType<typeof setTimeout>;
-    const tick = async () => {
-      await run();
-      if (!stopped && cached?.runtime && (!cached.ok || cached.runtimeUnavailable)) timer = setTimeout(tick, 1500);
+    void run();
+    const onVisibilityChange = () => {
+      if (!document.hidden) void run();
     };
-    void tick();
-    const refresh = () => { clearTimeout(timer); void tick(); };
-    window.addEventListener('focus', refresh);
-    return () => { stopped = true; clearTimeout(timer); window.removeEventListener('focus', refresh); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [run]);
 
-  // Retry only failed managed components; legacy installations keep their probe.
-  const recheck = useCallback((retry = true) => {
-    void run(retry);
+  const recheck = useCallback((_retry = true) => {
+    void run();
   }, [run]);
 
   return { status, checking, recheck };

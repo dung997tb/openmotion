@@ -23,6 +23,20 @@ export function mediaKey(sha256: string, name: string): string {
   return mediaPrefix + sha256 + '.' + extension;
 }
 
+export function cmsUrl(value: unknown): string {
+  assert(typeof value === 'string', 'Missing CMS URL');
+  const url = new URL(value);
+  assert(
+    url.origin === 'https://r.open-design.ai' &&
+      /^\/files\/[a-f0-9]{64}$/.test(url.pathname) &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash,
+    'Require a public, content-addressed CMS file URL',
+  );
+  return value;
+}
 export function validateMediaLock(file: MediaLock): void {
   mediaPath(file.path);
   assert(Number.isSafeInteger(file.bytes) && file.bytes > 0 && file.bytes <= maxMediaBytes, 'Media exceeds 50 MiB or has invalid size');

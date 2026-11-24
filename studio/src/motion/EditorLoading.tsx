@@ -5,7 +5,7 @@ export type EditorLoadingLayout = { header: number; timeline: number; left: numb
 
 /** Keep only measured chrome geometry; never retain another project's DOM or data. */
 export function readEditorLoadingLayout(surface: HTMLElement | null): EditorLoadingLayout | null {
-  const editor = surface?.querySelector('[data-editor-initializing="false"]');
+  const editor = surface?.querySelector('.motion-project-editor');
   if (!surface || !editor) return null;
   const header = editor.querySelector('.motion-studio-header')?.getBoundingClientRect();
   const timeline = editor.querySelector('[data-studio-timeline]')?.getBoundingClientRect();

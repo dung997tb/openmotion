@@ -161,6 +161,12 @@ it('reports the MCP page entry, client and setup choices, and each copy result w
   await act(async () => button('All 30+ templates').click());
   expect(openLibrary).toHaveBeenCalled();
   expect(of('ui_click').at(-1)?.properties).toMatchObject({ area: 'mcp_templates', element: 'open_library' });
+  await act(async () => (document.querySelector('#dev-drawer > button') as HTMLButtonElement).click());
+  await act(async () => roleTab('Costs & local permissions').click());
+  const manageProviders = [...document.querySelectorAll<HTMLButtonElement>('#dev-drawer button')].find(item => item.textContent === 'Manage providers')!;
+  await act(async () => manageProviders.click());
+  expect(openProviders).toHaveBeenCalledOnce();
+  expect(of('ui_click').at(-1)?.properties).toMatchObject({ area: 'mcp_resources', element: 'manage_providers' });
   expectAdmitted();
   expect(JSON.stringify(sent)).not.toMatch(/PRIVATE_DATA_DIR|mcp\.ts/);
 });

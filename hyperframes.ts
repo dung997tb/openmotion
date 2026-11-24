@@ -4,6 +4,13 @@ import { access, copyFile, mkdir, open, readFile, rename, rm, writeFile } from '
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { validateExportExpectation } from './shared/export-spec.ts';
+import {
+  assertRenderSubprocessEnvClean,
+  injectStudioRenderParityIntoHydratedDir,
+  injectStudioRenderParityScripts,
+} from './src/workers/render-env.ts';
+
+export { injectStudioRenderParityIntoHydratedDir, injectStudioRenderParityScripts };
 
 export const HYPERFRAMES_VERSION = '0.9.7';
 // Omitting registry uses the pinned CLI's official catalog, just like a native project.
@@ -34,6 +41,194 @@ export function runtimeEnv(): NodeJS.ProcessEnv {
 }
 
 export type CommandResult = { code: number; stdout: string; stderr: string };
+
+export interface IsolatedExecuteOptions {
+  readonly env: Record<string, string>;
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+  readonly onStdoutLine?: (line: string) => void;
+  readonly onStderrLine?: (line: string) => void;
+}
+
+/**
+ * Execute a subprocess inside `worker-render` using ONLY the strictly allowlisted `options.env`.
+ * Unlike `execute()`, this NEVER inherits `process.env` or `runtimeEnv()` and enforces
+ * `assertRenderSubprocessEnvClean(options.env)` before spawning Chromium / Hyperframes.
+ */
+export function executeIsolated(
+  command: string,
+  args: string[],
+  cwd: string,
+  options: IsolatedExecuteOptions,
+): Promise<CommandResult> {
+  assertRenderSubprocessEnvClean(options.env);
+  const timeout = options.timeoutMs ?? 25 * 60_000;
+  const signal = options.signal;
+
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('COMMAND_CANCELLED'));
+      return;
+    }
+    const child = spawn(command, args, {
+      cwd,
+      env: { ...options.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+    });
+    commands.add(child);
+    let stdout = '';
+    let stderr = '';
+    let stdoutLineBuf = '';
+    let stderrLineBuf = '';
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      terminate(child);
+    }, timeout);
+    const killer = setTimeout(() => terminate(child, 'SIGKILL'), timeout + 5000);
+    let cancellationKiller: ReturnType<typeof setTimeout> | undefined;
+    const cancel = () => {
+      terminate(child);
+      cancellationKiller = setTimeout(() => terminate(child, 'SIGKILL'), 5000);
+    };
+    signal?.addEventListener('abort', cancel, { once: true });
+
+    const flushLines = (chunk: string, buf: string, callback?: (line: string) => void): string => {
+      if (!callback) return '';
+      let combined = buf + chunk;
+      let idx = combined.indexOf('\n');
+      while (idx >= 0) {
+        const line = combined.slice(0, idx).replace(/\r$/, '');
+        combined = combined.slice(idx + 1);
+        try {
+          callback(line);
+        } catch {
+          // Never allow progress listener error to crash subprocess lifecycle handling.
+        }
+        idx = combined.indexOf('\n');
+      }
+      return combined;
+    };
+
+    const cleanup = () => {
+      commands.delete(child);
+      clearTimeout(timer);
+      clearTimeout(killer);
+      clearTimeout(cancellationKiller);
+      signal?.removeEventListener('abort', cancel);
+    };
+
+    child.stdout.on('data', (data) => {
+      const text = String(data);
+      stdout = (stdout + text).slice(-4 * 1024 * 1024);
+      stdoutLineBuf = flushLines(text, stdoutLineBuf, options.onStdoutLine);
+    });
+    child.stderr.on('data', (data) => {
+      const text = String(data);
+      stderr = (stderr + text).slice(-64 * 1024);
+      stderrLineBuf = flushLines(text, stderrLineBuf, options.onStderrLine);
+    });
+    child.on('error', (error) => {
+      cleanup();
+      reject(error);
+    });
+    child.on('close', (code) => {
+      if (stdoutLineBuf.length > 0 && options.onStdoutLine) {
+        try {
+          options.onStdoutLine(stdoutLineBuf.replace(/\r$/, ''));
+        } catch {
+          // Ignore trailing callback error.
+        }
+      }
+      if (stderrLineBuf.length > 0 && options.onStderrLine) {
+        try {
+          options.onStderrLine(stderrLineBuf.replace(/\r$/, ''));
+        } catch {
+          // Ignore trailing callback error.
+        }
+      }
+      cleanup();
+      if (signal?.aborted) {
+        reject(new Error('COMMAND_CANCELLED'));
+      } else if (timedOut) {
+        reject(Object.assign(new Error('Hyperframes render timed out: ' + stderr.slice(-1000)), { code: 'COMMAND_TIMEOUT' }));
+      } else {
+        resolve({ code: code ?? 1, stdout, stderr });
+      }
+    });
+  });
+}
+
+export async function runHyperframesIsolated(
+  runtimeRoot: string,
+  directory: string,
+  args: string[],
+  options: IsolatedExecuteOptions,
+): Promise<CommandResult> {
+  return executeIsolated(process.execPath, [cliPath(runtimeRoot), ...args], directory, options);
+}
+
+export async function inspectProjectIsolated(
+  runtimeRoot: string,
+  directory: string,
+  view: 'info' | 'lint' | 'timeline',
+  options: IsolatedExecuteOptions,
+): Promise<{ exitCode: number; result: unknown }> {
+  const result =
+    view === 'lint'
+      ? await executeIsolated(
+          process.execPath,
+          [path.join(pluginRoot, 'scripts/lint-project.mjs'), runtimeRoot, directory],
+          directory,
+          options,
+        )
+      : await runHyperframesIsolated(runtimeRoot, directory, [view, '.', '--json'], options);
+  try {
+    return { exitCode: result.code, result: JSON.parse(result.stdout) };
+  } catch {
+    throw new Error(`Hyperframes ${view} failed: ${(result.stderr || result.stdout).slice(-1500)}`);
+  }
+}
+
+export async function snapshotExportExpectationIsolated(
+  runtimeRoot: string,
+  directory: string,
+  compositionPath: string,
+  options: IsolatedExecuteOptions,
+) {
+  const info =
+    compositionPath === 'index.html'
+      ? await inspectProjectIsolated(runtimeRoot, directory, 'info', options)
+      : null;
+  if (info?.exitCode) throw new Error('Failed to inspect export snapshot: ' + JSON.stringify(info.result));
+  const infoResult = (info?.result ?? {}) as Record<string, unknown>;
+  const coreRoot = path.join(runtimeRoot, 'node_modules/@hyperframes/core');
+  const core = JSON.parse(await readFile(path.join(coreRoot, 'package.json'), 'utf8'));
+  const [{ parseHTMLContent }, { parseFps, fpsToNumber }] = await Promise.all([
+    import(pathToFileURL(path.join(coreRoot, core.exports['./compiler'].import)).href),
+    import(pathToFileURL(path.join(coreRoot, core.exports['.'].import)).href),
+  ]);
+  const document = parseHTMLContent(await readFile(path.join(directory, compositionPath), 'utf8'));
+  const attribute = (element: Element, name: string) =>
+    Array.from(element.attributes).find((item) => item.name.toLowerCase() === name)?.value;
+  const compositions = Array.from(document.querySelectorAll('*')) as Element[];
+  const roots = compositions.filter((element) => attribute(element, 'data-composition-id') !== undefined);
+  const root = roots.find((element) => attribute(element, 'data-root') === 'true') || roots[0];
+  if (!root) throw new Error('Export snapshot is missing a root composition');
+  const fps = parseFps(attribute(root, 'data-fps')?.trim() || '30');
+  if (!fps.ok) throw new Error('Export snapshot has invalid fps: ' + fps.reason);
+  return validateExportExpectation({
+    width: Number(infoResult.width ?? attribute(root, 'data-width')),
+    height: Number(infoResult.height ?? attribute(root, 'data-height')),
+    duration: Number(infoResult.duration ?? attribute(root, 'data-duration')),
+    fps: fpsToNumber(fps.value),
+    audio: 'optional',
+  });
+}
+
 export function execute(command: string, args: string[], cwd: string, timeout = 120_000, environment: NodeJS.ProcessEnv = {}, signal?: AbortSignal): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error('COMMAND_CANCELLED')); return; }
@@ -70,8 +265,7 @@ async function installed(root: string) {
 
 // Packaged plugins have no node_modules. Install the locked runtime in the writable
 // data directory; never alter the plugin cache or the user's global npm packages.
-export async function ensureRuntime(dataDirectory: string, prepareNative = true): Promise<string> {
-  if (prepareNative) await (await import('./scripts/npm-runtime.mjs')).ensureNativeRuntime(pluginRoot);
+export async function ensureRuntime(dataDirectory: string, _prepareNative = true): Promise<string> {
   if (await installed(pluginRoot)) return pluginRoot;
   const lockfile = await readFile(path.join(pluginRoot, 'package-lock.json'));
   const { createHash } = await import('node:crypto');
@@ -192,7 +386,7 @@ export async function startStudio(runtimeRoot: string, projectDirectory: string,
       const fail = (error: Error) => { clearTimeout(timer); reject(error); };
       child.once('error', fail);
       child.once('exit', code => fail(new Error(`Hyperframes Studio 已退出 (${code})，请查看 studio.log`)));
-      child.stdout.on('data', data => {
+      child.stdout?.on('data', data => {
         buffer += data;
         let newline;
         while ((newline = buffer.indexOf('\n')) >= 0) {

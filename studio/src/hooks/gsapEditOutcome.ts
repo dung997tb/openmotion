@@ -1,3 +1,5 @@
+import type { PlayheadEditRefusal } from "../../../packages/edit-core/playhead-edit";
+export type { PlayheadEditRefusal } from "../../../packages/edit-core/playhead-edit";
 import { editabilityForProvenance, type GsapAnimation } from "@hyperframes/core/gsap-parser";
 
 export type GsapEditBlockReason =
@@ -30,20 +32,6 @@ export type GsapEditBlockDetail =
   | PlayheadEditRefusal;
 
 /** Why an edit at the playhead could not be written as keyframes of the file's tween. */
-export type PlayheadEditRefusal =
-  | "eased-keyframes"
-  | "simple-array-keyframes"
-  | "array-step-delay"
-  | "array-step-callback"
-  | "array-step-config"
-  | "array-step-computed"
-  | "array-step-relative"
-  | "array-step-random"
-  | "unknown-ease"
-  | "implicit-end-unknown"
-  | "not-a-tween"
-  | "no-timing"
-  | "shared-tween";
 
 export type GsapEditOutcome =
   | {

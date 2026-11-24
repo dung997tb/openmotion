@@ -736,6 +736,7 @@
   "Code": "Код",
   "Catalog": "Библиотека компонентов",
   "Preview": "Предпросмотр",
+  "Preview builders are busy. Try again shortly.": "Сервис предпросмотра занят. Попробуйте ещё раз чуть позже.",
   "Timeline": "Таймлайн",
   "Design": "Дизайн",
   "Layers": "Слои",

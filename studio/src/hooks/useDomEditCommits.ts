@@ -1,3 +1,6 @@
+import { submitIsolatedCanvasEdit } from "./submitIsolatedCanvasEdit";
+import type { SdkSessionHandle } from "./useSdkSession";
+import { cloudHistoryForWrite } from "../utils/studioFileHistory";
 import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
@@ -12,6 +15,7 @@ import type { PatchOperation } from "../utils/sourcePatcher";
 import { DomEditPersistUnsafeValueError } from "./domEditPersistFailure";
 import { useDomEditPersist, type RecordEditInput } from "./useDomEditPersist";
 import { useDomEditPositionPatchCommit } from "./useDomEditPositionPatchCommit";
+import { inlineTextBatches } from "../components/editor/isolatedInlineTextPatch";
 import { useDomEditTextCommits } from "./useDomEditTextCommits";
 import { useDomGeometryCommits } from "./useDomGeometryCommits";
 import { useElementLifecycleOps } from "./useElementLifecycleOps";
@@ -20,6 +24,7 @@ import {
   batchesAreInlineStyleOnly,
   formatUnsafeFieldList,
   patchElementBatches,
+  isolatedCanvasCommands,
 } from "./useDomEditCommitsHelpers";
 import type { CutoverResult } from "../utils/sdkCutover";
 import { serializeStudioFileMutations } from "../utils/studioFileMutationCoordinator";
@@ -37,7 +42,7 @@ export interface UseDomEditCommitsParams {
   importedFontAssetsRef: React.MutableRefObject<ImportedFontAsset[]>;
   projectId: string | null;
   projectIdRef: React.MutableRefObject<string | null>;
-  reloadPreview: () => void;
+  reloadPreview: (changedPaths?: string | readonly string[]) => void;
 
   // From useDomSelection
   domEditSelection: DomEditSelection | null;
@@ -54,7 +59,7 @@ export interface UseDomEditCommitsParams {
   /** Resync the in-memory SDK session after a SERVER-side write (NOT the SDK
    * path, whose session is already current) so a later SDK edit doesn't
    * serialize the pre-write doc and revert the server's change. */
-  forceReloadSdkSession?: () => void;
+  forceReloadSdkSession?: SdkSessionHandle["forceReload"];
   /** Stage 7 Step 3c: called before the server-side patch path. */
   onTrySdkPersist?: (
     selection: DomEditSelection,
@@ -165,11 +170,22 @@ export function useDomEditCommits({
 
           const sourceFiles = batches.map((batch) => batch.sourceFile);
           // The server patch and its history entry hold every touched file's queue.
-          const { allMatched, changed } = await serializeStudioFileMutations(
+          const { allMatched, changedPaths, reconcileFromServer, previewApplied, confirmedCanvasVersion, savedVersions } = await serializeStudioFileMutations(
             writeProjectFile,
             sourceFiles,
             async () => {
-              const atomicResult = await patchElementBatches(pid, batches);
+              const history = cloudHistoryForWrite(writeProjectFile, options);
+              const intent = history && isolatedCanvasCommands(batches);
+              if (intent) {
+                const result = await submitIsolatedCanvasEdit(pid, intent.commands, intent.versions, history, previewIframeRef, options.coalesceKey);
+                const changed = result.changedPaths.length > 0;
+                if (changed) await editHistory.recordEdit({ ...options, files: {} });
+                const path = batches[0]!.sourceFile;
+                const confirmedCanvasVersion = !result.divergent.length && (result.previewApplied || !changed)
+                  ? result.versions[path] : undefined;
+                return { allMatched: true, changedPaths: result.changedPaths, reconcileFromServer: result.divergent.length > 0, previewApplied: result.previewApplied, confirmedCanvasVersion, savedVersions: result.versions };
+              }
+              const atomicResult = await patchElementBatches(pid, batches, history);
               const files = Object.fromEntries(
                 atomicResult.files
                   .filter((result) => result.changed)
@@ -203,11 +219,14 @@ export function useDomEditCommits({
               return {
                 allMatched:
                   atomicResult.durable && atomicResult.files.every((result) => result.allMatched),
-                changed: anyChanged,
+                changedPaths: Object.keys(files),
+                reconcileFromServer: false, previewApplied: false, confirmedCanvasVersion: undefined, savedVersions: undefined,
               };
             },
           );
-          if (changed) forceReloadSdkSession?.();
+          const changed = changedPaths.length > 0;
+          if (reconcileFromServer) return { durable: true, allMatched, changed };
+          if (changed) forceReloadSdkSession?.(savedVersions ? { projectId: pid, versions: savedVersions } : undefined);
           const durable = allMatched;
           // A z-only reorder already applied its inline styles to the live iframe
           // DOM (and the store) synchronously, so remounting the iframe here only
@@ -217,8 +236,9 @@ export function useDomEditCommits({
           // doesn't hold — reload so the preview reconverges.
           const skipSafe =
             options.skipReload === true && batchesAreInlineStyleOnly(batches) && durable;
-          if (!durable || (changed && !skipSafe)) reloadPreview();
-          return { durable, allMatched, changed };
+          if (!durable) reloadPreview();
+          else if (changed && !skipSafe && !previewApplied) reloadPreview(changedPaths);
+          return { durable, allMatched, changed, ...(confirmedCanvasVersion && { confirmedCanvasVersion }) };
         },
       ).catch((error) => {
         if (error instanceof AtomicElementPatchConvergenceError) reloadPreview();
@@ -242,6 +262,7 @@ export function useDomEditCommits({
     [
       editHistory,
       forceReloadSdkSession,
+      previewIframeRef,
       projectIdRef,
       queueDomEditSave,
       reloadPreview,
@@ -249,6 +270,19 @@ export function useDomEditCommits({
       writeProjectFile,
     ],
   );
+
+  const persistBoundText = useCallback(async (selection: DomEditSelection, value: string, typingKey?: string) => {
+    const project = projectIdRef.current;
+    if (!project || !selection.isolatedTarget?.binding) throw new Error("Missing bound text target");
+    const plain = document.createElement("span");
+    plain.textContent = value;
+    const batches = await inlineTextBatches(project, selection.isolatedTarget, plain.innerHTML, value);
+    if (projectIdRef.current !== project) throw new Error("Active project changed before the edit could be saved");
+    const result = await commitDomEditPatchBatches(batches, {
+      label: "Edit text", coalesceKey: typingKey ?? "bound-text:" + selection.selector, continuous: Boolean(typingKey),
+    });
+    if (!result.durable) throw new Error("Bound text was not saved");
+  }, [commitDomEditPatchBatches, projectIdRef]);
 
   // ── Text & style commits (delegated to useDomEditTextCommits) ──
 
@@ -277,6 +311,7 @@ export function useDomEditCommits({
     refreshDomEditSelectionFromPreview,
     buildDomSelectionFromTarget,
     persistDomEditOperations,
+    persistBoundText,
     resolveImportedFontAsset,
     showToast,
   });
@@ -319,6 +354,7 @@ export function useDomEditCommits({
   });
 
   return {
+    commitDomEditPatchBatches,
     resolveImportedFontAsset,
     handleDomStyleCommit,
     handleDomStyleCommitForSelection,

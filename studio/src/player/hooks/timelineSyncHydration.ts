@@ -29,6 +29,7 @@ import {
   autoHealMissingCompositionIds,
   normalizePreviewViewport,
 } from "../lib/timelineIframeHelpers";
+import { createPreviewAdapter } from "../lib/previewAdapter";
 import { inspectStudioRuntimeMessage } from "../lib/runtimeProtocol";
 
 /** Reject non-finite, non-positive, and absurdly large (loop-inflated) values. */
@@ -396,6 +397,7 @@ export function isPreviewReadinessMessage(
 ): boolean {
   if (!isFromPreviewFrame(e, iframe)) return false;
   const data = e.data;
+  if (iframe && data?.type === "timeline-state") return createPreviewAdapter({ iframe }).accepts(e);
   if (data?.source !== "hf-preview") return false;
   if (data?.type !== "state" && data?.type !== "timeline") return false;
   return inspectStudioRuntimeMessage(data).status !== "unsupported";
@@ -442,6 +444,15 @@ function applyRuntimeClipManifest(
 
 export function hydrateTimelineFromPreview(input: HydrateTimelineFromPreviewInput): void {
   const { iframe, adapter, syncTimelineElements } = input;
+  if (iframe) {
+    const preview = createPreviewAdapter({ iframe });
+    if (!preview.sameOrigin && preview.token) {
+      // A shadow frame's early manifest is intentionally ignored. Request its current rows
+      // after promoting that exact frame, when its authenticated response can be accepted.
+      preview.send("handshake", { timelineOnly: true });
+      return;
+    }
+  }
   try {
     const doc = safeContentDocument(iframe);
     const iframeWin = (iframe?.contentWindow as IframeWindow | null) ?? null;

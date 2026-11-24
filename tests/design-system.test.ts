@@ -7,7 +7,7 @@ import path from 'node:path';
 import { compile } from 'tailwindcss';
 import { designTokens, renderDesignTokens } from '../scripts/design-tokens.ts';
 import { publicDesignFiles, resolveDesignSystemFile } from '../packages/design-system/index.js';
-import { serveEditorFile } from '../editor-server.ts';
+import { serveStaticAsset } from '../src/entrypoints/api.ts';
 import { loadStylesheet, STYLES_DIR } from '../studio/src/styles/styleSources.ts';
 
 const packageRoot = new URL('../packages/design-system/', import.meta.url);
@@ -53,9 +53,15 @@ test('one token change reaches portable controls and compiled Studio/catalog uti
 
 test('public package assets and their transitive imports work through both HTTP prefixes', async t => {
   const server = createServer(async (req, res) => {
-    if (!await serveEditorFile(new URL(req.url!, 'http://localhost'), res)) {
+    const response = await serveStaticAsset(new URL(req.url!, 'http://localhost').pathname);
+    if (!response) {
       res.writeHead(404); res.end();
+      return;
     }
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, key) => { headers[key] = value; });
+    res.writeHead(response.status, headers);
+    res.end(Buffer.from(await response.arrayBuffer()));
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
@@ -73,9 +79,12 @@ test('public package assets and their transitive imports work through both HTTP 
       assert.equal((await fetch(target)).status, 200, `${file} -> ${target.pathname}`);
     }
   }
-  for (const file of ['tokens.css', 'fonts/AlbertSans-VariableFont_wght.ttf', 'brand/loading-mark.svg']) {
+  for (const file of ['tokens.css', 'fonts/AlbertSans-VariableFont_wght.woff2', 'fonts/IBMPlexMono-Regular.woff2', 'fonts/AlbertSans-VariableFont_wght.ttf', 'brand/loading-mark.svg']) {
     assert.deepEqual(Buffer.from(await (await fetch(`${origin}/web/design-system/${file}`)).arrayBuffer()), await readFile(new URL(file, packageRoot)));
   }
+  const fontsCss = await readFile(new URL('fonts.css', packageRoot), 'utf8');
+  assert.match(fontsCss, /AlbertSans-VariableFont_wght\.woff2.*format\('woff2'\)/);
+  assert.match(fontsCss, /IBMPlexMono-Regular\.woff2.*format\('woff2'\)/);
   assert.equal((await fetch(`${origin}/design-system`)).status, 200);
   for (const file of ['package.json', 'index.js', 'loading.ts', 'brand/BRANDKIT.md', '../package.json', '%2e%2e%2fpackage.json']) {
     assert.equal(resolveDesignSystemFile(`/design-system/${file}`), undefined, file);

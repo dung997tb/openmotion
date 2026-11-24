@@ -141,7 +141,7 @@ it('keeps project switching, templates, history actions and native export in the
   expect(container.querySelector('a[download]')).toBeNull();
   expect(container.querySelector('.om-app-brand [role=img]')?.getAttribute('aria-label')).toBe('OpenDesign');
   expect(container.querySelector('.om-app-brand .motion-brand-lockup--responsive')).not.toBeNull();
-  expect(document.querySelector('.motion-sidebar-utilities [aria-label="模型供应商"]')).not.toBeNull();
+  expect(document.querySelector('.motion-sidebar-utilities [aria-label="模型网关"]')).not.toBeNull();
   expect(document.querySelector('.motion-sidebar-utilities [aria-label="设置"]')).not.toBeNull();
   expect(container.querySelector('.om-app-rail [aria-label="编辑器"]')).toBeNull();
   expect(container.querySelector('.om-app-rail [aria-label="展开或收起项目列表"]')).toBeNull();

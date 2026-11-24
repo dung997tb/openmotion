@@ -17,7 +17,7 @@ test('README installation instructions and executable examples retain their full
   assert.notEqual(documentationContract('~~~sh\nnode a.mjs\n~~~'), documentationContract('~~~sh\nnode b.mjs\n~~~'));
 });
 
-test('only presentation documents skip Studio and packaging checks', () => {
+test('only presentation documents skip Studio and cloud checks', () => {
   assert.equal(classifyChanges(['README.md', 'docs/README.ja.md']).full, false);
   assert.equal(classifyChanges(['README.md']).maintainability, false);
   for (const file of [
@@ -98,25 +98,18 @@ const ciPath = new URL('../.github/workflows/ci.yml', import.meta.url);
 const jobBody = (ci, job) => ci.split(`  ${job}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
 const stepBody = (job, name) => job.split(`      - name: ${name}\n`)[1].split('      - name:')[0];
 
-test('parallel CI preserves common gates while separating distribution regressions', async () => {
+test('parallel CI preserves common gates and runs container-first cloud checks', async () => {
   const ci = await readFile(ciPath, 'utf8');
-  const distribution = jobBody(ci, 'distribution');
-  const distributionBrowser = jobBody(ci, 'distribution-browser');
-  for (const name of ['Scan tracked source without publication credentials', 'Validate manual package selection']) {
-    assert(!stepBody(distribution, name).includes('        if:'), `${name} must run for presentation docs too`);
-    assert(!distributionBrowser.includes(`- name: ${name}`), `${name} should run once in the package lane`);
+  const cloud = jobBody(ci, 'cloud');
+  assert(!stepBody(cloud, 'Scan tracked source without publication credentials').includes('        if:'),
+    'Source scan must run for presentation docs too');
+  for (const name of ['Install locked Motion dependencies', 'Build Studio and tracking bundles',
+    'Run cloud backend and integration test suite', 'Validate container and Compose definitions']) {
+    assert(stepBody(cloud, name).includes("steps.scope.outputs.full == 'true'"), name);
   }
-  for (const name of ['Download full-bundle media explicitly', 'Install rendering test tools',
-    'Install locked Motion dependencies', 'Build Studio and validate tracking',
-    'Validate standalone installation and packaging', 'Build phase-one ZIP and exercise all public tools',
-    'Validate two-round inline rendering',
-    'Build immutable standalone artifacts', 'Generate candidate installation guide', 'Retain candidate installation guide for review']) {
-    assert(stepBody(distribution, name).includes("steps.scope.outputs.full == 'true'"), name);
-  }
-  assert(distribution.indexOf('npm run build:studio') < distribution.indexOf('scripts/package.ts --mcp-profile=phase1'));
-  assert(!distribution.includes('npm run package:phase1'));
-  assert(!distribution.includes('npm run test:studio'));
-  assert(stepBody(distribution, 'Check presentation documentation').includes('ci-scope.mjs --check-docs'));
+  assert(stepBody(cloud, 'Run cloud backend and integration test suite').includes('tests/cloud/*.test.ts'));
+  assert(stepBody(cloud, 'Check presentation documentation').includes('ci-scope.mjs --check-docs'));
+
   const checks = jobBody(ci, 'checks');
   const studio = jobBody(ci, 'studio');
   const releaseControls = stepBody(checks, 'Test release controls without publication credentials');
@@ -124,7 +117,7 @@ test('parallel CI preserves common gates while separating distribution regressio
   for (const file of ['release-workflows.test.mjs', 'release-scan.test.mjs', 'registry-download.test.mjs', 'stable-release.test.mjs']) {
     assert(releaseControls.includes(file));
   }
-  for (const lane of [checks, studio]) {
+  for (const lane of [checks, studio, cloud]) {
     assert(!lane.includes('    needs:'), 'Independent lanes start without waiting for scope detection');
     assert(lane.includes('run: node .github/scripts/ci-scope.mjs'));
     assert(stepBody(lane, 'Install locked Motion dependencies').includes("steps.scope.outputs.full == 'true'"));
@@ -135,35 +128,17 @@ test('parallel CI preserves common gates while separating distribution regressio
   assert(sourceStep.includes('npm run design:test'));
   assert(sourceStep.includes('npm run typecheck:studio'));
   assert(sourceStep.includes('npm run typecheck:backend'));
-  assert(!distribution.includes('npm run typecheck:backend'));
-  assert(stepBody(distribution, 'Validate standalone installation and packaging').includes('tests/inline-video.test.ts'));
-  assert(stepBody(distribution, 'Validate two-round inline rendering').includes('tests/inline-video-runtime.test.ts'));
-  assert(!distribution.includes('npm run design:test'));
-  for (const name of ['Related template preview browser regression', 'Transcript workflow browser regression',
-    'Platform export Studio and MCP end-to-end regression', 'Brand Kit capture, package and showcase regression',
-    'Repository template runtime regression', 'Workspace, wrapper and session regression',
-    'Built-in template playback and export regression']) {
-    assert(stepBody(distributionBrowser, name).includes("steps.scope.outputs.full == 'true'"), name);
-    assert(!distribution.includes(`- name: ${name}`), `${name} must not remain serialized behind packaging`);
-  }
-  const browserBuild = stepBody(distributionBrowser, 'Build browser regression inputs');
-  assert(browserBuild.includes('npm run build:studio') && browserBuild.includes('npm run build:tracking'));
-  assert(!distributionBrowser.includes('    needs:'), 'Browser regression starts independently of packaging');
-  assert(stepBody(distribution, 'Build Studio and validate tracking').includes('node --test tests/design-system.test.ts'));
+  assert(sourceStep.includes('npm run typecheck:cloud'));
   assert(studio.includes('shard: [1, 2]'));
   assert(studio.includes('fail-fast: false'));
   const studioStep = stepBody(studio, 'Studio regression');
   assert(studioStep.includes("steps.scope.outputs.full == 'true'"));
   assert(studioStep.includes('npm run test:studio -- --maxWorkers=2 --shard=${{ matrix.shard }}/2'));
-  assert(!studio.includes('lfs pull'));
-  assert(!studio.includes('apt-get'));
-  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert(pkg.scripts['package:phase1'].startsWith('npm run build:studio &&'), 'The public packaging command still builds its input');
 });
 
 test('the existing standalone gate rejects failed, cancelled, skipped and missing lanes', async () => {
   const gate = jobBody(await readFile(ciPath, 'utf8'), 'standalone');
-  const jobs = ['template-library', 'maintainability', 'checks', 'platform-reliability', 'studio', 'distribution-browser', 'distribution'];
+  const jobs = ['template-library', 'maintainability', 'checks', 'studio', 'cloud'];
   assert(gate.includes('if: ${{ always() }}'));
   assert(gate.includes(`needs: [${jobs.join(', ')}]`));
   assert(gate.includes('VALIDATION_RESULTS: ${{ toJSON(needs) }}'));
@@ -191,24 +166,17 @@ test('the existing standalone gate rejects failed, cancelled, skipped and missin
   assert.equal(run({ ...manual, studio: { result: 'skipped' } }, true).status, 1);
 });
 
-// Root test files that no workflow names yet. The root `npm test` script is not invoked
-// by any lane, so a file only runs when a workflow names it. Freezing the current gap
-// keeps it visible: a new test file must either be scheduled or added here deliberately.
 const unscheduledSuites = [
-  'asset-routing.test.ts', 'assets-use.test.ts', 'brand-story-tracking.test.ts', 'browser.test.ts',
-  'codex-host-handoff.test.ts', 'cold-start.test.ts', 'final-video-delivery.test.ts', 'final-video-ui.test.ts',
-  'inline-video-preview.test.ts', 'inline-video-result.test.ts', 'install-public-skill.test.ts', 'integration.test.ts',
-  'legacy.test.ts', 'library-skill-catalog.test.ts', 'lint.test.ts', 'mcp-client.test.ts', 'mcp-config.test.ts', 'mcp.test.ts', 'media-save.test.ts',
-  'onboarding-recovery.test.ts', 'page-metadata.test.ts', 'phase1-runtime.test.ts', 'phase1-shared.test.ts',
-  'recreate-rendering.test.ts', 'registry-material-compat.test.ts', 'registry.test.ts', 'shared-editor.test.ts',
-  'source-native-runtime.test.ts', 'studio-history-availability.test.ts',
-  'template-metadata.test.ts', 'template-playback.test.ts', 'templates.test.ts', 'tracking-task-ledger.test.ts',
-  'verify-export.test.ts', 'video-compare.test.ts', 'vision-runtime-native.test.mjs', 'vision-runtime.test.mjs',
-  'welcome-template.test.ts', 'work-generation.test.ts', 'workflow-layering.test.ts',
+  'install-public-skill.test.ts',
+  'page-metadata.test.ts',
+  'registry-material-compat.test.ts',
+  'registry.test.ts',
+  'studio-history-availability.test.ts',
+  'template-playback.test.ts',
+  'vision-runtime.test.mjs',
+  'workflow-layering.test.ts',
 ];
 
-// Only shell bodies execute. A suite mentioned in a comment, a `paths:` filter or a
-// job name is documentation, not a scheduled run, so the scan reads `run:` bodies only.
 function runCommands(workflow) {
   const commands = [];
   let blockIndent = null;

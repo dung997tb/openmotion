@@ -9,10 +9,12 @@ import { linkedMembersOf } from "../player/components/audioClipLink";
 import { isLinkedSelectionOn } from "../utils/linkedClipPreferences";
 import { buildAtomicCutIntents, runAtomicCutTransaction } from "../utils/razorSplitTransaction";
 import type { RecordEditInput } from "./timelineEditingHelpers";
+import { projectLocalTimelineEdit } from "../player/lib/peerTimeline";
 import { useFreezeFrame } from "./useFreezeFrame";
 import { useMvpEditor } from "../motion/StudioHost";
 
 interface UseRazorSplitOptions {
+  previewIframeRef?: React.RefObject<HTMLIFrameElement | null>;
   projectId: string | null;
   // fallow-ignore-next-line code-duplication
   activeCompPath: string | null;
@@ -20,13 +22,14 @@ interface UseRazorSplitOptions {
   writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
   observeProjectFileVersion?: (path: string, version: string | null) => void;
   recordEdit: (input: RecordEditInput) => Promise<void>;
-  reloadPreview: () => void;
+  reloadPreview: (path?: string) => void;
   forceReloadSdkSession?: () => void;
   isRecordingRef?: React.RefObject<boolean>;
 }
 
 export function useRazorSplit({
   projectId,
+  previewIframeRef,
   activeCompPath,
   showToast,
   writeProjectFile,
@@ -40,7 +43,7 @@ export function useRazorSplit({
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
 
-  const synchronize = useCallback(() => {
+  const synchronize = useCallback((path?: string) => {
     let failure: unknown;
     try {
       forceReloadSdkSession?.();
@@ -48,7 +51,7 @@ export function useRazorSplit({
       failure = error;
     }
     try {
-      reloadPreview();
+      reloadPreview(path);
     } catch (error) {
       failure ??= error;
     }
@@ -73,7 +76,12 @@ export function useRazorSplit({
         writeProjectFile,
         recordEdit,
         observeProjectFileVersion,
-        synchronize,
+        projectPending: files => {
+          const path = activeCompPath ?? "index.html";
+          const file = files[path];
+          if (file && pid === projectIdRef.current) return projectLocalTimelineEdit(pid, path, file, previewIframeRef?.current ?? null);
+        },
+        synchronize: () => synchronize(intents.length === 1 ? intents[0].path : undefined),
       });
       trackStudioRazorSplit({ mode, count: result.splitCount });
       if (result.syncFailed) {
@@ -93,6 +101,7 @@ export function useRazorSplit({
     [
       activeCompPath,
       observeProjectFileVersion,
+      previewIframeRef,
       recordEdit,
       showToast,
       synchronize,

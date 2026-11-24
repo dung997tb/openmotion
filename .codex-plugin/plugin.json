@@ -4,7 +4,6 @@
   "description": "Plan, create, animate, edit, preview, and export motion graphics and motion videos in OpenMotion, including original videos on a user-supplied topic, template-based creation, and reference video recreation.",
   "skills": ["./skills/", "./.codex-plugin/onboarding/"],
   "mcpServers": "./.mcp.json",
-  "requires_local_executor": true,
   "extensions": {
     "com.openai": {
       "onboardingSkill": "./.codex-plugin/onboarding/SKILL.md"

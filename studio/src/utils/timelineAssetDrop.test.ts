@@ -280,6 +280,11 @@ describe("buildTimelineAssetInsertHtml markup quality", () => {
 describe("fitTimelineAssetGeometry", () => {
   const comp = { width: 1920, height: 1080 };
 
+  it("centers visual clips at a canvas drop, retaining full-frame sizing when metadata is absent", () => {
+    expect(fitTimelineAssetGeometry(null, { width: 1920, height: 1080 }, { left: 700, top: 360 }))
+      .toEqual({ left: -260, top: -180, width: 1920, height: 1080 });
+  });
+
   it("centers a smaller-than-comp asset at natural size", () => {
     expect(fitTimelineAssetGeometry({ width: 640, height: 360 }, comp)).toEqual({
       left: 640,

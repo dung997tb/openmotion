@@ -11,8 +11,9 @@ const instructions = {
   mcp: 'Merge the JSON into MCP settings, keep the other servers, then reload.',
 };
 
-export function McpManualConfiguration({ host, value, onCopy, children }: {
-  host: Exclude<IntegrationHost, 'chatgpt'>;
+export function McpManualConfiguration({ host, value, onCopy, children, streamableHttp }: {
+  host: IntegrationHost;
+  streamableHttp: boolean;
   value: string;
   onCopy: (value: string) => Promise<boolean>;
   children: ReactNode;
@@ -22,6 +23,13 @@ export function McpManualConfiguration({ host, value, onCopy, children }: {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const terminal = host === 'codex' || host === 'claude';
+  const instruction = host === 'chatgpt'
+    ? 'Add this Streamable HTTP URL in ChatGPT Settings -> Connectors and complete OAuth 2.1 authorization.'
+    : streamableHttp && host === 'mcp'
+      ? 'Merge this Streamable HTTP configuration into your client’s MCP settings and provide your Personal Access Token as OPENMOTION_TOKEN.'
+      : streamableHttp && terminal
+        ? 'Run this command to register the Streamable HTTP MCP endpoint, then sign in with OAuth 2.1 or a Personal Access Token.'
+        : instructions[host];
   const preview = terminal
     ? value.replace(/ +(?:--env |-- )[^\n]*/, ' …')
     : value.split('\n', 4).join('\n');
@@ -41,7 +49,7 @@ export function McpManualConfiguration({ host, value, onCopy, children }: {
   return (
     <>
       <div className="om-mcp-manual-head">
-        <h2 className="om-mcp-manual-title">{t(instructions[host])}</h2>
+        <h2 className="om-mcp-manual-title">{t(instruction)}</h2>
         <Button
           type="button"
           variant="plain"

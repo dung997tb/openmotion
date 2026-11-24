@@ -1,20 +1,55 @@
-# Build context for deploy/Dockerfile. Dependencies and the Studio bundle are
-# produced inside the image; local data and credentials never enter it.
+# Build context exclusions for deploy/Dockerfile.
+# Dependencies, Studio bundles, and compiled tracking artifacts are built inside
+# the image; local state, tests, scratch data, and secrets never enter it.
 .git
 .github
+.agents
+.codex-plugin
+.vscode
+.idea
+.DS_Store
+
 node_modules
 **/node_modules
+
+# Generated build outputs (produced in the deps-build stage)
 studio/build
 mcp-ui/template-recommendations/build
 web/inline-video.html
+tracking/dist
+packages/observability/dist
+dist
+coverage
+
+# Tests, scratch files, and local runtime artifacts
+tests
+studio/tests
+scratch
+**/*.log
+*.log
+*.tmp
+*.bak
 .motion-data
 .motion-data-dev
 .artifacts
 .tools
-dist
+outputs
+research
+
+# Phase 2 Game Studio static templates/kits (not shipped in Cloud Phase 1 images)
+templates/games
+templates/game-kits
+
+# Secrets and local environment overrides (keep .env.example files for reference)
 .env
 .env.*
-*.log
-.DS_Store
-tests
+!.env.example
 deploy/.env
+deploy/.env.*
+!deploy/.env.example
+deploy/k8s/secret.yaml
+deploy/k8s/*secret*.local.yaml
+*.pem
+*.key
+*.p12
+*.pfx

@@ -77,6 +77,10 @@ export function parseProjectIdFromHash(hash: string): string | null {
   return parseProjectHashRoute(hash)?.projectId ?? null;
 }
 
+export function optionalProjectSourceUrl(projectId: string, path: string): string {
+  return buildProjectApiPath(projectId, "/files/" + encodeURIComponent(path) + "?optional=1");
+}
+
 export function buildProjectApiPath(projectId: string, suffix = ""): string {
   const normalizedSuffix = suffix && !suffix.startsWith("/") ? `/${suffix}` : suffix;
   return `/api/projects/${encodeProjectId(projectId)}${normalizedSuffix}`;

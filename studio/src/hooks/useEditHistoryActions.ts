@@ -1,5 +1,5 @@
 // fallow-ignore-file complexity
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { STUDIO_MOTION_PATH } from "../components/editor/studioMotion";
 import { serializeStudioFileMutations } from "../utils/studioFileMutationCoordinator";
 import type { RestoreFiles } from "../utils/gsapUndoRestore";
@@ -28,6 +28,8 @@ interface HistoryFileCallbacks {
   claimedAfter?: number;
 }
 export interface EditHistoryHandle {
+  projectWide?: boolean;
+  availableNow?: (direction: "undo" | "redo") => boolean;
   canUndo: boolean;
   canRedo: boolean;
   undo: (cb: HistoryFileCallbacks) => Promise<HistoryResult>;
@@ -41,7 +43,7 @@ export interface EditHistoryHandle {
 }
 
 export interface UseEditHistoryActionsOptions {
-  editHistory: Pick<EditHistoryHandle, "undo" | "redo" | "predict" | "claims" | "canUndo" | "canRedo">;
+  editHistory: Pick<EditHistoryHandle, "undo" | "redo" | "predict" | "claims" | "projectWide" | "availableNow" | "canUndo" | "canRedo">;
   readOptionalProjectFile: (path: string) => Promise<string>;
   readProjectFile: (path: string) => Promise<string>;
   writeProjectFile: (path: string, content: string) => Promise<void>;
@@ -72,6 +74,14 @@ export function useEditHistoryActions({
   forceReloadSdkSession,
   projectId,
 }: UseEditHistoryActionsOptions) {
+  const queue = useMemo(() => ({ tail: null as Promise<void> | null }), [projectId]);
+  const activeQueue = useRef<typeof queue | null>(queue);
+  activeQueue.current = queue;
+  useEffect(() => {
+    activeQueue.current = queue;
+    return () => { if (activeQueue.current === queue) activeQueue.current = null; };
+  }, [queue]);
+  const [pendingQueue, setPendingQueue] = useState<typeof queue | null>(null);
   const historyRef = useRef(editHistory);
   historyRef.current = editHistory;
   const readHistoryFile = useCallback(
@@ -86,29 +96,31 @@ export function useEditHistoryActions({
   );
 
   const apply = useCallback(
-    async (direction: "undo" | "redo") => {
+    async (direction: "undo" | "redo", method: ReturnType<typeof takeHistoryTrigger>) => {
       const noun = direction === "undo" ? "Undo" : "Redo";
-      const method = takeHistoryTrigger();
       // One result per step the person asked for; the step itself never waits on this.
       const report = (outcome: "success" | "unavailable" | "failure") =>
         reportHistoryStep(direction, outcome, projectId, method);
-      if (direction === "undo" && cancelNewestStudioWaitingPress()) return report("success");
-      const available = direction === "undo" ? historyRef.current.canUndo : historyRef.current.canRedo;
+      const projectWide = historyRef.current.projectWide;
+      if (!projectWide && direction === "undo" && cancelNewestStudioWaitingPress()) return report("success");
+      const available = (projectWide ? historyRef.current.availableNow?.(direction) : undefined)
+        ?? (direction === "undo" ? historyRef.current.canUndo : historyRef.current.canRedo);
       if (!available && !(direction === "undo" && hasStudioPendingEdits())) return report("unavailable");
       // An edit still saving is newer than any step this tab predicts, so it paints back first.
-      const pendingEditShown = direction === "undo" ? paintBackNewestStudioPendingEdit() : null;
+      const pendingEditShown = !projectWide && direction === "undo" ? paintBackNewestStudioPendingEdit() : null;
       const predicted = pendingEditShown ? null : (editHistory.predict?.(direction) ?? null);
       const predictedShown = predicted ? (showHistoryRestoreNow?.(predicted.files) ?? null) : null;
       const shownLanded = predictedShown ? beginStudioShownRestore() : null;
       const putBack = predictedShown ?? pendingEditShown?.showAgain;
       const claimedAfter =
         pendingEditShown?.claimsAtBegin ??
-        (direction === "undo" && hasStudioPendingEdits() ? editHistory.claims?.() : undefined);
+        (!projectWide && direction === "undo" && hasStudioPendingEdits() ? editHistory.claims?.() : undefined);
       let result: HistoryResult = { ok: false, reason: "failed" };
       let serverSteppedShown = false;
       let revertIsTheUndo = false;
       try {
         await waitForPendingDomEditSaves();
+        if (projectWide && activeQueue.current !== queue) return;
         revertIsTheUndo = Boolean(pendingEditShown && !(await pendingEditShown.landed()));
         if (revertIsTheUndo) return report("success");
         result = await editHistory[direction]({
@@ -130,6 +142,7 @@ export function useEditHistoryActions({
         if (putBack && !serverSteppedShown && !revertIsTheUndo) putBack();
         shownLanded?.();
       }
+      if (projectWide && activeQueue.current !== queue) return;
       report(result.ok && result.label ? "success" : result.reason === "failed" ? "failure" : "unavailable");
       if (!result.ok && result.reason === "content-mismatch") {
         showToast(
@@ -162,6 +175,7 @@ export function useEditHistoryActions({
     },
     [
       editHistory,
+      queue,
       readHistoryFile,
       showToast,
       syncHistoryPreviewAfterApply,
@@ -175,9 +189,26 @@ export function useEditHistoryActions({
     ],
   );
 
-  const undo = useCallback(() => whileScriptWrites(() => apply("undo")), [apply]);
-  const redo = useCallback(() => whileScriptWrites(() => apply("redo")), [apply]);
-  return useMemo(() => ({ undo, redo }), [undo, redo]);
+  const run = useCallback((direction: "undo" | "redo") => {
+    const method = takeHistoryTrigger();
+    const step = () => whileScriptWrites(() => apply(direction, method));
+    if (!editHistory.projectWide) return step();
+    const current = () => activeQueue.current === queue ? step() : Promise.resolve();
+    const next = queue.tail ? queue.tail.then(current, current) : current();
+    queue.tail = next;
+    setPendingQueue(queue);
+    const finish = () => {
+      if (queue.tail !== next) return;
+      queue.tail = null;
+      if (activeQueue.current === queue) setPendingQueue(null);
+    };
+    void next.then(finish, finish);
+    return next;
+  }, [apply, editHistory.projectWide, queue]);
+  const undo = useCallback(() => run("undo"), [run]);
+  const redo = useCallback(() => run("redo"), [run]);
+  const pending = pendingQueue === queue;
+  return useMemo(() => ({ undo, redo, pending }), [undo, redo, pending]);
 }
 
 function fromShown(files: RestoreFiles | undefined, shown: RestoreFiles) {

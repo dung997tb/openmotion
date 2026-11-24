@@ -1,11 +1,21 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sameWorkspaceDirectory } from './check-installed-mcp.mjs';
 import { selectOnboardingTemplateIds } from '../shared/onboarding-templates.ts';
+import { templateConfig } from '../shared/template-config.ts';
 import { welcomeMarkdown } from '../mcp-ui/template-recommendations/i18n.ts';
+
+export function defaultDataDirectory(appRoot = fileURLToPath(new URL('../', import.meta.url))) {
+  if (process.env.MOTION_DATA_DIR) return path.resolve(process.env.MOTION_DATA_DIR);
+  const legacyDataDir = path.join(appRoot, '.motion-data');
+  const productionDataDir = process.platform === 'darwin' && !existsSync(legacyDataDir)
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'OpenDesign') : legacyDataDir;
+  return path.resolve(templateConfig().environment === 'dev' ? path.resolve(productionDataDir) + '-dev' : productionDataDir);
+}
 
 const presentationTool = 'openmotion_show_template_recommendations';
 const languages = ['zh', 'en', 'ja', 'ko', 'fr', 'es', 'pt'];
@@ -139,8 +149,7 @@ export async function prepareCodexHostHandoff(options = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--verify-only')) throw new Error('Resume the saved installation receipt with scripts/install-onboarding.mjs APP_ROOT --resume RECEIPT --verify-only; do not redraw template IDs.');
-  const { WorkspaceStore } = await import('../workspace.ts');
-  const result = await prepareCodexHostHandoff({ dataDirectory: new WorkspaceStore().directory,
+  const result = await prepareCodexHostHandoff({ dataDirectory: defaultDataDirectory(),
     expectedVersion: JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version,
     verifyOnly: process.argv.includes('--verify-only'), language: process.argv.find(value => value.startsWith('--language='))?.slice(11) });
   console.log(JSON.stringify(result, null, 2));

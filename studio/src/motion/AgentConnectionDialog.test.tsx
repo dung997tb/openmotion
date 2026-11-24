@@ -32,7 +32,7 @@ it('opens connection setup in the MVP and copies public installation instruction
   expect(document.querySelector('[role=status]')?.textContent).toContain('Copied to clipboard');
   expect(document.querySelector('.om-agent-connection [role=status]')).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(1);
-  expect(fetcher.mock.calls[0][0]).toBe('/motion-api/integration');
+  expect(fetcher.mock.calls[0][0]).toBe('/motion-api/account/integration');
   await act(async () => button('Close').click()); expect(close).toHaveBeenCalledOnce();
 });
 
@@ -69,7 +69,7 @@ it('updates manual setup with the selected client and explains unsupported cloud
   expect(document.querySelector('a[download]')?.getAttribute('href')).toBe('/connect/config?host=claude');
   expect(document.querySelector('details pre')?.textContent).toContain('claude mcp add');
   await select('ChatGPT');
-  expect(document.body.textContent).toContain('Remote connection unavailable');
+  expect(document.body.textContent).toContain('HTTPS required for ChatGPT Cloud');
   expect(button('Copy connection instruction')).toBeUndefined();
   expect(document.querySelector('a[download]')).toBeNull();
 });

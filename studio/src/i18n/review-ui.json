@@ -95,7 +95,9 @@
     "Process comments": "逐项处理评论",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "修改并验证视频后，再将已处理评论标记完成。也可以按要求修改评论正文、重新打开或删除指定评论。仅复制不会执行操作。",
     "Recover safely": "异常恢复",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "连接到同一工作区。评论或源文件变化后，先重新读取再重试。如果元素已消失或无法验证，保留待处理状态并说明原因。"
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "连接到同一工作区。评论或源文件变化后，先重新读取再重试。如果元素已消失或无法验证，保留待处理状态并说明原因。",
+    "Review comments are coming in Phase 2": "审片批注将在第二阶段上线",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "按帧锚定的审片批注与画笔标记功能计划在第二阶段提供。"
   },
   "ja": {
     "Comments": "コメント",
@@ -193,7 +195,9 @@
     "Process comments": "コメントを処理する",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "動画を編集して確認した後、対応したコメントを完了にします。依頼に応じて本文の更新、再開、指定コメントの削除も可能です。コピーだけでは操作は実行されません。",
     "Recover safely": "問題からの復旧",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "同じワークスペースに接続してください。変更されたコメントやソースを再読してから再試行します。要素が消えた場合や確認できない場合は未対応のままにし、理由を報告します。"
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "同じワークスペースに接続してください。変更されたコメントやソースを再読してから再試行します。要素が消えた場合や確認できない場合は未対応のままにし、理由を報告します。",
+    "Review comments are coming in Phase 2": "レビューコメントはフェーズ 2 で提供予定です",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "フレーム固定コメントと視覚的マークアップ注釈はフェーズ 2 で提供予定です。"
   },
   "ko": {
     "Comments": "댓글",
@@ -291,7 +295,9 @@
     "Process comments": "댓글 처리",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "영상을 수정하고 확인한 뒤 처리한 댓글을 완료로 표시합니다. 요청에 따라 댓글 본문 수정, 다시 열기, 특정 댓글 삭제도 가능합니다. 복사만으로 작업이 실행되지는 않습니다.",
     "Recover safely": "문제 복구",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "같은 워크스페이스에 연결하세요. 변경된 댓글과 소스 파일을 다시 읽고 재시도합니다. 요소가 사라졌거나 확인할 수 없으면 댓글을 미처리 상태로 두고 이유를 설명합니다."
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "같은 워크스페이스에 연결하세요. 변경된 댓글과 소스 파일을 다시 읽고 재시도합니다. 요소가 사라졌거나 확인할 수 없으면 댓글을 미처리 상태로 두고 이유를 설명합니다.",
+    "Review comments are coming in Phase 2": "리뷰 댓글 기능은 Phase 2에서 제공될 예정입니다",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "프레임 고정 댓글 및 시각적 마크업 주석 기능은 Phase 2에 제공될 예정입니다."
   },
   "de": {
     "Comments": "Kommentare",
@@ -389,7 +395,9 @@
     "Process comments": "Kommentare bearbeiten",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "Das Video bearbeiten und prüfen, dann erledigte Kommentare abschließen. Auf Wunsch kann der Agent Kommentartext ändern, Kommentare wieder öffnen oder gezielt löschen. Kopieren allein führt keine Aktion aus.",
     "Recover safely": "Fehler beheben",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Mit demselben Arbeitsbereich verbinden. Geänderte Kommentare und Quelldateien vor einem erneuten Versuch neu lesen. Fehlt ein Element oder ist keine Prüfung möglich, bleibt der Kommentar offen und der Agent erklärt das Hindernis."
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Mit demselben Arbeitsbereich verbinden. Geänderte Kommentare und Quelldateien vor einem erneuten Versuch neu lesen. Fehlt ein Element oder ist keine Prüfung möglich, bleibt der Kommentar offen und der Agent erklärt das Hindernis.",
+    "Review comments are coming in Phase 2": "Review-Kommentare folgen in Phase 2",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "Bildgenaue Kommentare und visuelle Markierungen sind für Phase 2 geplant."
   },
   "fr": {
     "Comments": "Commentaires",
@@ -487,7 +495,9 @@
     "Process comments": "Traiter les commentaires",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "Modifier et vérifier la vidéo, puis marquer les commentaires traités comme terminés. Sur demande, l’Agent peut aussi modifier le texte, rouvrir ou supprimer des commentaires précis. Copier ne lance aucune action.",
     "Recover safely": "Reprendre après une erreur",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Se connecter au même espace de travail. Relire les commentaires et fichiers sources modifiés avant de réessayer. Si un élément a disparu ou si la vérification est impossible, garder le commentaire ouvert et expliquer le blocage."
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Se connecter au même espace de travail. Relire les commentaires et fichiers sources modifiés avant de réessayer. Si un élément a disparu ou si la vérification est impossible, garder le commentaire ouvert et expliquer le blocage.",
+    "Review comments are coming in Phase 2": "Les commentaires de révision arrivent en phase 2",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "Les commentaires ancrés aux images et les annotations visuelles sont prévus pour la phase 2."
   },
   "ru": {
     "Comments": "Комментарии",
@@ -585,7 +595,9 @@
     "Process comments": "Обработка комментариев",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "Измените и проверьте видео, затем отметьте обработанные комментарии как выполненные. По запросу Agent также может изменить текст, снова открыть или удалить конкретные комментарии. Копирование само по себе ничего не запускает.",
     "Recover safely": "Восстановление после ошибок",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Подключитесь к тому же рабочему пространству. Перед повтором перечитайте изменённые комментарии и исходные файлы. Если элемент исчез или проверка невозможна, оставьте комментарий открытым и объясните причину."
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Подключитесь к тому же рабочему пространству. Перед повтором перечитайте изменённые комментарии и исходные файлы. Если элемент исчез или проверка невозможна, оставьте комментарий открытым и объясните причину.",
+    "Review comments are coming in Phase 2": "Комментарии к обзору появятся во 2-й фазе",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "Комментарии с привязкой к кадру и визуальная разметка запланированы на 2-ю фазу."
   },
   "es": {
     "Comments": "Comentarios",
@@ -683,7 +695,9 @@
     "Process comments": "Procesar comentarios",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "Edita y verifica el vídeo, y luego marca los comentarios atendidos como completados. Si se solicita, el Agent también puede modificar el texto, reabrir o eliminar comentarios específicos. Copiar no ejecuta ninguna acción.",
     "Recover safely": "Recuperarse de errores",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Conecta con el mismo espacio de trabajo. Vuelve a leer los comentarios y archivos fuente modificados antes de reintentar. Si un elemento desapareció o no se puede verificar, deja el comentario abierto y explica el impedimento."
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Conecta con el mismo espacio de trabajo. Vuelve a leer los comentarios y archivos fuente modificados antes de reintentar. Si un elemento desapareció o no se puede verificar, deja el comentario abierto y explica el impedimento.",
+    "Review comments are coming in Phase 2": "Los comentarios de revisión llegarán en la fase 2",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "Los comentarios anclados a fotogramas y las anotaciones visuales están previstos para la fase 2."
   },
   "pt-BR": {
     "Comments": "Comentários",
@@ -781,7 +795,9 @@
     "Process comments": "Processar comentários",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "Edite e verifique o vídeo antes de marcar os comentários atendidos como concluídos. Quando solicitado, o Agent também pode alterar o texto, reabrir ou excluir comentários específicos. Copiar não executa nenhuma ação.",
     "Recover safely": "Recuperar de erros",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Conecte-se ao mesmo espaço de trabalho. Releia comentários e arquivos-fonte alterados antes de tentar novamente. Se um elemento desapareceu ou a verificação não for possível, mantenha o comentário aberto e explique o impedimento."
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Conecte-se ao mesmo espaço de trabalho. Releia comentários e arquivos-fonte alterados antes de tentar novamente. Se um elemento desapareceu ou a verificação não for possível, mantenha o comentário aberto e explique o impedimento.",
+    "Review comments are coming in Phase 2": "Os comentários de revisão chegarão na Fase 2",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "Comentários ancorados em quadros e marcações visuais estão previstos para a Fase 2."
   },
   "it": {
     "Comments": "Commenti",
@@ -879,7 +895,9 @@
     "Process comments": "Gestire i commenti",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "Modifica e verifica il video, poi segna come completati i commenti risolti. Su richiesta, l’Agent può anche modificare il testo, riaprire o eliminare commenti specifici. La sola copia non esegue alcuna azione.",
     "Recover safely": "Riprendere dopo un errore",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Collegati allo stesso spazio di lavoro. Rileggi i commenti e i file sorgenti modificati prima di riprovare. Se un elemento è scomparso o non è possibile verificare, lascia il commento aperto e spiega il problema."
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Collegati allo stesso spazio di lavoro. Rileggi i commenti e i file sorgenti modificati prima di riprovare. Se un elemento è scomparso o non è possibile verificare, lascia il commento aperto e spiega il problema.",
+    "Review comments are coming in Phase 2": "I commenti di revisione arriveranno nella Fase 2",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "I commenti ancorati ai fotogrammi e le annotazioni visive sono previsti nella Fase 2."
   },
   "tr": {
     "Comments": "Yorumlar",
@@ -977,6 +995,8 @@
     "Process comments": "Yorumları işle",
     "Edit and verify the video, then mark addressed comments complete. Agents can also update comment text, reopen or delete specific comments when requested. Copying alone performs no action.": "Videoyu düzenleyip doğruladıktan sonra ele alınan yorumları tamamlandı olarak işaretle. Agent, istendiğinde yorum metnini değiştirebilir, belirli yorumları yeniden açabilir veya silebilir. Yalnızca kopyalamak işlem başlatmaz.",
     "Recover safely": "Hatalardan kurtul",
-    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Aynı çalışma alanına bağlan. Yeniden denemeden önce değişen yorumları ve kaynak dosyalarını tekrar oku. Bir öğe kaybolmuşsa veya doğrulama yapılamıyorsa yorumu açık bırak ve engeli açıkla."
+    "Connect to the same workspace. Re-read changed comments and source files before retrying. If an element disappeared or verification is unavailable, keep the comment open and explain the blocker.": "Aynı çalışma alanına bağlan. Yeniden denemeden önce değişen yorumları ve kaynak dosyalarını tekrar oku. Bir öğe kaybolmuşsa veya doğrulama yapılamıyorsa yorumu açık bırak ve engeli açıkla.",
+    "Review comments are coming in Phase 2": "İnceleme yorumları Faz 2’de gelecek",
+    "Frame-anchored comments and visual markup annotations are scheduled for Phase 2.": "Kareye sabitlenmiş yorumlar ve görsel işaretleme notları Faz 2 için planlanmıştır."
   }
 }

@@ -20,8 +20,7 @@ import {
 } from "./useTimelineSyncCallbacks";
 import type { IframeWindow, PlaybackAdapter } from "../lib/playbackTypes";
 import { setPreviewReloading } from "../previewReloading";
-import { studioFileRevision } from "../../utils/studioFileVersion";
-import { announcePreviewPromoted } from "../sceneSwap";
+import { announcePreviewPromoted, previewSourceRevision } from "../sceneSwap";
 import { afterStudioPendingEdits, isStudioEditSaving } from "../../utils/studioPendingEdits";
 import { usePlayerStore } from "../store/playerStore";
 import { READY_TIMEOUT_CAUSE, useShadowReloadRetry } from "./useShadowReloadRetry";
@@ -34,7 +33,8 @@ export const SHADOW_READY_TIMEOUT_MS = 15_000;
 export const SHADOW_READY_BUDGETS = 3;
 
 function restoreSeekPainted(iframe: HTMLIFrameElement | null): Promise<void> | undefined {
-  const win = iframe?.contentWindow as IframeWindow | null | undefined;
+  if (!iframe?.contentDocument) return;
+  const win = iframe.contentWindow as IframeWindow | null;
   return win?.__hfWaitForSeekCompletion?.().catch(() => {});
 }
 
@@ -162,7 +162,7 @@ export function useShadowPreviewReload({
   );
 
   const gestureSavesOnScreen = useCallback(() => {
-    const liveDoc = iframeRef.current?.contentDocument;
+    const liveDoc = iframeRef.current?.contentDocument ?? iframeRef.current?.ownerDocument;
     return liveDoc ? studioManualEditSavesIn(liveDoc) : 0;
   }, [iframeRef]);
 
@@ -185,14 +185,14 @@ export function useShadowPreviewReload({
   // shows the file before it: once that write has landed, a fresh one loads instead.
   const heldOrStale = useCallback(
     (gen: number) => {
-      const liveDoc = iframeRef.current?.contentDocument;
+      const liveDoc = iframeRef.current?.contentDocument ?? iframeRef.current?.ownerDocument;
       if (liveDoc && isStudioManualEditGestureLiveIn(liveDoc))
         return waitThenRetry(gen, "gesture", (retry) =>
           afterStudioManualEditGestures(liveDoc, retry),
         );
       if (
         gestureSavesOnScreen() === savesAtRequestRef.current &&
-        studioFileRevision() === revisionAtRequestRef.current
+        previewSourceRevision() === revisionAtRequestRef.current
       )
         return false;
       if (isStudioEditSaving()) return waitThenRetry(gen, "save", afterStudioPendingEdits);
@@ -345,7 +345,7 @@ export function useShadowPreviewReload({
       budgetsSpentRef.current = 0;
       shadowUrlRef.current = url;
       savesAtRequestRef.current = gestureSavesOnScreen();
-      revisionAtRequestRef.current = studioFileRevision();
+      revisionAtRequestRef.current = previewSourceRevision();
       armReadyTimer(gen);
       setPreviewSlots((prev) => planShadowReload(prev, gen, url));
       // Thumbnails of the edit wait for the new preview instead of competing with it.

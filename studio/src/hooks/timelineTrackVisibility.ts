@@ -1,3 +1,5 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { saveCloudTimeline } from "../utils/cloudTimelineEdit";
 import { useCallback } from "react";
 import { usePlayerStore, type TimelineElement } from "../player";
 import { reseekPreviewAtTime } from "../player/hooks/timelineSyncHydration";
@@ -37,6 +39,7 @@ interface ToggleTimelineTrackHiddenInput {
    *  rendered number to hand over, which falls back to deriving one. */
   displayNumber?: number | null;
   previewIframe: HTMLIFrameElement | null;
+  reloadPreview?: () => void;
   writeProjectFile: (path: string, content: string) => Promise<void>;
   recordEdit: (input: RecordEditInput) => Promise<void>;
   pendingTimelineEditPathRef: MutableRef<Set<string>>;
@@ -54,6 +57,7 @@ interface SetElementsHiddenInput {
   hidden: boolean;
   label: string;
   previewIframe: HTMLIFrameElement | null;
+  reloadPreview?: () => void;
   writeProjectFile: (path: string, content: string) => Promise<void>;
   recordEdit: (input: RecordEditInput) => Promise<void>;
   pendingTimelineEditPathRef: MutableRef<Set<string>>;
@@ -94,6 +98,7 @@ function patchLiveHiddenState(
   hidden: boolean,
   activeCompPath: string | null,
 ): void {
+  if (!iframe?.contentDocument) return;
   for (const element of elements) {
     const target = findTimelineElementInIframe(iframe, element, activeCompPath);
     if (!target) continue;
@@ -103,6 +108,7 @@ function patchLiveHiddenState(
       target.removeAttribute("data-hidden");
     }
   }
+  reseekPreviewRuntime(iframe);
 }
 
 export function reseekPreviewRuntime(iframe: HTMLIFrameElement | null): void {
@@ -136,6 +142,7 @@ async function setElementsHidden({
   hidden,
   label,
   previewIframe,
+  reloadPreview,
   writeProjectFile,
   recordEdit,
   pendingTimelineEditPathRef,
@@ -143,7 +150,6 @@ async function setElementsHidden({
   if (elements.length === 0) return [];
 
   patchLiveHiddenState(previewIframe, elements, hidden, activeCompPath);
-  reseekPreviewRuntime(previewIframe);
 
   const hiddenOperation: PatchOperation = {
     type: "attribute",
@@ -163,7 +169,12 @@ async function setElementsHidden({
   }
 
   try {
-    const changedPaths = await saveProjectFilesWithHistory({
+    const changedPaths = getCachedCloudDisklessMode()
+      ? await saveCloudTimeline(projectId, [...groupElementsByTargetPath(elements, activeCompPath)].map(([path, clips]) => {
+          pendingTimelineEditPathRef.current.add(path);
+          return { path, command: resolve => ({ kind: 'setClipState', state: 'hidden', enabled: hidden, hfIds: clips.map(resolve) }) };
+        }), writeProjectFile, recordEdit, label)
+      : await saveProjectFilesWithHistory({
       projectId,
       label,
       files,
@@ -174,13 +185,13 @@ async function setElementsHidden({
     for (const element of elements) {
       usePlayerStore.getState().updateElement(element.key ?? element.id, { hidden });
     }
+    if (changedPaths.length && previewIframe && !previewIframe.contentDocument) reloadPreview?.();
     return changedPaths;
   } catch (error) {
     // The optimistic live patch already ran; a patch-target/save failure here would
     // otherwise leave the preview showing the wrong visibility until a reload. Revert
     // the live DOM to the prior state so what's on screen matches what persisted.
     patchLiveHiddenState(previewIframe, elements, !hidden, activeCompPath);
-    reseekPreviewRuntime(previewIframe);
     throw error;
   }
 }
@@ -193,6 +204,7 @@ export async function toggleTimelineTrackHidden({
   hidden,
   displayNumber,
   previewIframe,
+  reloadPreview,
   writeProjectFile,
   recordEdit,
   pendingTimelineEditPathRef,
@@ -216,6 +228,7 @@ export async function toggleTimelineTrackHidden({
     hidden,
     label,
     previewIframe,
+    reloadPreview,
     writeProjectFile,
     recordEdit,
     pendingTimelineEditPathRef,
@@ -229,6 +242,7 @@ export async function toggleTimelineElementHidden({
   elementKey,
   hidden,
   previewIframe,
+  reloadPreview,
   writeProjectFile,
   recordEdit,
   pendingTimelineEditPathRef,
@@ -244,6 +258,7 @@ export async function toggleTimelineElementHidden({
     hidden,
     label: elements.length > 1 ? `${verb} ${elements.length} elements` : `${verb} element`,
     previewIframe,
+    reloadPreview,
     writeProjectFile,
     recordEdit,
     pendingTimelineEditPathRef,
@@ -257,6 +272,7 @@ export function useTimelineTrackVisibilityEditing({
   writeProjectFile,
   recordEdit,
   previewIframeRef,
+  reloadPreview,
   pendingTimelineEditPathRef,
   isRecordingRef,
   forceReloadSdkSession,
@@ -287,6 +303,7 @@ export function useTimelineTrackVisibilityEditing({
           hidden,
           displayNumber,
           previewIframe: previewIframeRef.current,
+          reloadPreview,
           writeProjectFile,
           recordEdit,
           pendingTimelineEditPathRef,
@@ -303,6 +320,7 @@ export function useTimelineTrackVisibilityEditing({
       activeCompPath,
       timelineElements,
       previewIframeRef,
+      reloadPreview,
       writeProjectFile,
       recordEdit,
       pendingTimelineEditPathRef,
@@ -321,6 +339,7 @@ export function useTimelineElementVisibilityEditing({
   writeProjectFile,
   recordEdit,
   previewIframeRef,
+  reloadPreview,
   pendingTimelineEditPathRef,
   isRecordingRef,
   forceReloadSdkSession,
@@ -350,6 +369,7 @@ export function useTimelineElementVisibilityEditing({
           elementKey,
           hidden,
           previewIframe: previewIframeRef.current,
+          reloadPreview,
           writeProjectFile,
           recordEdit,
           pendingTimelineEditPathRef,
@@ -366,6 +386,7 @@ export function useTimelineElementVisibilityEditing({
       activeCompPath,
       timelineElements,
       previewIframeRef,
+      reloadPreview,
       writeProjectFile,
       recordEdit,
       pendingTimelineEditPathRef,

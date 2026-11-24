@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openmotion-api
+  namespace: openmotion
+  labels:
+    app.kubernetes.io/name: openmotion-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: openmotion
+  annotations:
+    # Required for long-lived SSE streams (/api/events, /api/render/:id/progress)
+    # and Streamable HTTP /mcp connections without buffering delays.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # Covers MCP_MAX_BODY_BYTES (10 MiB) + overhead; binary media uploads go directly to S3 via Presigned PUT.
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Cookie-less Preview Subdomain Isolation (c5):
+    # - Main Studio/API host (`motion.example.com`) issues host-only HttpOnly session cookies (never Domain=.example.com).
+    # - Dedicated preview host (`preview.openmotion.example.com`) receives zero browser session cookies and is
+    #   enforced by the `api` Preview Host Isolation middleware to serve ONLY read-only preview/runtime/font/liveness
+    #   endpoints with short-lived project-scoped preview tokens (`403 PREVIEW_ORIGIN_ISOLATED` on all API/Auth/MCP routes).
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - motion.example.com
+        - preview.openmotion.example.com
+      secretName: openmotion-tls
+  rules:
+    - host: motion.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: openmotion-api
+                port:
+                  name: http
+    # Dedicated cookie-less preview origin routing strictly to openmotion-api (isolated by PREVIEW_PUBLIC_ORIGIN).
+    - host: preview.openmotion.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: openmotion-api
+                port:
+                  name: http

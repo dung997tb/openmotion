@@ -1,14 +1,32 @@
 import { expect, it } from 'vitest';
-import { accountMediaMessages, accountSignInMessages } from '../../../gateway/account.ts';
 import { isKnownMessage } from './messages';
 
-// The failure card translates gateway errors by exact text, so a reworded gateway message would silently stay English.
-it('has a Chinese translation for every account media failure the gateway reports', () => {
-  expect(accountMediaMessages.length).toBeGreaterThan(10);
-  expect(accountMediaMessages.filter(message => !isKnownMessage(message))).toEqual([]);
-});
+const cloudAccountAndGatewayMessages = [
+  'OpenDesign Model Gateway',
+  'Model gateway',
+  'Default models',
+  'Local Dev Mode',
+  'Local Mock Model Gateway',
+  'Personal access tokens',
+  'Workspaces',
+  'Switch workspace',
+  'Workspace switched',
+  'Could not switch workspace',
+  'Signed out',
+  'Could not sign out',
+  'Create token',
+  'Personal access token created',
+  'Could not create token',
+  'Token revoked',
+  'Could not revoke token',
+  'Token copied',
+  'Could not copy token',
+  'Could not sync models',
+  'Workspace admin permission is required to change default models.',
+];
 
-it('has a Chinese translation for every sign-in failure the account panel shows', () => {
-  expect(accountSignInMessages.length).toBeGreaterThan(5);
-  expect(accountSignInMessages.filter(message => !isKnownMessage(message))).toEqual([]);
+// Cloud account and gateway notices are translated by exact source text, so regressions must not fall back silently.
+it('has a Chinese translation for every maintained cloud account and gateway UI message', () => {
+  expect(cloudAccountAndGatewayMessages.length).toBeGreaterThan(10);
+  expect(cloudAccountAndGatewayMessages.filter(message => !isKnownMessage(message))).toEqual([]);
 });

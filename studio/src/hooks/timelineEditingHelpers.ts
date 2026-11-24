@@ -1,3 +1,6 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { timelineAttributeCommand } from "../utils/cloudTimelineEdit";
+import { stampHfIdsInPlace } from "@hyperframes/parsers/hf-ids";
 import { isHtmlElement } from "@hyperframes/core/runtime/dom-realm";
 import { applyAuthoredTiming } from "@hyperframes/core/studio-preview-mark";
 import { syncPreservedPreviewTiming } from "../utils/previewAuthoredTiming";
@@ -234,6 +237,11 @@ function resolveResizePlaybackStart(
 /** Below any centisecond step, above float noise from authored-start round trips. */
 const AUTHORED_START_EPSILON = 1e-6;
 
+function hasAuthoredStart(original: string, target: PatchTarget, start: number): boolean {
+  const value = readAttributeByTarget(original, target, "data-start");
+  return value != null && value.trim() !== "" && Math.abs(Number(value) - start) < AUTHORED_START_EPSILON;
+}
+
 export function applyTimelineMoveAttributes(
   original: string,
   target: PatchTarget,
@@ -251,11 +259,7 @@ export function applyTimelineMoveAttributes(
   // A clip that only changes lane keeps its authored start text: re-rounding an
   // unchanged start to centiseconds while data-duration keeps full precision
   // shifts its end past the next clip's start and makes the pair overlap.
-  const authoredStart = readAttributeByTarget(original, target, "data-start");
-  const startUnchanged = authoredStart != null
-    && authoredStart.trim() !== ""
-    && Math.abs(Number(authoredStart) - start) < AUTHORED_START_EPSILON;
-  let patched = startUnchanged ? original : applyPatchByTarget(original, target, {
+  let patched = hasAuthoredStart(original, target, start) ? original : applyPatchByTarget(original, target, {
     type: "attribute",
     property: "start",
     value: formatTimelineAttributeNumber(start),
@@ -324,15 +328,16 @@ export function applyTimelineResizeAttributes(
   updates: Pick<TimelineElement, "start" | "duration" | "playbackStart">,
 ): string {
   const pbs = resolveResizePlaybackStart(original, target, element, updates);
-  let patched = applyPatchByTarget(original, target, {
+  const start = toAuthoredStart(element, updates.start);
+  let patched = hasAuthoredStart(original, target, start) ? original : applyPatchByTarget(original, target, {
     type: "attribute",
     property: "start",
-    value: formatTimelineAttributeNumber(toAuthoredStart(element, updates.start)),
+    value: String(start),
   });
   patched = applyPatchByTarget(patched, target, {
     type: "attribute",
     property: "duration",
-    value: formatTimelineAttributeNumber(updates.duration),
+    value: String(updates.duration),
   });
   if (pbs) {
     patched = applyPatchByTarget(patched, target, {
@@ -431,12 +436,18 @@ export function patchTimelineChangesInSource(
     const target = buildPatchTarget(element);
     if (!target) throw new Error(`Timeline element ${element.id} is missing a patchable target`);
     // Resolve first: a member already at its target values patches to the same string, a missing one must throw.
-    if (!findTagByTarget(current, target)) {
-      throw new Error(
-        `Unable to patch timeline element ${element.id} in ${targetPath} (${missedLookups(element, target)})`,
-      );
+    let basis = current;
+    if (!findTagByTarget(basis, target)) {
+      // Legacy documents may only have the preview's deterministic hf-id until their first edit.
+      if (target.hfId) basis = stampHfIdsInPlace(current);
+      if (basis === current || !findTagByTarget(basis, target)) {
+        throw new Error(
+          `Unable to patch timeline element ${element.id} in ${targetPath} (${missedLookups(element, target)})`,
+        );
+      }
     }
-    current = buildPatches(current, target);
+    const patched = buildPatches(basis, target);
+    if (patched !== basis) current = patched;
   }
   return current;
 }
@@ -566,13 +577,17 @@ export async function persistElementAttribute({
     patchLive(value);
 
     const operation: PatchOperation = { type: "attribute", property: attr, value };
-    const patched = applyPatchByTarget(before, patchTarget, operation);
+    const command = getCachedCloudDisklessMode() ? timelineAttributeCommand([{ target: patchTarget, value }], attr) : undefined;
 
     pendingTimelineEditPathRef.current.add(targetPath);
     try {
+      const patched = command
+        ? (await import("../../../packages/edit-core/canvas-commands")).applyCanvasCommand(before, command)
+        : applyPatchByTarget(before, patchTarget, operation);
       return await writeProjectFilesWithHistoryInQueue({
         projectId,
         label,
+        commandForWrite: command ? () => command : undefined,
         files: { [targetPath]: () => patched },
         readFile: async () => before,
         writeFile: writeProjectFile,

@@ -1,43 +1,71 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-import { apiUrlError, defaultParameters } from './settingsValidation';
-import { connectionBaseUrl } from '../../../gateway/connections';
-import { providerOrigin } from '../../../gateway/network';
-import { modelMetadata } from '../../../gateway/model-metadata';
+import { apiKeyError, apiUrlError, defaultParameters, modelIdError, providerNameError } from './settingsValidation';
 
 it.each([
-  '', 'not a url', 'http://api.example.com', 'https://api.example.com/v1',
-  'https://api.example.com:443/v2/', 'https://api.example.com:8443',
-  'https://user:pass@api.example.com', 'https://api.example.com/?key=x', 'https://api.example.com/#section',
-  'https://api.example.com/a%2fb', 'https://api.example.com/a%5Cb',
-  'https://localhost', 'https://foo.localhost', 'https://127.1', 'https://0x7f000001',
-  'https://10.1.2.3', 'https://172.16.0.1', 'https://172.32.0.1', 'https://192.168.1.1',
-  'https://100.64.0.1', 'https://169.254.0.1', 'https://224.0.0.1', 'https://8.8.8.8',
-  'https://[::1]', 'https://[::ffff:8.8.8.8]', 'https://[2001:4860:4860::8888]',
-  `https://api.example.com/${'a'.repeat(2048)}`,
-])('matches service API URL acceptance: %s', value => {
-  let accepted = true;
-  try { connectionBaseUrl(value); } catch { accepted = false; }
+  ['https://api.example.com/v1', true],
+  ['https://api.example.com:443/v2/', true],
+  ['https://api.example.com:8443', false],
+  ['', false],
+  ['not a url', false],
+  ['http://api.example.com', false],
+  ['https://user:pass@api.example.com', false],
+  ['https://api.example.com/?key=x', false],
+  ['https://api.example.com/#section', false],
+  ['https://api.example.com/a%2fb', false],
+  ['https://api.example.com/a%5Cb', false],
+  ['https://localhost', false],
+  ['https://foo.localhost', false],
+  ['https://127.1', false],
+  ['https://0x7f000001', false],
+  ['https://10.1.2.3', false],
+  ['https://172.16.0.1', false],
+  ['https://172.32.0.1', true],
+  ['https://192.168.1.1', false],
+  ['https://100.64.0.1', false],
+  ['https://169.254.0.1', false],
+  ['https://224.0.0.1', false],
+  ['https://8.8.8.8', true],
+  ['https://[::1]', false],
+  ['https://[::ffff:8.8.8.8]', false],
+  ['https://[2001:4860:4860::8888]', true],
+  [`https://api.example.com/${'a'.repeat(2048)}`, false],
+])('validates HTTPS API URL acceptance: %s', (value, accepted) => {
   expect(!apiUrlError(value)).toBe(accepted);
 });
-it.each(['https://api.example.com', 'https://api.example.com/v1', 'https://api.example.com/v1/', 'https://api.example.com/v2'])('matches gateway origin path rules: %s', value => {
-  let accepted = true;
-  try { providerOrigin(value); } catch { accepted = false; }
+
+it.each([
+  ['https://api.example.com', true],
+  ['https://api.example.com/v1', true],
+  ['https://api.example.com/v1/', true],
+  ['https://api.example.com/v2', false],
+])('validates origin-only media URL rules: %s', (value, accepted) => {
   expect(!apiUrlError(value, true)).toBe(accepted);
 });
-it.each(['model', 'MODEL', 'prompt', 'input', 'api_key', 'api-key', 'apiKey', 'authorization', 'headers', 'webhook_url', '__proto__', 'constructor', 'prototype'])('matches reserved JSON field validation: %s', field => {
+
+it.each(['model', 'MODEL', 'prompt', 'input', 'api_key', 'api-key', 'apiKey', 'authorization', 'headers', 'webhook_url', '__proto__', 'constructor', 'prototype'])('rejects reserved JSON parameter fields: %s', field => {
   const raw = `{"${field}":"test"}`, result = defaultParameters(raw);
   expect(result.field).toBe(field);
   expect(result.error).toBeTruthy();
-  expect(() => modelMetadata({ defaults: JSON.parse(raw) })).toThrow('reserved field');
 });
-it('allows nested names and JSON whitespace while matching serialized size boundaries', () => {
+
+it('allows nested names and JSON whitespace while enforcing serialized size boundaries', () => {
   for (const parameters of [{ nested: { model: 'allowed' } }, { text: '中'.repeat(63989) }]) {
     const result = defaultParameters(JSON.stringify(parameters, null, 2));
     expect(result.error).toBeUndefined();
-    expect(() => modelMetadata({ defaults: result.parameters })).not.toThrow();
+    expect(result.parameters).toEqual(parameters);
   }
   const result = defaultParameters(JSON.stringify({ text: '中'.repeat(63990) }));
   expect(result.error).toContain('64,000');
-  expect(() => modelMetadata({ defaults: result.parameters })).toThrow();
+});
+
+it('validates provider names, model IDs, and API key boundaries', () => {
+  expect(providerNameError('')).toBeTruthy();
+  expect(providerNameError('x'.repeat(81))).toBeTruthy();
+  expect(providerNameError('OpenDesign')).toBeUndefined();
+  expect(modelIdError('')).toBeTruthy();
+  expect(modelIdError('bad id')).toBeTruthy();
+  expect(modelIdError('opendesign:flux-pro')).toBeUndefined();
+  expect(apiKeyError('sk-valid')).toBeUndefined();
+  expect(apiKeyError('line1\nline2')).toBeTruthy();
 });

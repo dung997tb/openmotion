@@ -1,0 +1,109 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openmotion-catalog-sync
+  namespace: openmotion
+  labels:
+    app.kubernetes.io/name: openmotion-catalog-sync
+    app.kubernetes.io/component: catalog-sync
+    app.kubernetes.io/part-of: openmotion
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openmotion-catalog-sync
+        app.kubernetes.io/component: catalog-sync
+        app.kubernetes.io/part-of: openmotion
+    spec:
+      serviceAccountName: openmotion-jobs
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: catalog-sync
+          image: ghcr.io/nexu-io/openmotion-catalog-sync:latest
+          imagePullPolicy: IfNotPresent
+          command: ["node", "--experimental-strip-types", "scripts/sync-catalog-cas.ts"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: NODE_ENV
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: LOG_LEVEL
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: openmotion-secrets
+                  key: DATABASE_URL
+            - name: S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: S3_ENDPOINT
+                  optional: true
+            - name: S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: S3_REGION
+            - name: S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: S3_BUCKET
+            - name: S3_FORCE_PATH_STYLE
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: S3_FORCE_PATH_STYLE
+            - name: CATALOG_SYNC_FETCH_REMOTE
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: CATALOG_SYNC_FETCH_REMOTE
+                  optional: true
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: openmotion-secrets
+                  key: S3_ACCESS_KEY_ID
+                  optional: true
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openmotion-secrets
+                  key: S3_SECRET_ACCESS_KEY
+                  optional: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi

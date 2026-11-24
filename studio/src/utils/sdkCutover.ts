@@ -1,3 +1,4 @@
+import { getCachedCloudDisklessMode } from "./cloudRuntime";
 import type { Composition, GsapTweenSpec } from "@hyperframes/sdk";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import type { PatchOperation } from "./sourcePatcher";
@@ -34,6 +35,7 @@ export type {
   PublishSdkSession,
 } from "./sdkEditTransaction";
 function sdkFamilyEnabled(family: StudioSdkOperationFamily): boolean {
+  if (getCachedCloudDisklessMode() && (family === "gsap-animation" || family === "gsap-keyframe")) return false;
   const configured = Object.prototype.hasOwnProperty.call(
     studioAvailability,
     "STUDIO_SDK_CUTOVER_FAMILIES",

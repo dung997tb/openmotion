@@ -1,9 +1,28 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { WorkspaceStore, projectPath } from './workspace.ts';
-import { atomicJson, jsonFile } from './phase1-versions.ts';
+import { projectPath } from './shared/project-validation.ts';
 import type { ReviewComment, ReviewCommentsInput, ReviewCommentsResult } from './shared/review-comments.ts';
 import { validateReviewAnnotation } from './shared/review-comments.ts';
+
+export interface ReviewCommentsStore {
+  readonly directory: string;
+  lock<T>(task: () => Promise<T>): Promise<T>;
+  forProject(projectId: string): {
+    get(): Promise<{ revision: string; project?: { files: Array<{ path: string }> } }>;
+  };
+}
+
+async function jsonFile<T>(filename: string, fallback: T): Promise<T> {
+  try { return JSON.parse(await readFile(filename, 'utf8')) as T; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return fallback; throw error; }
+}
+async function atomicJson(filename: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(filename), { recursive: true, mode: 0o700 });
+  const temp = `${filename}.${randomUUID()}.tmp`;
+  try { await writeFile(temp, JSON.stringify(value, null, 2), { mode: 0o600, flag: 'wx' }); await rename(temp, filename); }
+  finally { await rm(temp, { force: true }); }
+}
 
 type Receipt = { hash: string; commentId?: string; deletedId?: string };
 type State = { comments: ReviewComment[]; receipts: Record<string, Receipt> };
@@ -39,7 +58,7 @@ function validateOperation(input: ReviewCommentsInput) {
 }
 
 /** Shared HTTP/MCP service. Record + retry receipt commit together under a cross-process lock. */
-export async function reviewComments(store: WorkspaceStore, input: ReviewCommentsInput): Promise<ReviewCommentsResult> {
+export async function reviewComments(store: ReviewCommentsStore, input: ReviewCommentsInput): Promise<ReviewCommentsResult> {
   validateOperation(input);
   return store.lock(async () => {
     const scoped = store.forProject(input.projectId);

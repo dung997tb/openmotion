@@ -1,3 +1,4 @@
+import { implicitTextLane } from "../store/timelineElement";
 import { isImplicitRootText } from "./timelineText";
 /**
  * Higher-level timeline DOM operations: element factories, DOM-to-element
@@ -31,6 +32,7 @@ import {
   buildTimelineElementIdentity,
   getTimelineElementIdentity,
   isTimelineIgnoredElement,
+  isVideoAudible,
   readTimelineElementZIndex,
 } from "./timelineElementHelpers";
 
@@ -104,6 +106,10 @@ export function createTimelineElementFromManifestClip(params: {
     selectorIndex =
       doc && selector ? getTimelineElementSelectorIndex(doc, hostEl, selector) : undefined;
     sourceFile = getTimelineElementSourceFile(hostEl);
+  } else if (!doc && clip.authored) {
+    ({ domId, hfId, sourceFile } = clip.authored);
+    if (domId) selector = `#${CSS.escape(domId)}`;
+    else if (hfId) selector = `[data-hf-id="${CSS.escape(hfId)}"]`;
   }
 
   const identity = buildTimelineElementIdentity({
@@ -181,9 +187,16 @@ export function createTimelineElementFromManifestClip(params: {
     entry.zIndex = readTimelineElementZIndex(hostEl);
     if (isImplicitRootText(hostEl)) {
       entry.implicitTextTiming = true;
-      entry.track = -100000 + fallbackIndex;
+      entry.track = implicitTextLane(fallbackIndex);
       entry.authoredTrack = 0;
     }
+  }
+  if (!doc && clip.authored) {
+    entry.hidden = clip.authored.hidden || undefined;
+    entry.timelineLocked = clip.authored.timelineLocked || undefined;
+    entry.muted = clip.authored.muted || undefined;
+    entry.hasAudio = isVideoAudible({ tag: entry.tag, hasAudioAttr: clip.authored.hasAudioAttr, muted: clip.authored.muted }) || undefined;
+    if (Number.isFinite(clip.authored.volume)) entry.volume = clip.authored.volume;
   }
   if (clip.assetUrl) entry.src = clip.assetUrl;
   if (clip.kind === "composition" && clip.compositionId) {
@@ -338,7 +351,7 @@ function scanTimelineFromDOM(
 
     if (isImplicitRootText(el)) {
       entry.implicitTextTiming = true;
-      entry.track = -100000 + els.length;
+      entry.track = implicitTextLane(els.length);
       entry.authoredTrack = 0;
     }
 

@@ -1,10 +1,13 @@
+import { getCachedCloudDisklessMode } from "./cloudRuntime";
+import { type TimelineFileEdit, saveCloudTimeline } from "./cloudTimelineEdit";
 import type { TimelineElement } from "../player";
 import { toAuthoredStart } from "../player/store/timelineElement";
 import type { RecordEditInput } from "../hooks/timelineEditingHelpers";
 import { buildPatchTarget } from "./timelineElementSplit";
 import { serializeStudioFileMutations } from "./studioFileMutationCoordinator";
 import { buildProjectApiPath } from "./projectRouting";
-import { markStudioWriteToken } from "./studioFileVersion";
+import { cloudHistoryForWrite, type StudioWriteHistory } from "./studioFileHistory";
+import { studioWriteHeaders } from "./studioFileVersion";
 import { resolveElementTrack } from "./studioHelpers";
 import { studioApiFetch } from "./studioApiFetch";
 
@@ -113,6 +116,7 @@ async function readFileVersion(projectId: string, path: string): Promise<string>
 async function requestAtomicCut(
   projectId: string,
   intents: CutFileIntent[],
+  history?: StudioWriteHistory,
 ): Promise<CutBatchResponse> {
   const files = [];
   for (const intent of intents) {
@@ -122,14 +126,13 @@ async function requestAtomicCut(
     });
   }
   const transactionToken = `cut:${crypto.randomUUID()}`;
-  markStudioWriteToken(transactionToken);
   const response = await studioApiFetch(
     buildProjectApiPath(projectId, "/file-mutations/split-batch"),
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Hyperframes-Write-Token": transactionToken,
+        ...studioWriteHeaders(history, transactionToken),
       },
       body: JSON.stringify({ files, transactionToken }),
     },
@@ -172,13 +175,36 @@ interface RunAtomicCutInput {
   recordEdit: (input: RecordEditInput) => Promise<void>;
   observeProjectFileVersion?: (path: string, version: string | null) => void;
   synchronize: () => void;
+  projectPending?: (files: RecordEditInput["files"]) => (() => void) | undefined;
 }
 
 /** One coordinator owns request, history registration, safe rollback, and resync. */
 export function runAtomicCutTransaction(input: RunAtomicCutInput): Promise<AtomicCutResult> {
+  if (getCachedCloudDisklessMode() && input.intents.every(intent => intent.targets.length)) {
+    const edits: TimelineFileEdit[] = input.intents.map(intent => ({ path: intent.path, command: resolve => {
+      const measured = intent.targets.map(cut => ({ hfId: resolve({...cut.target, domId: cut.target.id ?? undefined}),
+        start: cut.elementStart, duration: cut.elementDuration, track: cut.track,
+        ...(cut.splitTime !== intent.targets[0]!.splitTime && { at: cut.splitTime }) }));
+      return { kind: "splitClips", hfIds: measured.map(cut => cut.hfId), at: intent.targets[0]!.splitTime, measured };
+    }}));
+    const skipped = new Set<string>();
+    return saveCloudTimeline(input.projectId, edits, input.writeProjectFile, input.recordEdit, input.label, undefined, {
+      onSkippedSelectors: selectors => selectors.forEach(selector => skipped.add(selector)),
+      projectPending: input.projectPending,
+    }).then(() => {
+      let syncFailed = false;
+      try { input.synchronize(); } catch { syncFailed = true; }
+      return { splitCount: input.intents.reduce((sum, edit) => sum + edit.targets.length, 0), skippedSelectors: [...skipped], syncFailed };
+    }, error => {
+      // An uncertain response or failed history read still needs the authoritative file and preview.
+      try { input.synchronize(); } catch { /* Preserve the original save diagnostic. */ }
+      throw error;
+    });
+  }
   const paths = input.intents.map((intent) => intent.path);
   return serializeStudioFileMutations(input.writeProjectFile, paths, async () => {
-    const result = await requestAtomicCut(input.projectId, input.intents);
+    const history = cloudHistoryForWrite(input.writeProjectFile, input);
+    const result = await requestAtomicCut(input.projectId, input.intents, history);
     const snapshots = Object.fromEntries(
       result.files.map((file) => [file.path, { before: file.before, after: file.after }]),
     );

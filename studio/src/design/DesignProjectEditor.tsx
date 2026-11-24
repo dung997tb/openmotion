@@ -160,7 +160,7 @@ export function DesignProjectEditor({
   const { info: integrationInfo } = useIntegrationInfo();
   const promptOptions = { integration: integrationInfo, language: locale !== 'en' ? locale : null };
   const toast = useToast();
-  const { project, versions, currentVersionId, comments, editors, loading, error, refresh, setProject, setComments } = useDesignProject(projectId);
+  const { project, versions, currentVersionId, comments, editors, loading, error, deferred, refresh, setProject, setComments } = useDesignProject(projectId);
 
   const [titleDraft, setTitleDraft] = useState('');
   const [activeFile, setActiveFile] = useState<string>('');
@@ -568,6 +568,14 @@ export function DesignProjectEditor({
 
   if (loading && !project) {
     return <div className="om-design-shell" style={{ alignItems: 'center', justifyContent: 'center' }}><span className="om-design-muted">{t('Loading design project…')}</span></div>;
+  }
+  if (deferred) {
+    return <div className="om-design-shell" role="status" data-deferred-p2="true" style={{ alignItems: 'center', justifyContent: 'center', gap: 12, textAlign: 'center', padding: 24 }}>
+      <RemixIcon name="time-line" size={28} />
+      <strong>{t('Design Studio is coming in Phase 2')}</strong>
+      <p className="om-design-muted" style={{ maxWidth: 460 }}>{t('Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.')}</p>
+      <Button type="button" variant="secondary" onClick={onBack}>{t('Back to Design Studio')}</Button>
+    </div>;
   }
   if (error || !project) {
     return <div className="om-design-shell" style={{ alignItems: 'center', justifyContent: 'center', gap: 12 }}>

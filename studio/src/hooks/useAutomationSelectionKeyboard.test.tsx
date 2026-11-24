@@ -2,6 +2,7 @@
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
+import { TimelineReadOnlyContext } from "../player/components/timelineReadOnly";
 import { usePlayerStore } from "../player/store/playerStore";
 import { useAutomationSelectionKeyboard } from "./useAutomationSelectionKeyboard";
 import {
@@ -76,7 +77,7 @@ describe("useAutomationSelectionKeyboard", () => {
     mountedRoot = null;
   });
 
-  const setup = (binding: Partial<AutomationLaneBinding>) => {
+  const setup = (binding: Partial<AutomationLaneBinding>, readOnly = false) => {
     const onCommit = vi.fn().mockResolvedValue(undefined);
     const automation = {
       version: 1,
@@ -111,10 +112,18 @@ describe("useAutomationSelectionKeyboard", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
-    act(() => root.render(<Host lanes={lanes} />));
+    act(() => root.render(<TimelineReadOnlyContext.Provider value={readOnly ? () => {} : null}><Host lanes={lanes} /></TimelineReadOnlyContext.Provider>));
     mountedRoot = { root, host };
     return { onCommit };
   };
+
+  it("ignores document-level Delete while the visible timeline is read-only", () => {
+    usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
+    usePlayerStore.getState().setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 }));
+    const { onCommit } = setup({}, true);
+    key("Delete");
+    expect(onCommit).not.toHaveBeenCalled();
+  });
 
   it("Delete removes every breakpoint the selection covers", () => {
     // Deleted, not emptied. Pinning anchors at the selection's edges keeps the

@@ -10,6 +10,39 @@ afterEach(() => {
 });
 
 describe("addBlockToProject", () => {
+  it.each([
+    { existingEnd: 0, start: 0, duration: 5 },
+    { existingEnd: 43.13, start: 0, duration: 43.13 },
+    { existingEnd: 43.13, start: 40, duration: 3.13 },
+    { existingEnd: 43.13, start: 43.07, duration: 0.06 },
+    { existingEnd: 43.13, start: 43.08, duration: 0.05 },
+    { existingEnd: 43.13, start: 43.12, duration: 0.05 },
+    { existingEnd: 43.13, start: 43.13, duration: 5 },
+    { existingEnd: 43.13, start: 45, duration: 5 },
+  ])("places an undated overlay at $start on a $existingEnd-second timeline", async ({ existingEnd, start, duration }) => {
+    const child = "compositions/components/arc-motion-path.html";
+    const files = new Map([
+      [child, '<div data-composition-id="arc-motion-path"></div>'],
+      ["index.html", `<main data-composition-id="main" data-duration="${existingEnd}"></main>`],
+    ]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ written: [child], block: {
+        type: "hyperframes:component", name: "arc-motion-path", title: "Arc Motion Path",
+      } }),
+    }));
+    const result = await addBlockToProject({
+      projectId: "p1", blockName: "arc-motion-path", activeCompPath: null, placement: { start, track: 1 },
+      timelineElements: existingEnd ? [{ id: "existing", tag: "div", start: 0, duration: existingEnd, track: 0 }] : [],
+      readProjectFile: async path => files.get(path) ?? "",
+      writeProjectFile: async (path, content) => { files.set(path, content); },
+      recordEdit: vi.fn(), refreshFileTree: vi.fn(), reloadPreview: vi.fn(), showToast: vi.fn(),
+    });
+    expect(result?.element).toMatchObject({ start, duration });
+    const saved = new DOMParser().parseFromString(files.get("index.html")!, "text/html");
+    expect(saved.querySelector("#arc-motion-path")?.getAttribute("data-duration")).toBe(String(duration));
+    expect(Number(saved.querySelector("main")?.getAttribute("data-duration"))).toBeCloseTo(Math.max(existingEnd, start + duration));
+  });
+
   it("uses an explicit selected-media duration and track for a Registry overlay block", async () => {
     const componentPath = "compositions/camcorder-hud.html";
     const targetPath = "compositions/scene.html";
@@ -61,7 +94,7 @@ describe("addBlockToProject", () => {
 
     expect(result?.block.name).toBe("camcorder-hud");
     const source = files.get(targetPath);
-    expect(source).toContain('data-composition-src="compositions/camcorder-hud.html"');
+    expect(source).toContain('data-composition-src="camcorder-hud.html"');
     expect(source).toContain('data-start="2.5"');
     expect(source).toContain('data-duration="4.25"');
     expect(source).toContain('data-track-index="3"');

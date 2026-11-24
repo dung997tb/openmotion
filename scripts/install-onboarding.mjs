@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { runFile } from './runtime-assets.mjs';
 import { onboardingPresentationInstructions } from './inline-onboarding.mjs';
-import { prepareCodexHostHandoff } from './codex-host-handoff.mjs';
+import { defaultDataDirectory, prepareCodexHostHandoff } from './codex-host-handoff.mjs';
 import { onboardingTemplateIds, recommendationTemplateIds, selectOnboardingTemplateIds } from '../shared/onboarding-templates.ts';
 import { installationFallbackWelcome, isLanguage } from '../mcp-ui/template-recommendations/i18n.ts';
 
@@ -28,8 +28,7 @@ export async function prepareInstallationOnboarding({ appRoot, dataDirectory, te
     // HTML preparation is host-neutral; the Agent selects a supported presentation surface.
     try {
       if (!dataDirectory) {
-        const { WorkspaceStore } = await import('../workspace.ts');
-        dataDirectory = new WorkspaceStore().directory;
+        dataDirectory = defaultDataDirectory(appRoot);
       }
       const { prepareInlineOnboarding } = await import('./inline-onboarding.mjs');
       return await prepareInlineOnboarding({ appRoot, language, templateIds,
@@ -106,13 +105,9 @@ export async function prepareInstallationFlow(options) {
       const resolved = expand(declared);
       const cwd = path.isAbsolute(resolved) ? '.' : expand(server.cwd || '.');
       if (resolved) options = { ...options, dataDirectory: path.isAbsolute(resolved) ? path.resolve(resolved) : path.resolve(options.appRoot, cwd, resolved) };
-      else {
-        const { WorkspaceStore } = await import('../workspace.ts');
-        options = { ...options, dataDirectory: new WorkspaceStore().directory };
-      }
+      else options = { ...options, dataDirectory: defaultDataDirectory(options.appRoot) };
     } else {
-      const { WorkspaceStore } = await import('../workspace.ts');
-      options = { ...options, dataDirectory: new WorkspaceStore().directory };
+      options = { ...options, dataDirectory: defaultDataDirectory(options.appRoot) };
     }
   }
   const [onboarding, preview] = await Promise.all([

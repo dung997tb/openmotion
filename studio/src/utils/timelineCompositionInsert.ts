@@ -1,6 +1,6 @@
 import { createStudioSaveHttpError } from "./studioSaveDiagnostics";
 import { serializeStudioFileMutation } from "./studioFileMutationCoordinator";
-import type { RecordEditInput } from "./studioFileHistory";
+import { cloudHistoryForWrite, type RecordEditInput, type StudioWriteHistory } from "./studioFileHistory";
 import { buildProjectApiPath } from "./projectRouting";
 import { studioWriteHeaders } from "./studioFileVersion";
 import { deriveTimelineStoreKeyForDomId } from "../player/lib/timelineElementHelpers";
@@ -23,7 +23,8 @@ async function insertTimelineComposition(input: {
   sourcePath: string;
   start: number;
   track: number;
-}): Promise<TimelineCompositionInsertionResult> {
+  canvasPosition?: { left: number; top: number };
+}, history?: StudioWriteHistory): Promise<TimelineCompositionInsertionResult> {
   const current = await studioApiFetch(
     buildProjectApiPath(input.projectId, `/files/${encodeURIComponent(input.targetPath)}`),
   );
@@ -40,11 +41,12 @@ async function insertTimelineComposition(input: {
     ),
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
+      headers: { "Content-Type": "application/json", ...studioWriteHeaders(history) },
       body: JSON.stringify({
         sourcePath: input.sourcePath,
         start: input.start,
         track: input.track,
+        canvasPosition: input.canvasPosition,
         expectedVersion: snapshot.version,
       }),
     },
@@ -61,6 +63,7 @@ export async function commitTimelineCompositionInsertion(input: {
   sourcePath: string;
   start: number;
   track: number;
+  canvasPosition?: { left: number; top: number };
   writeFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
   recordEdit: (entry: RecordEditInput) => Promise<void>;
   observeVersion?: (path: string, version: string | null) => void;
@@ -71,11 +74,12 @@ export async function commitTimelineCompositionInsertion(input: {
 }): Promise<TimelineElement | undefined> {
   return serializeStudioFileMutation(input.writeFile, input.targetPath, async () => {
     if (input.isActive?.() === false) return;
-    const result = await insertTimelineComposition(input);
+    const label = "Add composition to timeline";
+    const result = await insertTimelineComposition(input, cloudHistoryForWrite(input.writeFile, { label }));
     input.observeVersion?.(input.targetPath, result.version);
     try {
       await input.recordEdit({
-        label: "Add composition to timeline",
+        label,
         files: { [input.targetPath]: { before: result.before, after: result.after } },
       });
     } catch (error) {

@@ -2,18 +2,22 @@
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MotionApp, resolveWorkspaceProject } from './MotionApp';
+import { MotionApp } from './MotionApp';
+import { preloadMotionProjectEditor } from './MotionProjectEditor';
+import { resolveWorkspaceProject } from './resolveWorkspaceRoute';
+import { setCachedCloudDisklessMode } from '../utils/cloudRuntime';
 import { I18nProvider, translate } from '../i18n/I18n';
 import { trackMotion } from './tracking';
 import { preloadAllWorkspacePages } from '../router/lazyPages';
 
+vi.mock('./MotionProjectEditor', () => ({ preloadMotionProjectEditor: vi.fn() }));
 vi.mock('../App', () => ({ StudioApp: ({ resolvedProjectId }: { resolvedProjectId: string }) => <div data-viewer-project={resolvedProjectId} /> }));
 vi.mock('./ArtifactViewer', () => ({ ArtifactViewer: ({ artifact }: { artifact: { projectId: string } }) => <div data-viewer-project={artifact.projectId} /> }));
 vi.mock('./tracking', () => ({ trackMotion: vi.fn() }));
 const id = '11111111-1111-1111-1111-111111111111';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 beforeAll(() => preloadAllWorkspacePages());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.mocked(preloadMotionProjectEditor).mockClear(); });
 it.each([false, true])('prepares only existing projects while browsing, and creates only the selected template (existing=%s)', async existing => {
   history.replaceState(null, '', '/?templates=1&embed=1');
   sessionStorage.clear();
@@ -51,6 +55,7 @@ it.each([false, true])('prepares only existing projects while browsing, and crea
   const root = createRoot(container);
   try {
     await act(async () => root.render(<I18nProvider initialLocale="en"><MotionApp /></I18nProvider>));
+    expect(preloadMotionProjectEditor).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(container.querySelector('dialog[aria-label="Template library"]')).not.toBeNull();
     expect(fetcher.mock.calls.some(([url]) => url.includes('/preview/open'))).toBe(existing);
@@ -61,10 +66,14 @@ it.each([false, true])('prepares only existing projects while browsing, and crea
     const open = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Open and edit'))!;
     await act(async () => open.click());
     expect(posts().map(([url]) => url.split('?')[0])).toEqual([
-      '/design-api/sessions', `/design-api/sessions/${preparedSessionId}/artifacts`, `/motion-api/projects/${preparedId}/open`,
+      '/motion-api/sessions', `/motion-api/sessions/${preparedSessionId}/artifacts`, `/motion-api/projects/${preparedId}/open`,
     ]);
-    expect(JSON.parse(String(posts()[0][1]!.body)).templateId).toBe('product-promo');
-    expect(JSON.parse(String(posts()[1][1]!.body))).toEqual({ templateId: 'product-promo', expectedRevision: 'original-revision', expectedProjectId: existing ? id : 'project' });
+    const sessionBody = JSON.parse(String(posts()[0][1]!.body));
+    expect(sessionBody).toMatchObject({ templateId: 'product-promo', id: expect.any(String) });
+    expect(JSON.parse(String(posts()[1][1]!.body))).toEqual({
+      templateId: 'product-promo', projectType: 'template', requestId: sessionBody.id,
+      expectedRevision: 'original-revision', expectedProjectId: existing ? id : 'project',
+    });
     expect(posts()[2][0]).toBe(`/motion-api/projects/${preparedId}/open${existing ? `?projectId=${id}` : ''}`);
     expect(JSON.parse(String(posts()[2][1]!.body))).toEqual({ expectedRevision: existing ? 'original-revision' : 'new-revision', expectedProjectId: existing ? id : preparedId });
     expect(assign).not.toHaveBeenCalled();
@@ -82,6 +91,52 @@ it('resolves a bookmark without switching another page globally', async () => {
   await resolveWorkspaceProject(id, new AbortController().signal);
   expect(fetcher.mock.calls.map(call => call[0])).toEqual(['/motion-api/projects', `/motion-api/preview/open?projectId=${id}`]);
   expect(fetcher.mock.calls[1][1]).toEqual({ method: 'POST', signal: expect.any(AbortSignal) });
+});
+
+it('mounts a cloud bookmark while the independent sidebar catalog is still pending', async () => {
+  const session = '22222222-2222-2222-2222-222222222222';
+  const artifact = { id: '33333333-3333-3333-3333-333333333333', projectId: id, title: 'Film', kind: 'motion-project' };
+  let confirmProject!: (response: Response) => void;
+  const confirmation = new Promise<Response>(resolve => { confirmProject = resolve; });
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes('/preview/open')) return confirmation;
+    return new Promise<Response>(() => {});
+  });
+  vi.stubGlobal('fetch', fetcher);
+  setCachedCloudDisklessMode(true);
+  history.replaceState(null, '', '/?project=' + id);
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<I18nProvider><MotionApp /></I18nProvider>));
+    expect(preloadMotionProjectEditor).toHaveBeenCalledOnce();
+    expect(container.querySelector('[data-viewer-project]')).toBeNull();
+    await act(async () => confirmProject(Response.json({ projectId: id, sessionId: session, artifact })));
+    expect(container.querySelector('[data-viewer-project]')?.getAttribute('data-viewer-project')).toBe(id);
+    expect(new URLSearchParams(location.search).get('session')).toBe(session);
+    expect(fetcher.mock.calls.filter(([url]) => url.includes('/preview/open'))).toHaveLength(1);
+    expect(fetcher.mock.calls.some(([url]) => url.includes('/sessions/'))).toBe(false);
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+    history.replaceState(null, '', '/');
+    setCachedCloudDisklessMode(null);
+  }
+});
+it('skips speculative editor loading on a template link with a retained project', async () => {
+  setCachedCloudDisklessMode(true);
+  history.replaceState(null, '', '/?templates=1&project=' + id);
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+  const root = createRoot(document.createElement('div'));
+  try {
+    await act(async () => root.render(<I18nProvider><MotionApp /></I18nProvider>));
+    expect(preloadMotionProjectEditor).not.toHaveBeenCalled();
+  } finally {
+    act(() => root.unmount());
+    history.replaceState(null, '', '/');
+    setCachedCloudDisklessMode(null);
+  }
 });
 
 it('records an explicit editor visit as Studio after its active project resolves', async () => {
@@ -193,7 +248,7 @@ it('keeps chrome, sidebar search and geometry mounted while replacing only the p
     }
     if ((url.includes('/preview/open') || url.includes('/project/status')) && projectId === second) await opening;
     return Response.json(url.endsWith('/projects') && !init?.method ? catalog
-      : url.includes('/design-api/sessions/') ? catalog.sessions.find(item => url.includes(item.id))
+      : url.includes('/motion-api/sessions/') ? catalog.sessions.find(item => url.includes(item.id))
       : url.includes('/open') && url.includes('/projects/') ? { projectId: new URL(url, location.origin).pathname.split('/').at(-2), revision: 'r' }
       : { projectId, revision: 'r' });
   }));
@@ -247,5 +302,52 @@ it('keeps chrome, sidebar search and geometry mounted while replacing only the p
     expect(row.closest('.om-project-sidebar-row')?.getAttribute('data-active')).toBe('false');
   } finally {
     act(() => root.unmount()); container.remove(); assign.mockRestore(); history.replaceState(null, '', '/');
+  }
+});
+
+it('uses the authorized sidebar activation to mount its target without another preview open', async () => {
+  const other = '22222222-2222-2222-2222-222222222222';
+  const session = '33333333-3333-3333-3333-333333333333';
+  const meta = document.createElement('meta');
+  meta.name = 'openmotion-runtime';
+  meta.content = 'cloud-diskless';
+  meta.dataset.editorOpen = '1';
+  document.head.append(meta);
+  setCachedCloudDisklessMode(true);
+  history.replaceState(null, '', '/?project=' + id);
+  const projects = [{ id, title: 'First' }, { id: other, title: 'Target' }];
+  const result = (projectId: string) => ({
+    projectId, sessionId: session,
+    artifact: { id: projectId, projectId, kind: 'motion-project', title: projectId === id ? 'First' : 'Target' },
+  });
+  const fetcher = vi.fn(async (url: string) => {
+    const { pathname, searchParams } = new URL(url, location.origin);
+    if (pathname === '/motion-api/projects') return Response.json({ activeId: id, projects });
+    if (pathname === '/motion-api/preview/open') return Response.json(result(id));
+    if (pathname === '/motion-api/projects/' + other + '/open') return Response.json(result(other));
+    return Response.json({ projectId: searchParams.get('projectId'), revision: 'revision' });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const el = document.createElement('div');
+  document.body.append(el);
+  const root = createRoot(el);
+  try {
+    await act(async () => root.render(<I18nProvider><MotionApp /></I18nProvider>));
+    expect(el.querySelector('[data-viewer-project]')?.getAttribute('data-viewer-project')).toBe(id);
+    fetcher.mockClear();
+    const button = el.querySelector<HTMLButtonElement>('button.motion-session[aria-label="Target"]');
+    expect(button).toBeTruthy();
+    await act(async () => button!.click());
+    expect(el.querySelector('[data-viewer-project]')?.getAttribute('data-viewer-project')).toBe(other);
+    const urls = fetcher.mock.calls.map(([url]) => url);
+    expect(urls).toContain('/motion-api/projects/' + other + '/open?view=editor&projectId=' + id);
+    expect(urls.some(url => url.includes('/preview/open') || url.includes('/project/status?view=summary&projectId=' + id))).toBe(false);
+    expect(urls.filter(url => url === '/motion-api/projects')).toHaveLength(1);
+  } finally {
+    act(() => root.unmount());
+    el.remove();
+    meta.remove();
+    history.replaceState(null, '', '/');
+    setCachedCloudDisklessMode(null);
   }
 });

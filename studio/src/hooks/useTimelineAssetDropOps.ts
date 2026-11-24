@@ -1,3 +1,6 @@
+import type { TrackPlacement } from "../../../packages/edit-core/asset-track-layout";
+import { applyContentCommand, type ContentCommand } from "../../../packages/edit-core/content-commands";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { TimelineMediaActionError } from "../utils/timelineMediaActionError";
 // Asset-drop handlers for the timeline: drop an existing project asset at a
 // placement, or upload dragged-in OS files and place them sequentially.
@@ -11,15 +14,10 @@ import type { TimelineDropPlacement } from "../player/components/timelineCallbac
 import { mediaPlacementPeers, resolveMediaDropPlacement, resolveDropTrack, topTrackZIndex } from "../utils/timelineDropTrackInsert";
 import {
   buildTimelineAssetId,
-  buildTimelineAssetInsertHtml,
-  fitTimelineAssetGeometry,
   getTimelineAssetKind,
-  insertTimelineAssetIntoSource,
-  resolveTimelineAssetCompositionSize,
-  resolveTimelineAssetSrc,
 } from "../utils/timelineAssetDrop";
 import { generateId } from "../utils/generateId";
-import { saveProjectFilesWithHistory, type RecordEditInput } from "../utils/studioFileHistory";
+import { saveProjectFilesWithHistory, type ProjectFileWriter, type RecordEditInput } from "../utils/studioFileHistory";
 import {
   collectHtmlIds,
   resolveDroppedAssetDuration,
@@ -28,7 +26,6 @@ import {
 import { formatTimelineAttributeNumber } from "./timelineEditingHelpers";
 import { readFileContent } from "./timelineTimingSync";
 import { commitTimelineCompositionInsertion } from "../utils/timelineCompositionInsert";
-import { extendRootDurationInSource } from "../utils/rootDuration";
 import { deriveTimelineStoreKeyForDomId } from "../player/lib/timelineElementHelpers";
 import { selectAndRevealTimelineElement } from "../player/components/timelineDropReveal";
 import { usePlayerStore } from "../player/store/playerStore";
@@ -71,7 +68,7 @@ interface UseTimelineAssetDropOpsOptions {
   activeCompPath: string | null;
   timelineElements: TimelineElement[];
   showToast: (message: string, tone?: "error" | "info") => void;
-  writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
+  writeProjectFile: ProjectFileWriter;
   recordEdit: (input: RecordEditInput) => Promise<void>;
   reloadPreview: () => void;
   uploadProjectFiles: (files: Iterable<File>, dir?: string, entryPoint?: ImportEntryPoint) => Promise<string[]>;
@@ -161,7 +158,7 @@ export function useTimelineAssetDropOps({
         // <video> marked data-has-audio, and a muted drop was losing the sound.
         const hasAudio = await resolveDroppedAssetHasAudio(pid, assetPath, kind);
         if (!stillActive()) return undefined;
-        const resolvedAssetSrc = resolveTimelineAssetSrc(targetPath, assetPath);
+        let command: ContentCommand | undefined;
 
         const tag = kind === "image" ? "img" : kind === "text" ? "p" : kind;
 
@@ -191,7 +188,9 @@ export function useTimelineAssetDropOps({
             ? peers
             : mediaPlacementPeers(originalContent, peers, placed);
           landing = resolveMediaDropPlacement(gesture.onNewTrack ? placed : livePeers, placement, dropped);
+          const trackLayout: TrackPlacement[] = [];
           const resolved = resolveDropTrack({
+            trackLayout,
             source: originalContent,
             elements: livePeers,
             placed,
@@ -205,27 +204,13 @@ export function useTimelineAssetDropOps({
             duration: normalizedDuration,
             waitingForPlacement: false,
           });
-          return extendRootDurationInSource(
-            insertTimelineAssetIntoSource(
-              resolved.source,
-              buildTimelineAssetInsertHtml({
-                id: newId,
-                hfId: `hf-${generateId()}`,
-                assetPath: resolvedAssetSrc,
-                kind,
-                start,
-                duration: normalizedDuration,
-                track,
-                zIndex: newElementZIndex,
-                hasAudio,
-                geometry: fitTimelineAssetGeometry(
-                  null,
-                  resolveTimelineAssetCompositionSize(originalContent),
-                ),
-              }),
-            ),
-            start + normalizedDuration,
-          );
+          const place: ContentCommand = {
+            kind: 'placeAsset', compositionPath: targetPath, assetPath, hfId: 'hf-' + generateId(),
+            ...(trackLayout.length && {trackLayout}),
+            start, duration: normalizedDuration, track, zIndex: newElementZIndex, hasAudio, canvasPosition: placement.canvasPosition,
+          };
+          if (getCachedCloudDisklessMode()) command = place;
+          return applyContentCommand(originalContent, place);
         };
 
         await saveProjectFilesWithHistory({
@@ -234,6 +219,7 @@ export function useTimelineAssetDropOps({
           files: { [targetPath]: insertAsset },
           readFile: (path) => readFileContent(pid, path),
           writeFile: writeProjectFile,
+          commandForWrite: () => command,
           recordEdit,
         });
 
@@ -374,7 +360,7 @@ export function useTimelineAssetDropOps({
   );
 
   const handleTimelineCompositionDrop = useCallback(
-    async (sourcePath: string, placement: Pick<TimelineElement, "start" | "track">) => {
+    async (sourcePath: string, placement: TimelineDropPlacement) => {
       if (isRecordingRef?.current) {
         showToast("Cannot edit timeline while recording", "error");
         return;
@@ -394,6 +380,7 @@ export function useTimelineAssetDropOps({
           sourcePath,
           start: placement.start,
           track: placement.track,
+          canvasPosition: placement.canvasPosition,
           writeFile: writeProjectFile,
           recordEdit,
           observeVersion: observeProjectFileVersion,

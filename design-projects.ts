@@ -12,12 +12,31 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { constants } from 'node:fs';
 import { promisify } from 'node:util';
-import { atomicJson, jsonFile } from './phase1-versions.ts';
-import { withProcessLock } from './shared/process-lock.ts';
 import { readProjectZip } from './shared/project-zip.ts';
-import { attachmentDisposition } from './shared/http-header.ts';
 import { zip } from './scripts/zip.mjs';
-import { browserExecutable } from './browser.ts';
+import { browserExecutable } from './shared/browser-executable.ts';
+
+async function jsonFile<T>(filename: string, fallback: T): Promise<T> {
+  try { return JSON.parse(await readFile(filename, 'utf8')) as T; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return fallback; throw error; }
+}
+async function atomicJson(filename: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(filename), { recursive: true, mode: 0o700 });
+  const temp = `${filename}.${randomUUID()}.tmp`;
+  try { await writeFile(temp, JSON.stringify(value, null, 2), { mode: 0o600, flag: 'wx' }); await rename(temp, filename); }
+  finally { await rm(temp, { force: true }); }
+}
+const designLocks = new Map<string, Promise<unknown>>();
+async function withProcessLock<T>(lockPath: string, task: () => Promise<T>): Promise<T> {
+  const prev = designLocks.get(lockPath) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const next = prev.then(() => gate);
+  designLocks.set(lockPath, next);
+  await prev;
+  try { return await task(); }
+  finally { release(); if (designLocks.get(lockPath) === next) designLocks.delete(lockPath); }
+}
 import { validateReviewAnnotation } from './shared/review-comments.ts';
 import { designCatalog } from './shared/design-catalog.ts';
 import {
@@ -38,24 +57,7 @@ const READ_LIMIT_DEFAULT = 200_000;
 const IGNORED_DIRS = new Set(['node_modules', '.git', '__MACOSX', 'dist', 'build', '.next']);
 
 const TEXT_EXTS = new Set(['html', 'htm', 'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'json', 'md', 'markdown', 'txt', 'svg', 'xml', 'csv', 'yaml', 'yml', 'glsl', 'vert', 'frag']);
-const BINARY_IMPORT_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'ico', 'bmp', 'svg', 'woff', 'woff2', 'ttf', 'otf', 'mp3', 'wav', 'ogg', 'mp4', 'webm']);
 const IMPORT_EXTS = new Set([...TEXT_EXTS, 'png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'ico', 'bmp', 'woff', 'woff2', 'ttf', 'otf', 'pdf', 'mp3', 'wav', 'ogg', 'mp4', 'webm', 'wasm', 'map', 'webmanifest']);
-
-export type DesignAssetResolver = (ref: { assetId: string; versionId: string }) => Promise<{
-  asset: { id: string; name: string; modality: string };
-  version: { id: string; filename: string; name?: string; mimeType: string; bytes: number; sha256: string };
-  filename: string;
-}>;
-
-function slugifyAssetName(raw: string): string {
-  const slug = raw
-    .toLowerCase()
-    .replace(/\.[^.]+$/, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48);
-  return slug || 'asset';
-}
 
 const MIME_BY_EXT: Record<string, string> = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8',
@@ -977,104 +979,6 @@ export class DesignProjects {
     }));
   }
 
-  async importBinaryFile(id: string, input: {
-    requestId: string;
-    expectedRevision: string;
-    sourcePath: string;
-    expectedSha256?: string;
-    path?: string;
-    name?: string;
-    versionId?: string;
-    summary?: string;
-    source?: 'agent' | 'manual' | 'import';
-  }, origin = ''): Promise<{ project: DesignProjectDetail; version: DesignVersion; path: string }> {
-    const pid = validateId(id);
-    if (typeof input.sourcePath !== 'string' || !input.sourcePath.trim()) {
-      throw new DesignError('INVALID_ARGUMENT', 'sourcePath is required');
-    }
-    const sourceExt = path.extname(input.sourcePath).slice(1).toLowerCase();
-    if (!BINARY_IMPORT_EXTS.has(sourceExt)) {
-      throw new DesignError('INVALID_ARGUMENT', `Unsupported binary asset extension: .${sourceExt || 'none'}`);
-    }
-    const defaultSlug = slugifyAssetName(input.name ?? path.basename(input.sourcePath, `.${sourceExt}`));
-    const suffix = (input.versionId ?? input.expectedSha256 ?? randomUUID()).slice(0, 8);
-    const safePath = cleanDesignPath(input.path ?? `assets/${defaultSlug}-${suffix}.${sourceExt}`);
-    const targetExt = path.extname(safePath).slice(1).toLowerCase();
-    if (!BINARY_IMPORT_EXTS.has(targetExt)) {
-      throw new DesignError('INVALID_ARGUMENT', `Unsupported destination asset extension: .${targetExt || 'none'}`);
-    }
-
-    let bytes: Buffer;
-    let handle;
-    try {
-      handle = await open(input.sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW | (constants.O_NONBLOCK ?? 0));
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') throw new DesignError('NOT_FOUND', 'Source asset file not found');
-      throw new DesignError('INVALID_ARGUMENT', 'Unable to open source asset file');
-    }
-    try {
-      const info = await handle.stat();
-      if (!info.isFile()) throw new DesignError('INVALID_ARGUMENT', 'Source asset must be a regular file');
-      if (!info.size) throw new DesignError('INVALID_ARGUMENT', 'Source asset file is empty');
-      if (info.size > MAX_IMPORT_FILE_BYTES) {
-        throw new DesignError('INVALID_ARGUMENT', `Binary asset exceeds ${Math.round(MAX_IMPORT_FILE_BYTES / (1024 * 1024))} MB limit`);
-      }
-      const chunks: Buffer[] = [];
-      let total = 0;
-      for await (const chunk of handle.createReadStream({ autoClose: false })) {
-        total += chunk.length;
-        if (total > MAX_IMPORT_FILE_BYTES) {
-          throw new DesignError('INVALID_ARGUMENT', `Binary asset exceeds ${Math.round(MAX_IMPORT_FILE_BYTES / (1024 * 1024))} MB limit`);
-        }
-        chunks.push(chunk);
-      }
-      bytes = Buffer.concat(chunks);
-    } finally {
-      await handle.close();
-    }
-
-    const actualSha = sha256(bytes);
-    if (input.expectedSha256 && actualSha !== input.expectedSha256) {
-      throw new DesignError('INVALID_ARGUMENT', 'Source asset checksum mismatch');
-    }
-
-    return this.lock(() => this.idempotent(
-      `import-asset:${pid}`,
-      input.requestId,
-      { expectedRevision: input.expectedRevision, sha256: actualSha, path: safePath },
-      async () => {
-        const catalog = await this.readCatalog();
-        const stored = catalog.projects.find(p => p.id === pid && !p.trashedAt);
-        if (!stored) throw new DesignError('NOT_FOUND', `Design project ${pid} not found`);
-        const dir = this.projectDir(pid);
-        const currentFiles = await this.scanFiles(dir);
-        const currentRevision = computeRevision(currentFiles);
-        if (input.expectedRevision !== currentRevision) {
-          throw new DesignError('VERSION_CONFLICT', `Expected revision ${input.expectedRevision}, current revision is ${currentRevision}`);
-        }
-        if (!currentFiles.some(f => f.path === safePath) && currentFiles.length >= MAX_FILES) {
-          throw new DesignError('INVALID_ARGUMENT', 'Project exceeds file count limit');
-        }
-        const full = path.join(dir, safePath);
-        await mkdir(path.dirname(full), { recursive: true });
-        const tmp = `${full}.${randomUUID()}.tmp`;
-        await writeFile(tmp, bytes);
-        await rename(tmp, full);
-
-        const nextFiles = await this.scanFiles(dir);
-        stored.updatedAt = Date.now();
-        await this.saveCatalog(catalog);
-        const version = await this.appendVersion(pid, nextFiles, {
-          source: input.source ?? 'manual',
-          summary: input.summary ?? `Imported ${safePath}`,
-          entry: stored.entry,
-        });
-        return { project: await this.hydrate(stored, origin), version, path: safePath };
-      },
-    ));
-  }
-
   async listVersions(id: string, opts: { cursor?: string; limit?: number } = {}): Promise<{ versions: DesignVersion[]; currentVersionId: string | null; nextCursor: string | null }> {
     const pid = validateId(id);
     const catalog = await this.readCatalog();
@@ -1579,60 +1483,12 @@ async function readMultipartZip(req: IncomingMessage, maxBytes = MAX_IMPORT_BYTE
 /** HTTP adapter mounted by server.ts for /motion-api/design/* (rewritten to /api/design/*). */
 const THUMB_PERF_SCRIPT = `<style data-om-thumb-style>html:not([data-om-thumb-play="1"]) *,html:not([data-om-thumb-play="1"]) *::before,html:not([data-om-thumb-play="1"]) *::after{animation-play-state:paused!important;transition:none!important;}</style><script data-om-thumb-guard>(function(){try{Object.defineProperty(window,'devicePixelRatio',{get:function(){return 1;},configurable:true});}catch(e){}var nRaf=window.requestAnimationFrame.bind(window),nCaf=window.cancelAnimationFrame.bind(window);var playing=false,budget=3,q=[],nextId=1;window.requestAnimationFrame=function(cb){if(playing||budget>0){if(!playing)budget--;return nRaf(cb);}var id=nextId++;q.push({id:id,cb:cb});return id;};window.cancelAnimationFrame=function(id){nCaf(id);q=q.filter(function(x){return x.id!==id;});};window.addEventListener('message',function(e){var d=e.data;if(!d||d.type!=='om:thumb-play')return;playing=Boolean(d.play);document.documentElement.setAttribute('data-om-thumb-play',playing?'1':'0');if(playing&&q.length){var batch=q.splice(0,q.length);for(var i=0;i<batch.length;i++)nRaf(batch[i].cb);}});})();</script>`;
 
-const THUMB_READY_SCRIPT = `<script data-om-thumb-ready>window.addEventListener('load',function(){window.parent.postMessage({type:'om:thumb-ready'},'*');},{once:true});</script>`;
-
-function injectThumbPerfGuard(buf: Buffer, notifyReady = false): Buffer {
+function injectThumbPerfGuard(buf: Buffer): Buffer {
   const html = buf.toString('utf8');
-  const scripts = THUMB_PERF_SCRIPT + (notifyReady ? THUMB_READY_SCRIPT : '');
   const injected = /<head\b[^>]*>/i.test(html)
-    ? html.replace(/<head\b[^>]*>/i, m => `${m}\n${scripts}`)
-    : `${scripts}\n${html}`;
+    ? html.replace(/<head\b[^>]*>/i, m => `${m}\n${THUMB_PERF_SCRIPT}`)
+    : `${THUMB_PERF_SCRIPT}\n${html}`;
   return Buffer.from(injected, 'utf8');
-}
-
-async function importResolvedAsset(
-  service: DesignProjects,
-  projectId: string,
-  input: {
-    requestId: string;
-    expectedRevision: string;
-    assetId: string;
-    versionId: string;
-    path?: string;
-    summary?: string;
-    source: 'agent' | 'manual';
-  },
-  origin: string,
-  resolveAsset?: DesignAssetResolver,
-) {
-  if (!resolveAsset) throw new DesignError('UNSUPPORTED', 'Workspace asset import is not available in this context');
-  if (!input.expectedRevision || !input.assetId || !input.versionId) {
-    throw new DesignError('INVALID_ARGUMENT', 'expectedRevision, assetId and versionId are required');
-  }
-  let resolved;
-  try {
-    resolved = await resolveAsset({ assetId: input.assetId, versionId: input.versionId });
-  } catch (error) {
-    const message = (error as Error)?.message ?? 'Workspace asset not found';
-    if (/ASSET_NOT_FOUND|ASSET_VERSION_UNAVAILABLE/i.test(message)) {
-      throw new DesignError('NOT_FOUND', message);
-    }
-    throw error;
-  }
-  const ext = path.extname(resolved.filename).toLowerCase();
-  const slug = slugifyAssetName(resolved.asset.name || resolved.version.name || 'asset');
-  const defaultPath = `assets/${slug}-${resolved.version.id.slice(0, 8)}${ext}`;
-  return service.importBinaryFile(projectId, {
-    requestId: input.requestId,
-    expectedRevision: input.expectedRevision,
-    sourcePath: resolved.filename,
-    expectedSha256: resolved.version.sha256,
-    path: input.path ?? defaultPath,
-    name: resolved.asset.name,
-    versionId: resolved.version.id,
-    summary: input.summary ?? `Imported asset ${resolved.asset.name}`,
-    source: input.source,
-  }, origin);
 }
 
 export async function designHttp(
@@ -1642,7 +1498,6 @@ export async function designHttp(
   dataDirectory: string,
   origin: string,
   input: (req: IncomingMessage, limit?: number) => Promise<any>,
-  resolveAsset?: DesignAssetResolver,
 ): Promise<boolean> {
   if (!url.pathname.startsWith('/api/design/')) return false;
   const service = designProjectsFor(dataDirectory);
@@ -1680,7 +1535,7 @@ export async function designHttp(
       if (!file) return sendJson(404, { error: { code: 'NOT_FOUND', message: 'Template preview file not found' } });
       const mime = mimeFor(file);
       let data: Buffer = await readFile(file);
-      if (url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')) data = injectThumbPerfGuard(data, url.searchParams.get('thumbReady') === '1');
+      if (url.searchParams.get('thumb') === '1' && mime.startsWith('text/html')) data = injectThumbPerfGuard(data);
       const headers: Record<string, string> = { 'Content-Type': mime, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' };
       if (mime.startsWith('text/html')) headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads';
       res.writeHead(200, headers);
@@ -1787,20 +1642,6 @@ export async function designHttp(
       return sendJson(200, await service.write(writeMatch[1], { ...body, requestId: body?.requestId || randomUUID() }, origin));
     }
 
-    const importAssetMatch = /^projects\/([^/]+)\/import-asset$/.exec(sub);
-    if (importAssetMatch && req.method === 'POST') {
-      const body = await input(req, 32 * 1024);
-      return sendJson(200, await importResolvedAsset(service, importAssetMatch[1], {
-        requestId: body?.requestId || randomUUID(),
-        expectedRevision: body?.expectedRevision,
-        assetId: body?.assetId,
-        versionId: body?.versionId,
-        path: body?.path,
-        summary: body?.summary,
-        source: 'manual',
-      }, origin, resolveAsset));
-    }
-
     const versionsMatch = /^projects\/([^/]+)\/versions$/.exec(sub);
     if (versionsMatch && req.method === 'GET') {
       return sendJson(200, await service.listVersions(versionsMatch[1], { cursor: url.searchParams.get('cursor') ?? undefined }));
@@ -1835,7 +1676,7 @@ export async function designHttp(
       const result = await service.exportProject(exportMatch[1], body ?? {});
       res.writeHead(200, {
         'Content-Type': result.mime,
-        'Content-Disposition': attachmentDisposition(result.filename),
+        'Content-Disposition': `attachment; filename="${result.filename.replace(/"/g, '')}"`,
         'Content-Length': result.data.length,
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
@@ -1850,13 +1691,7 @@ export async function designHttp(
   }
 }
 
-export async function dispatchDesignTool(
-  name: string,
-  args: any,
-  dataDirectory: string,
-  origin: string,
-  resolveAsset?: DesignAssetResolver,
-): Promise<unknown> {
+export async function dispatchDesignTool(name: string, args: any, dataDirectory: string, origin: string): Promise<unknown> {
   const service = designProjectsFor(dataDirectory);
   const catalog = designCatalog();
 
@@ -1986,17 +1821,6 @@ export async function dispatchDesignTool(
       case 'restore_version': {
         if (!args.versionId || !args.expectedRevision) throw new DesignError('INVALID_ARGUMENT', 'versionId and expectedRevision are required');
         return service.restoreVersion(args.projectId, args.versionId, { requestId: args.requestId || randomUUID(), expectedRevision: args.expectedRevision }, origin);
-      }
-      case 'import_asset': {
-        return importResolvedAsset(service, args.projectId, {
-          requestId: args.requestId || randomUUID(),
-          expectedRevision: args.expectedRevision,
-          assetId: args.assetId,
-          versionId: args.versionId,
-          path: args.path,
-          summary: args.summary,
-          source: 'agent',
-        }, origin, resolveAsset);
       }
       default: throw new DesignError('INVALID_ARGUMENT', `Unknown edit action: ${args.action}`);
     }

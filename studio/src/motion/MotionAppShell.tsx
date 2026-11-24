@@ -1,0 +1,73 @@
+import { lazy, useEffect, type ReactNode } from 'react';
+import { StudioErrorBoundary } from '../components/StudioErrorBoundary';
+import { I18nProvider } from '../i18n/I18n';
+import { readStudioUiPreferences } from '../utils/studioUiPreferences';
+import { getModelContext } from '../webmcp/types';
+import { installEditorTracking } from './editorTracking';
+import { StudioHostContext, type StudioHost } from './StudioHost';
+import { trackMotion } from './tracking';
+
+installEditorTracking(trackMotion);
+
+let editorHostPreload: Promise<{ default: typeof import('./MotionStudioHost').MotionEditorHost }> | undefined;
+const loadMotionEditorHost = () => {
+  editorHostPreload ??= import('./MotionStudioHost')
+    .then(({ MotionEditorHost }) => ({ default: MotionEditorHost }))
+    .catch((error) => {
+      editorHostPreload = undefined;
+      throw error;
+    });
+  return editorHostPreload;
+};
+const LazyMotionEditorHost = lazy(loadMotionEditorHost);
+
+const shellHost: StudioHost = {
+  feedback: false,
+  EditorHost: LazyMotionEditorHost,
+  preloadEditorHost: () => {
+    void loadMotionEditorHost();
+  },
+};
+
+/**
+ * Registers OpenMotion WebMCP tools once for the app lifetime when the browser
+ * natively exposes `document.modelContext`, avoiding the 340 KB `@mcp-b/global`
+ * polyfill download on `/explore` and other shell routes. `MotionEditorHost`
+ * passes `polyfillOnly` to `OpenMotionAgentTools` so native browsers never
+ * double-register when entering the editor.
+ */
+function NativeWebMcpRegistrar() {
+  useEffect(() => {
+    if (readStudioUiPreferences().agentToolsEnabled === false) return;
+    const context = getModelContext();
+    if (!context) return;
+    const controller = new AbortController();
+    void Promise.all([
+      import('../../../shared/webmcp-tools'),
+      import('../webmcp/registrar'),
+      import('../utils/studioApiFetch'),
+    ])
+      .then(([{ buildOpenMotionWebMcpTools }, { registerStudioTools }, { studioApiFetch }]) => {
+        if (controller.signal.aborted) return;
+        return registerStudioTools(context, buildOpenMotionWebMcpTools(studioApiFetch), controller.signal);
+      })
+      .catch(() => {});
+    return () => {
+      controller.abort();
+    };
+  }, []);
+  return null;
+}
+
+export function MotionAppShell({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider>
+      <StudioHostContext.Provider value={shellHost}>
+        <StudioErrorBoundary>
+          <NativeWebMcpRegistrar />
+          {children}
+        </StudioErrorBoundary>
+      </StudioHostContext.Provider>
+    </I18nProvider>
+  );
+}

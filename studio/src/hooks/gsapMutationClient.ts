@@ -1,3 +1,4 @@
+import type { StudioWriteHistory } from "../utils/studioFileHistory";
 import { studioWriteHeaders } from "../utils/studioFileVersion";
 import { studioApiFetch } from "../utils/studioApiFetch";
 
@@ -95,12 +96,13 @@ export function requestGsapMutation(
   route: GsapMutationRoute,
   filePath: string,
   body: unknown,
+  history?: StudioWriteHistory,
 ): Promise<Response> {
   return studioApiFetch(
     `/api/projects/${encodeURIComponent(projectId)}/${route}/${encodeURIComponent(filePath)}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
+      headers: { "Content-Type": "application/json", ...studioWriteHeaders(history) },
       body: JSON.stringify(body),
     },
   );

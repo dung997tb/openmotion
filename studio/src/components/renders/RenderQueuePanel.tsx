@@ -1,5 +1,5 @@
 import { ExportCompositionSelect } from "./ExportCompositionSelect";
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { NativeRuntimeNotice } from "../NativeRuntimeNotice";
 import { useFileManagerContextOptional } from "../../contexts/FileManagerContext";
 import { RenderQueue } from "./RenderQueue";
@@ -21,6 +21,9 @@ export const RenderQueuePanel = memo(function RenderQueuePanel() {
   const composition = chosen?.projectId === projectId ? chosen.path : activeCompPath || 'index.html';
   const current = composition === (activeCompPath || 'index.html');
   const fileManager = useFileManagerContextOptional();
+
+  const recheck = renderQueue.recheckFfmpeg;
+  useEffect(() => { recheck(); }, [recheck]);
 
   return (
     <div data-testid="export-panel" className="flex h-full min-h-0 flex-col">
@@ -47,7 +50,7 @@ export const RenderQueuePanel = memo(function RenderQueuePanel() {
           ffmpeg={renderQueue.ffmpeg}
           ffmpegChecking={renderQueue.ffmpegChecking}
           onRecheckFfmpeg={renderQueue.recheckFfmpeg}
-          onStartRender={async (format, quality, resolution, fps, gpu, gifLoop) => {
+          onStartRender={async (format, quality, resolution, fps, gpu, gifLoop, engine) => {
             await waitForPendingDomEditSaves();
             // Use the explicit selected composition without changing the editor preview.
             await renderQueue.startRender({
@@ -58,6 +61,7 @@ export const RenderQueuePanel = memo(function RenderQueuePanel() {
               resolution,
               gpu,
               gifLoop,
+              engine,
               origin: "export_panel",
               // Render what the user is previewing: active variable overrides
               // from the Variables panel ride along (undefined = defaults).
@@ -67,6 +71,7 @@ export const RenderQueuePanel = memo(function RenderQueuePanel() {
           compositionDimensions={current ? compositionDimensions : null}
           isRendering={renderQueue.isRendering}
           emptyComposition={current && renderQueue.emptyComposition}
+          canBrowserExport={current}
         />
       </div>
     </div>

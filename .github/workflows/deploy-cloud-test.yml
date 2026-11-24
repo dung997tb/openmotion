@@ -1,0 +1,49 @@
+name: Release default cloud test environment
+
+on:
+  push:
+    branches: [feat/cloud-container-p1]
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  checks:
+    if: github.repository == 'nexu-io/openmotion' && github.ref == 'refs/heads/feat/cloud-container-p1'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  images:
+    if: github.repository == 'nexu-io/openmotion' && github.ref == 'refs/heads/feat/cloud-container-p1'
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+    uses: ./.github/workflows/container-images.yml
+
+  promote:
+    name: Publish tested image digests for Argo CD
+    environment: orbit-cloud-test
+    needs: [checks, images]
+    if: github.repository == 'nexu-io/openmotion' && github.ref == 'refs/heads/feat/cloud-container-p1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: test-digest-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+      - name: Publish tested image digests to Orbit
+        if: vars.ORBIT_OPENMOTION_PULL == 'true'
+        env:
+          ORBIT_API_URL: ${{ vars.ORBIT_API_URL }}
+          ORBIT_OPENMOTION_BUILD_TOKEN: ${{ secrets.ORBIT_OPENMOTION_BUILD_TOKEN }}
+        run: node .github/scripts/orbit-publish-cloud-test.mjs "$RUNNER_TEMP/digests"
+      - name: Advance the default test release
+        if: vars.ORBIT_OPENMOTION_PULL != 'true'
+        run: bash .github/scripts/promote-cloud-test.sh "$RUNNER_TEMP/digests"

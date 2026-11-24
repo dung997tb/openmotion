@@ -152,11 +152,32 @@ describe("preview errors", () => {
     }
   });
 
+  it("keeps the signed origin on cross-origin mounts and retries", async () => {
+    const url = "https://preview.example/api/projects/demo/preview/comp/one.html?pt=test";
+    const { host, player } = await mountPlayer({ directUrl: url });
+    expect(new URL(player.getAttribute("src")!).origin).toBe("https://preview.example");
+    act(() => void player.dispatchEvent(new CustomEvent("error", { detail: { message: "Retry" } })));
+    const retry = Array.from(host.querySelectorAll("button")).find(b => b.textContent === "Retry preview")!;
+    act(() => retry.click());
+    const next = new URL(player.getAttribute("src")!);
+    expect(next.origin + next.pathname).toBe(url.split("?")[0]);
+    expect(next.searchParams.get("pt")).toBe("test");
+  });
+
   it("retries a failed preview with a fresh player URL", async () => {
     const onPainted = vi.fn();
-    const { host, player } = await mountPlayer({ onPainted });
+    const { host, player } = await mountPlayer({ onPainted, showInitialLoading: true });
+    expect(player.getAttribute("assets-loading-ui")).toBe("none");
 
-    act(() => void player.dispatchEvent(new Event("painted")));
+    const finishLoad = async () => {
+      act(() => {
+        Object.assign(player, { ready: true, painted: true });
+        player.iframeElement.dispatchEvent(new Event("load"));
+        player.dispatchEvent(new Event("painted"));
+      });
+      await twoFrames();
+    };
+    await finishLoad();
 
     act(() => {
       player.dispatchEvent(
@@ -176,9 +197,11 @@ describe("preview errors", () => {
 
     const retryUrl = new URL(player.getAttribute("src") ?? "", window.location.origin);
     expect(retryUrl.searchParams.get("_hfStudioRetry")).toBe("1");
+    expect(player.getAttribute("assets-loading-ui")).toBe("none");
+    expect(host.querySelector('[data-testid="composition-loading-overlay"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="composition-preview-error"]')).toBeNull();
 
-    act(() => void player.dispatchEvent(new Event("painted")));
+    await finishLoad();
     expect(onPainted.mock.calls.map(([details]) => details.loadId)).toEqual([1, 2]);
   });
 });
@@ -360,6 +383,59 @@ describe("ready to show", () => {
     expect(usePlayerStore.getState().previewBooted).toBe(true);
   });
 
+  it.each([
+    { shadow: false, video: false, renderReady: true, show: true },
+    { shadow: false, video: true, renderReady: true, show: false },
+    { shadow: false, video: false, renderReady: false, show: false },
+    { shadow: true, video: false, renderReady: true, show: false },
+  ])("shows only a visually ready live document while audio buffers ($shadow, $video, $renderReady)",
+    async ({ shadow, video, renderReady, show }) => {
+      const onReadyToShowChange = vi.fn();
+      const onPainted = vi.fn();
+      const { player } = await mountPlayer({ showInitialLoading: !shadow, onReadyToShowChange, onPainted });
+      // A connected web component can report its initial about:blank before navigation.
+      act(() => void player.iframeElement.dispatchEvent(new Event("load")));
+      document.body.appendChild(player.iframeElement);
+      const doc = player.iframeElement.contentDocument!;
+      Object.assign(doc.defaultView!, { __playerReady: true, __renderReady: renderReady });
+      Object.assign(player, { ready: true });
+      for (const tag of video ? ["audio", "video"] : ["audio"]) {
+        const media = doc.createElement(tag);
+        Object.defineProperty(media, "readyState", { value: 0 });
+        Object.defineProperty(media, "networkState", { value: 2 });
+        doc.body.append(media);
+      }
+      act(() => void player.dispatchEvent(new Event("ready")));
+      await twoFrames();
+      expect(player.getAttribute("assets-loading-ui")).toBe(shadow ? null : "none");
+      expect(onReadyToShowChange.mock.calls.some(([ready]) => ready)).toBe(show);
+      expect(onPainted).toHaveBeenCalledTimes(show ? 1 : 0);
+      if (show) {
+        painted(player);
+        await twoFrames();
+        expect(onPainted).toHaveBeenCalledTimes(1);
+        shaderState(player, true);
+        expect(onReadyToShowChange).toHaveBeenLastCalledWith(false);
+        painted(player);
+        expect(player.hasAttribute("assets-loading-ui")).toBe(false);
+      }
+    });
+
+  it("covers the live canvas immediately until a displayable frame, without covering a hot reload", async () => {
+    const { host, player } = await mountPlayer({ showInitialLoading: true });
+    const cover = () => host.querySelector('[data-testid="composition-loading-overlay"]');
+    expect(cover()?.textContent).toContain("Loading composition");
+    loadAndReady(player);
+    await twoFrames();
+    expect(cover()).not.toBeNull();
+    painted(player);
+    await twoFrames();
+    expect(cover()).toBeNull();
+    loadAndReady(player);
+    await twoFrames();
+    expect(cover()).toBeNull();
+  });
+
   it("marks the preview booted at its first frame while media is still buffering", async () => {
     usePlayerStore.setState({ previewBooted: false });
     const onReadyToShowChange = vi.fn();
@@ -480,7 +556,9 @@ describe("ready to show", () => {
     const now = vi.spyOn(performance, "now").mockReturnValue(100);
     const { player } = await mountPlayer({ onPainted });
 
-    painted(player as TestHyperframesPlayer);
+    loadAndReady(player);
+    painted(player);
+    await twoFrames();
 
     expect(onPainted).toHaveBeenCalledWith({
       iframe: (player as TestHyperframesPlayer).iframeElement,

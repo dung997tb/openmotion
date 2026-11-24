@@ -8,9 +8,12 @@ import { useI18n } from "../../i18n/I18n";
  * AssetCard and FontRow — visual asset tile / row components for the Assets panel.
  * Extracted from AssetsTab.tsx to keep that file under the 600-line CI gate.
  */
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Tooltip } from "../ui/Tooltip";
-import { VideoFrameThumbnail } from "../ui/VideoFrameThumbnail";
+import { useNearViewport } from "../../hooks/useNearViewport";
+import { useThumbnailLease } from "../../hooks/useThumbnailLease";
+import { createVideoThumbnailRequest } from "../../player/lib/videoThumbnailRequest";
+import { mediaThumbnailRevisionOf } from "../../player/store/thumbnailSlice";
 import { VIDEO_EXT, IMAGE_EXT } from "../../utils/mediaTypes";
 import { TIMELINE_ASSET_MIME } from "../../utils/timelineAssetDrop";
 import { ContextMenu } from "./AssetContextMenu";
@@ -21,6 +24,8 @@ import { useAssetPreviewStore } from "../../utils/assetPreviewStore";
 import { findClipForAsset, isPointerClick } from "../../utils/assetClickBehavior";
 import { basename, ext, type CopyFeedback } from "./assetHelpers";
 import { resolveMediaPreviewUrl } from "../../player/components/thumbnailUtils";
+import { useCloudDisklessMode } from "../../utils/cloudRuntime";
+import { clearLocalUploadPreview, useLocalUploadPreview } from "../../utils/localUploadPreviewStore";
 
 /** Drag payload writer shared by the asset tile and the font row: copy effect
  *  plus the timeline-asset MIME and a plain-text path fallback. */
@@ -110,12 +115,27 @@ function useProbedDuration(src: string, skip: boolean): number | null | undefine
   return duration;
 }
 
+function AssetVideoPoster({ projectId, asset, src, duration, localPreview }: {
+  projectId: string; asset: string; src: string; duration?: number; localPreview: string | null;
+}) {
+  const sessionEpoch = usePlayerStore((state) => state.timelineSessionEpoch);
+  const request = useMemo(() => createVideoThumbnailRequest({
+    projectId, sessionEpoch, videoSrc: src, duration: duration ?? 1, priority: "visible",
+  }, 1, false), [duration, projectId, sessionEpoch, src]);
+  const snapshot = useThumbnailLease(request);
+  const decoded = snapshot.status === "ready" && snapshot.value.kind === "image" ? snapshot.value.url : null;
+  const poster = decoded ?? localPreview;
+  return poster ? <img src={poster} alt="" draggable={false} className="w-full h-full object-cover"
+    onLoad={() => { if (decoded && localPreview) clearLocalUploadPreview(projectId, asset); }} /> : null;
+}
+
 export interface AssetCardProps {
   projectId: string;
   asset: string;
   displayName?: string;
   used: boolean;
   duration?: number;
+  optimizing?: boolean;
   onCopy: (path: string) => void;
   copyFeedback: CopyFeedback;
   onDelete?: (path: string) => void;
@@ -139,6 +159,7 @@ export function AssetCard({
   displayName,
   used,
   duration,
+  optimizing = false,
   onCopy,
   copyFeedback,
   onDelete,
@@ -147,18 +168,26 @@ export function AssetCard({
 }: AssetCardProps) {
   const mvp = useMvpEditor();
   const { t } = useI18n();
+  const isCloudMode = useCloudDisklessMode();
+  const localPreview = useLocalUploadPreview(projectId, asset);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [hovered, setHovered] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [card, setCard] = useState<HTMLDivElement | null>(null);
+  const visible = useNearViewport(card);
   const [imgError, setImgError] = useState(false);
   const isCopied = copyFeedback?.path === asset && copyFeedback.ok;
   const fullName = displayName ?? asset.split("/").pop() ?? asset;
   const name = displayName ?? basename(asset);
   const extension = ext(asset);
-  const serveUrl = resolveMediaPreviewUrl(asset, projectId);
+  const sourceUrl = resolveMediaPreviewUrl(asset, projectId);
+  const revision = usePlayerStore((state) => mediaThumbnailRevisionOf(state.thumbnailRevisions, asset));
+  const serveUrl = revision ? `${sourceUrl}?revision=${revision}` : sourceUrl;
   const isVideo = VIDEO_EXT.test(asset);
   const isImage = IMAGE_EXT.test(asset);
-  const probedDuration = useProbedDuration(serveUrl, !isVideo || duration != null);
+  useEffect(() => { setImgError(false); }, [serveUrl, localPreview]);
+  // In cloud mode, duration comes from PG metadata; only fall back to <video> probe in local mode.
+  const probedDuration = useProbedDuration(serveUrl, !visible || !isVideo || duration != null || isCloudMode);
   const resolvedDuration = duration ?? probedDuration ?? undefined;
 
   // Drag-threshold click gate: track pointer-down position so we can ignore
@@ -221,6 +250,7 @@ export function AssetCard({
   return (
     <>
       <div
+        ref={setCard}
         draggable
         role="button"
         tabIndex={0}
@@ -244,6 +274,7 @@ export function AssetCard({
       >
         {/* Thumbnail */}
         <div className="motion-asset-thumbnail w-full aspect-video overflow-hidden bg-neutral-900 relative">
+          {isImage && localPreview && <img src={localPreview} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover" />}
           {isImage && !imgError && (
             <img
               src={serveUrl}
@@ -251,12 +282,13 @@ export function AssetCard({
               draggable={false}
               loading="lazy"
               className="w-full h-full object-cover"
+              onLoad={() => { if (localPreview) clearLocalUploadPreview(projectId, asset); }}
               onError={() => setImgError(true)}
             />
           )}
           {isVideo && (
             <>
-              <VideoFrameThumbnail src={serveUrl} />
+              {visible && <AssetVideoPoster projectId={projectId} asset={asset} src={serveUrl} duration={resolvedDuration} localPreview={localPreview} />}
               {hovered && (
                 <video
                   src={serveUrl}
@@ -269,7 +301,7 @@ export function AssetCard({
               )}
             </>
           )}
-          {((!isImage && !isVideo) || (isImage && imgError)) && (
+          {((!isImage && !isVideo) || (isImage && imgError && !localPreview)) && (
             <div className="w-full h-full flex items-center justify-center">
               <span className="text-[10px] font-medium text-neutral-600">{extension}</span>
             </div>
@@ -279,6 +311,30 @@ export function AssetCard({
           {used && (
             <span className="absolute top-1 left-1 text-[9px] font-semibold leading-none px-1.5 py-[3px] rounded-sm bg-neutral-950/80 text-panel-text-1">
               {t("In use")}</span>
+          )}
+
+          {/* Background optimization badge — bottom-left while proxy/sprite derives on worker-media */}
+          {optimizing && (
+            <Tooltip
+              label={
+                isVideo
+                  ? t("Optimizing preview & timeline frames in the background — ready to edit now")
+                  : t("Optimizing high-res preview in the background — ready to edit now")
+              }
+              wrap
+            >
+              <span
+                data-asset-optimizing="true"
+                role="status"
+                className="absolute bottom-1 left-1 inline-flex items-center gap-1 text-[9px] font-medium leading-none px-1.5 py-[3px] rounded-sm bg-neutral-950/80 text-panel-text-2"
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-block w-2 h-2 rounded-full border border-border border-t-panel-text-1 animate-spin motion-reduce:animate-none"
+                />
+                {t("Optimizing")}
+              </span>
+            </Tooltip>
           )}
 
           {/* Duration badge — top-right, media only */}

@@ -1,3 +1,4 @@
+import { computePreviewImpact } from "../../../shared/preview-impact";
 import { useCallback, useRef, useState } from "react";
 import { saveFailureFeedback } from "../utils/saveFailureFeedback";
 import { useMountEffect } from "./useMountEffect";
@@ -55,6 +56,7 @@ export interface UsePreviewPersistenceParams {
   activeCompPathRef: React.MutableRefObject<string | null>;
   /** Called to reload the preview after undo/redo or external file changes. */
   reloadPreview: () => void;
+  invalidateHistoryCompositions?: (paths: readonly string[]) => void;
 }
 
 function readIframeDocument(iframe: HTMLIFrameElement): Document | null {
@@ -119,6 +121,7 @@ export function usePreviewPersistence({
   previewIframeRef,
   activeCompPathRef,
   reloadPreview,
+  invalidateHistoryCompositions,
 }: UsePreviewPersistenceParams) {
   void _recordEdit;
 
@@ -213,6 +216,10 @@ export function usePreviewPersistence({
 
   const syncHistoryPreviewAfterApply = useCallback(
     async (restore: HistoryPreviewRestore) => {
+      const paths = restore.paths ?? Object.keys(restore.files ?? {});
+      const impact = computePreviewImpact(paths);
+      if (!impact.affectsPreview) return;
+      invalidateHistoryCompositions?.(impact.affectedCompositions);
       const iframe = previewIframeRef.current;
       const doc = iframe?.contentDocument;
       const activePath = activeCompPathRef.current;
@@ -223,7 +230,6 @@ export function usePreviewPersistence({
       const deferUnderGesture = () => {
         const held = heldPreviewDoc();
         if (!held) return false;
-        const paths = restore.paths ?? Object.keys(restore.files ?? {});
         afterStudioManualEditGestures(held, () => {
           if (!isCurrent()) return;
           if (studioFileRevision() === revision && syncHistoryTimelineFromFiles(activePath, restore.files))
@@ -264,7 +270,7 @@ export function usePreviewPersistence({
       if (strategy === "full") return;
       syncRestoredTimelineFromPreview(previewIframeRef.current?.contentDocument);
     },
-    [previewIframeRef, activeCompPathRef, reloadPreview, heldPreviewDoc],
+    [previewIframeRef, activeCompPathRef, reloadPreview, invalidateHistoryCompositions, heldPreviewDoc],
   );
 
   // A restore the server has not confirmed yet: in place now, or not at all. A GSAP script re-run is not

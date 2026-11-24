@@ -11,6 +11,7 @@
 
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import type { ClipManifestClip, IframeWindow, PlaybackAdapter } from "../lib/playbackTypes";
+import { rememberIsolatedManifest } from "../lib/isolatedTimelineManifest";
 import { hasTimelinePerformanceFixtureLease } from "../lib/timelinePerformanceFixture";
 import { acceptStudioRuntimeMessage, postRuntimeControlMessage } from "../lib/runtimeProtocol";
 import {
@@ -23,7 +24,14 @@ import {
   parsePreviewFacts,
 } from "../store/previewQualitySlice";
 import { parseTimelineFromDOM } from "../lib/timelineDOM";
+import { acceptsTimingManifest } from "../peerTimingPreview";
 import { hasPendingHistoryTimeline } from "../timelineRestorePending";
+import {
+  createPreviewAdapter,
+  isPreviewBridgeMessageValue,
+  PREVIEW_BRIDGE_SOURCE,
+  type PreviewBridgeMessage,
+} from "../lib/previewAdapter";
 
 /** What `processTimelineMessage` accepts — the clip-manifest postMessage. */
 export interface ClipManifestMessage {
@@ -39,12 +47,17 @@ interface PreviewMessage {
   source?: string;
   type?: string;
   clips?: unknown;
+  durationInFrames?: unknown;
+  fps?: unknown;
   isPlaying?: unknown;
   copies?: unknown;
   health?: unknown;
   facts?: unknown;
   code?: unknown;
   details?: unknown;
+  currentTime?: unknown;
+  duration?: unknown;
+  selection?: unknown;
 }
 
 export interface PreviewMessageRouterDeps {
@@ -72,8 +85,85 @@ function acceptedPreviewMessage(
   if (hasTimelinePerformanceFixtureLease()) return null;
   if (isForeignSource(e, iframe)) return null;
   const data = e.data as PreviewMessage | null;
+  if (isPreviewBridgeMessageValue(data) && data.source === PREVIEW_BRIDGE_SOURCE) {
+    const adapter = iframe ? createPreviewAdapter({ iframe }) : null;
+    if (!adapter?.accepts(e)) return null;
+    if (iframe && data.type === "timeline-state" && Array.isArray(data.clips) &&
+        !acceptsTimingManifest(iframe, data.timelinePath, data.timelineVersion)) return null;
+    if (data.type === "layer-tree" || data.type === "response") return null;
+    return projectTimelineUrls(normalizeBridgeMessage(data), adapter);
+  }
   if (data?.source !== "hf-preview") return null;
-  return acceptStudioRuntimeMessage(data) ? data : null;
+  if (!acceptStudioRuntimeMessage(data)) return null;
+  if (iframe && data.type === "timeline") {
+    const adapter = createPreviewAdapter({ iframe });
+    if (adapter.token && !adapter.sameOrigin) {
+      if (e.origin !== adapter.targetOrigin || e.source !== iframe.contentWindow) return null;
+      // The runtime posts immediately after replacing __clipManifest. Ask the
+      // project frame to bind those rows to their authored nodes before installing them.
+      adapter.send("handshake", { timelineOnly: true });
+      return null;
+    }
+  }
+  return data;
+}
+
+// Studio media probes and file operations use the project API under the user's session.
+function projectTimelineUrls(data: PreviewMessage, preview: ReturnType<typeof createPreviewAdapter>): PreviewMessage {
+  if (!Array.isArray(data.clips) || !preview.projectId) return data;
+  const prefix = `/api/projects/${encodeURIComponent(preview.projectId)}/preview/`;
+  function projectUrl(value: string | null) {
+    if (!value || !URL.canParse(value)) return value;
+    const url = new URL(value);
+    if (url.origin !== preview.targetOrigin || !url.pathname.startsWith(prefix)) return value;
+    const path = url.pathname.slice(prefix.length).replace(/^~assets\/[^/]+\//, "");
+    const local = new URL(prefix + path, window.location.origin);
+    local.search = url.search;
+    local.searchParams.delete("pt");
+    local.hash = url.hash;
+    return local.href;
+  }
+  const clips = data.clips.map((clip: ClipManifestClip) => ({
+    ...clip, assetUrl: projectUrl(clip.assetUrl), compositionSrc: projectUrl(clip.compositionSrc),
+  }));
+  if (!preview.sameOrigin) rememberIsolatedManifest(clips, preview);
+  return { ...data, clips };
+}
+
+function normalizeBridgeMessage(data: PreviewBridgeMessage): PreviewMessage {
+  switch (data.type) {
+    case "preview-ready":
+      return { source: "hf-preview", type: "ready" };
+    case "timeline-state":
+      if (Array.isArray(data.clips)) {
+        return {
+          source: "hf-preview",
+          type: "timeline",
+          clips: data.clips,
+          fps: data.fps,
+          durationInFrames: Number(data.durationInFrames || 0),
+        };
+      }
+      return {
+        source: "hf-preview",
+        type: "state",
+        isPlaying: data.isPlaying === true,
+        currentTime: data.currentTime,
+        duration: data.duration,
+      };
+    case "runtime-error":
+      window.dispatchEvent(new CustomEvent("previewruntimeerror", { detail: data }));
+      return { source: "hf-preview", type: "diagnostic", details: data };
+    case "select-element":
+    case "selection-geometry":
+      window.dispatchEvent(new CustomEvent("previewselection", { detail: data }));
+      return { source: "hf-preview", type: "state", isPlaying: false };
+    case "preview-replaced":
+      window.dispatchEvent(new CustomEvent("previewreplaced", { detail: data }));
+      return { source: "hf-preview", type: "state", isPlaying: false };
+    default:
+      return { source: "hf-preview", type: "state", isPlaying: false };
+  }
 }
 
 /** Whether enrichment is due: no timeline message and no enrichment of ours for 500 ms. Marks it run. */

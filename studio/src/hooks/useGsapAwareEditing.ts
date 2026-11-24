@@ -1,3 +1,4 @@
+import type { CanvasGroupWrite } from "./cloudGroupMove";
 import { useGsapAwareGroupMove } from "./useGsapAwareGroupMove";
 import { observeGsapGesture } from "./gsapGestureOutcome";
 import type { DomEditPersistOutcome } from "./domEditCommitTypes";
@@ -45,6 +46,7 @@ import {
 } from "../components/editor/cropResize";
 
 export interface UseGsapAwareEditingParams {
+  commitCanvasGroup?: (writes: CanvasGroupWrite[]) => Promise<boolean>;
   domEditSelection: DomEditSelection | null;
   selectedGsapAnimations: GsapAnimation[];
   gsapCommitMutation: CommitMutation | null;
@@ -115,6 +117,7 @@ export interface UseGsapAwareEditingParams {
 }
 
 export function useGsapAwareEditing({
+  commitCanvasGroup,
   domEditSelection,
   selectedGsapAnimations,
   gsapCommitMutation,
@@ -196,6 +199,7 @@ export function useGsapAwareEditing({
   );
 
   const handleGsapAwareGroupPathOffsetCommit = useGsapAwareGroupMove({
+    commitCanvasGroup,
     gsapCommitMutation,
     activeCompPath,
     previewIframeRef,

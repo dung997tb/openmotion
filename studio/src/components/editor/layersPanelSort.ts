@@ -9,6 +9,10 @@ interface CollapsedState {
 
 // fallow-ignore-next-line complexity
 export function sortLayersByZIndex(layers: DomEditLayerItem[]): DomEditLayerItem[] {
+  return sortLayerRows(layers, item => getElementZIndex(item.element));
+}
+
+export function sortLayerRows<T extends { depth: number }>(layers: T[], zIndex: (item: T) => number): T[] {
   if (layers.length <= 1) return layers;
 
   const minDepth = layers[0].depth;
@@ -16,12 +20,12 @@ export function sortLayersByZIndex(layers: DomEditLayerItem[]): DomEditLayerItem
     if (layers[i].depth < minDepth) return layers;
   }
 
-  const chunks: Array<{ root: DomEditLayerItem; children: DomEditLayerItem[]; domIndex: number }> =
+  const chunks: Array<{ root: T; children: T[]; domIndex: number }> =
     [];
 
   for (let i = 0; i < layers.length; i++) {
     if (layers[i].depth === minDepth) {
-      const children: DomEditLayerItem[] = [];
+      const children: T[] = [];
       let j = i + 1;
       while (j < layers.length && layers[j].depth > minDepth) {
         children.push(layers[j]);
@@ -33,36 +37,36 @@ export function sortLayersByZIndex(layers: DomEditLayerItem[]): DomEditLayerItem
 
   if (chunks.length <= 1) {
     if (chunks.length === 1 && chunks[0].children.length > 0) {
-      const sorted = sortLayersByZIndex(chunks[0].children);
+      const sorted = sortLayerRows(chunks[0].children, zIndex);
       return [chunks[0].root, ...sorted];
     }
     return layers;
   }
 
   chunks.sort((a, b) => {
-    const zA = getElementZIndex(a.root.element);
-    const zB = getElementZIndex(b.root.element);
+    const zA = zIndex(a.root);
+    const zB = zIndex(b.root);
     if (zA !== zB) return zB - zA;
     return b.domIndex - a.domIndex;
   });
 
-  const result: DomEditLayerItem[] = [];
+  const result: T[] = [];
   for (const chunk of chunks) {
     result.push(chunk.root);
     if (chunk.children.length > 0) {
-      result.push(...sortLayersByZIndex(chunk.children));
+      result.push(...sortLayerRows(chunk.children, zIndex));
     }
   }
   return result;
 }
 
-export function getVisibleLayers(
-  layers: DomEditLayerItem[],
+export function getVisibleLayers<T extends { key: string; depth: number; childCount: number }>(
+  layers: T[],
   collapsed: CollapsedState,
-): DomEditLayerItem[] {
+): T[] {
   if (Object.keys(collapsed).length === 0) return layers;
 
-  const result: DomEditLayerItem[] = [];
+  const result: T[] = [];
   let skipDepth = -1;
 
   for (const layer of layers) {

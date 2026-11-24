@@ -27,12 +27,19 @@ export { resolveClipTimingBasis } from "./gsapShared";
 export { fetchParsedAnimations, resolveSelectorElementIds } from "./keyframeCacheAstLoad";
 export { getAnimationsForElement } from "./gsapElementMatch";
 
+function changedCompositionPaths(change: string | readonly string[] | undefined, projectId: string | null) {
+  const paths = (typeof change === "string" ? [change] : change ?? [])
+    .map(path => projectCompositionPath(path, projectId));
+  return paths.length && paths.every((path): path is string => path !== null) ? paths : null;
+}
+
 export function useGsapAnimationsForElement(
   projectId: string | null,
   sourceFile: string,
   target: DomEditSelection | null,
   version: number,
   iframeRef?: React.RefObject<HTMLIFrameElement | null>,
+  changedPath?: string | readonly string[],
 ): {
   animations: GsapAnimation[];
   multipleTimelines: boolean;
@@ -41,20 +48,23 @@ export function useGsapAnimationsForElement(
   const [allAnimations, setAllAnimations] = useState<GsapAnimation[]>([]);
   const [multipleTimelines, setMultipleTimelines] = useState(false);
   const [unsupportedTimelinePattern, setUnsupportedTimelinePattern] = useState(false);
-  const lastFetchKeyRef = useRef("");
+  const sourceRead = useRef<{
+    projectId: string;
+    path: string;
+    version: number;
+    request: ReturnType<typeof fetchParsedAnimations>;
+  } | null>(null);
   // Re-run the per-element cache populate when sub-comp DOM children appear, so a
   // sub-comp element gets its host-relative keyframe percentages (not elDuration=1).
   const domClipChildrenKey = usePlayerStore((s) =>
     s.domClipChildren.map((c) => `${c.id}<${c.hostId}`).join("|"),
   );
 
+  const hasSelection = target !== null;
   useEffect(() => {
-    const targetKey = target?.id ?? target?.selector ?? "";
-    const fetchKey = `${projectId}:${sourceFile}:${version}:${targetKey}`;
-    if (fetchKey === lastFetchKeyRef.current) return;
-    lastFetchKeyRef.current = fetchKey;
-
-    if (!projectId) {
+    const path = projectCompositionPath(sourceFile, projectId);
+    if (!projectId || !path || !hasSelection) {
+      sourceRead.current = null;
       setAllAnimations([]);
       setMultipleTimelines(false);
       setUnsupportedTimelinePattern(false);
@@ -62,11 +72,18 @@ export function useGsapAnimationsForElement(
     }
 
     let cancelled = false;
-    fetchParsedAnimations(projectId, sourceFile).then((parsed) => {
+    const previous = sourceRead.current;
+    const scoped = changedCompositionPaths(changedPath, projectId);
+    const reusable = previous?.projectId === projectId && previous.path === path &&
+      (previous.version === version || (previous.version + 1 === version && scoped && !scoped.includes(path)));
+    const request = reusable ? previous.request : fetchParsedAnimations(projectId, path);
+    sourceRead.current = { projectId, path, version, request };
+    request.then((parsed) => {
       if (cancelled) {
         return;
       }
       if (!parsed) {
+        sourceRead.current = null;
         setAllAnimations([]);
         setMultipleTimelines(false);
         setUnsupportedTimelinePattern(false);
@@ -80,7 +97,7 @@ export function useGsapAnimationsForElement(
     return () => {
       cancelled = true;
     };
-  }, [projectId, sourceFile, version, target?.id, target?.selector]);
+  }, [projectId, sourceFile, version, changedPath, hasSelection, target?.id, target?.selector]);
 
   const targetId = target?.id ?? null;
   const targetSelector = target?.selector ?? null;
@@ -242,9 +259,11 @@ export function useGsapAnimationsForElement(
 }
 
 export function useGsapCacheVersion() {
-  const [version, setVersion] = useState(0);
-  const bump = useCallback(() => setVersion((v) => v + 1), []);
-  return { version, bump };
+  const [change, setChange] = useState<{ version: number; changedPath?: string | readonly string[] }>({ version: 0 });
+  const bump = useCallback((changedPath?: string | readonly string[]) => {
+    setChange(previous => ({ version: previous.version + 1, changedPath }));
+  }, []);
+  return { ...change, bump };
 }
 
 /**
@@ -258,6 +277,7 @@ export function usePopulateKeyframeCacheForFile(
   sourceFile: string,
   version: number,
   iframeRef?: React.RefObject<HTMLIFrameElement | null>,
+  changedPath?: string | readonly string[],
 ): void {
   const elementCount = usePlayerStore((s) => s.elements.length);
   // Every sub-composition file the timeline shows rows for. The cache is loaded
@@ -276,49 +296,57 @@ export function usePopulateKeyframeCacheForFile(
   const domClipChildrenKey = usePlayerStore((s) =>
     s.domClipChildren.map((c) => `${c.id}<${c.hostId}`).join("|"),
   );
-  const loadedRef = useRef<{ dataKey: string; files: Set<string> }>({
-    dataKey: "",
-    files: new Set(),
-  });
-
+  // Reads belong to the authored source generation. The projection also depends
+  // on which elements and sub-composition children the timeline currently has.
+  const source = useRef<{
+    projectId: string | null;
+    version: number;
+    fresh: boolean;
+    reads: Map<string, Promise<GsapAnimation[] | null>>;
+  } | null>(null);
+  const projected = useMemo(() => new Set<string>(),
+    [projectId, version, elementCount, domClipChildrenKey, compositionSrcKey]);
+  const previousProjection = useRef<Set<string> | null>(null);
   const runtimeScanDoneRef = useRef("");
 
   useEffect(() => {
-    const dataKey = `kf-cache:${projectId}:${version}:${elementCount}:${domClipChildrenKey}:${compositionSrcKey}`;
+    if (source.current?.projectId !== projectId || source.current?.version !== version) {
+      // A request started before a write (or before leaving and reopening a
+      // project) must not satisfy the new generation, even if still in flight.
+      const previous = source.current;
+      const paths = changedCompositionPaths(changedPath, projectId);
+      // Reuse other files only when the entire change since our last read is known.
+      const scoped = paths && previous?.projectId === projectId && previous.version + 1 === version;
+      const reads = scoped ? previous.reads : new Map();
+      if (scoped) for (const path of paths) reads.delete(path);
+      source.current = { projectId, version, fresh: previous !== null, reads };
+    }
     if (!projectId) return;
-
-    // The active file first: it owns the selection, and each file clears only
-    // its own cache entries, so the order just decides who writes the bare
-    // `id` alias last.
-    const files = Array.from(
-      new Set(
-        [sourceFile, ...(compositionSrcKey ? compositionSrcKey.split("|") : [])]
-          .map((source) => projectCompositionPath(source, projectId))
-          .filter((source): source is string => source !== null),
-      ),
-    );
-    const sameData = loadedRef.current.dataKey === dataKey;
-    const stale = sameData ? files.filter((sf) => !loadedRef.current.files.has(sf)) : files;
-    const covered = sameData ? new Set([...loadedRef.current.files, ...files]) : new Set(files);
-    loadedRef.current = { dataKey, files: covered };
-    // Everything the previous scan cached for a file this one no longer covers
-    // (the composition just switched away from) has no owner left to clear it.
-    if (!sameData) pruneKeyframeCacheToFiles(files);
-    if (stale.length === 0) return;
-    runtimeScanDoneRef.current = "";
-    const doc = iframeRef?.current?.contentDocument;
-    for (const sf of stale) {
-      void populateKeyframeCacheFromAst(projectId, sf, doc).then((loaded) => {
-        if (!loaded && loadedRef.current.dataKey === dataKey) loadedRef.current.files.delete(sf);
+    const { reads, fresh } = source.current;
+    const files = [...new Set([sourceFile, ...(compositionSrcKey ? compositionSrcKey.split("|") : [])]
+      .map(path => projectCompositionPath(path, projectId)).filter((path): path is string => path !== null))];
+    if (previousProjection.current !== projected) {
+      pruneKeyframeCacheToFiles(files);
+      previousProjection.current = projected;
+    }
+    let active = true;
+    for (const path of files) {
+      if (projected.has(path)) continue;
+      runtimeScanDoneRef.current = "";
+      const read = reads.get(path) ?? fetchParsedAnimations(projectId, path, { fresh })
+        .then(parsed => parsed?.animations ?? null);
+      reads.set(path, read);
+      void read.then(animations => {
+        if (!animations) {
+          if (reads.get(path) === read) reads.delete(path);
+        } else if (active) {
+          populateKeyframeCacheFromAst(path, animations, iframeRef?.current?.contentDocument);
+          projected.add(path);
+        }
       });
     }
-    // elementCount is in the deps because new timeline elements (e.g. after a
-    // sub-composition expand) need their keyframe cache populated immediately;
-    // without it the effect won't re-run when elements appear/disappear.
-    // iframeRef is read for DOM selector resolution but intentionally not a dep
-    // (it's a stable ref; the separate runtime-scan effect owns iframe timing).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, sourceFile, version, elementCount, domClipChildrenKey, compositionSrcKey]);
+    return () => { active = false; };
+  }, [projectId, sourceFile, version, changedPath, compositionSrcKey, projected, iframeRef]);
 
   // Separate effect for runtime keyframe discovery — polls until the iframe
   // has loaded GSAP timelines, independent of the AST fetch lifecycle.

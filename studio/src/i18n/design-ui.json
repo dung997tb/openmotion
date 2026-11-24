@@ -84,7 +84,12 @@
     "Tags": "标签",
     "Example brief": "示例简报",
     "Type @ to mention templates or skills": "输入 @ 引用模板、技能或提示词",
-    "Mention template or skill": "引用模板或技能"
+    "Mention template or skill": "引用模板或技能",
+    "Design Studio is coming in Phase 2": "Design Studio 将在第二阶段上线",
+    "Design Studio is coming in Phase 2.": "Design Studio 将在第二阶段上线。",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "云端 HTML Design Studio 工程、版本快照与批注功能计划在第二阶段提供。",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "云端 HTML Design Studio 工程、版本快照与批注计划在第二阶段提供。视频编辑、模板库、媒体生成与 Streamable HTTP MCP 现已可用。",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "云端 HTML Design Studio 模板与工程创建计划在第二阶段提供。"
   },
   "ja": {
     "Prototype": "プロトタイプ",
@@ -158,7 +163,12 @@
     "Tags": "タグ",
     "Example brief": "ブリーフ例",
     "Type @ to mention templates or skills": "@を入力してテンプレートやスキルを参照",
-    "Mention template or skill": "テンプレート・スキルを参照"
+    "Mention template or skill": "テンプレート・スキルを参照",
+    "Design Studio is coming in Phase 2": "Design Studio はフェーズ 2 で提供予定です",
+    "Design Studio is coming in Phase 2.": "Design Studio はフェーズ 2 で提供予定です。",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "クラウド HTML Design Studio のプロジェクト、バージョンスナップショット、注釈はフェーズ 2 で提供予定です。",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "クラウド HTML Design Studio のプロジェクト、スナップショット、注釈はフェーズ 2 で提供予定です。動画編集、テンプレート、メディア生成、Streamable HTTP MCP は現在利用可能です。",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "クラウド HTML Design Studio のテンプレートとプロジェクト作成はフェーズ 2 で提供予定です。"
   },
   "ko": {
     "Prototype": "프로토타입",
@@ -232,7 +242,12 @@
     "Tags": "태그",
     "Example brief": "예시 브리프",
     "Type @ to mention templates or skills": "@를 입력해 템플릿이나 스킬을 멘션하세요",
-    "Mention template or skill": "템플릿 또는 스킬 멘션"
+    "Mention template or skill": "템플릿 또는 스킬 멘션",
+    "Design Studio is coming in Phase 2": "Design Studio는 Phase 2에서 제공될 예정입니다",
+    "Design Studio is coming in Phase 2.": "Design Studio는 Phase 2에서 제공될 예정입니다.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "클라우드 HTML Design Studio 프로젝트, 버전 스냅샷 및 주석 기능은 Phase 2에 제공될 예정입니다.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "클라우드 HTML Design Studio 프로젝트, 버전 스냅샷 및 주석은 Phase 2에 제공될 예정입니다. 비디오 편집, 템플릿, 미디어 생성 및 Streamable HTTP MCP는 지금 사용할 수 있습니다.",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "클라우드 HTML Design Studio 템플릿 및 프로젝트 생성은 Phase 2에 제공될 예정입니다."
   },
   "de": {
     "Prototype": "Prototyp",
@@ -306,7 +321,12 @@
     "Tags": "Tags",
     "Example brief": "Beispiel-Briefing",
     "Type @ to mention templates or skills": "@ tippen, um Vorlagen oder Skills zu erwähnen",
-    "Mention template or skill": "Vorlage oder Skill erwähnen"
+    "Mention template or skill": "Vorlage oder Skill erwähnen",
+    "Design Studio is coming in Phase 2": "Design Studio folgt in Phase 2",
+    "Design Studio is coming in Phase 2.": "Design Studio folgt in Phase 2.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "Cloud-HTML-Projekte, Versions-Snapshots und Annotationen in Design Studio sind für Phase 2 geplant.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "Cloud-HTML-Projekte, Snapshots und Annotationen in Design Studio sind für Phase 2 geplant. Videobearbeitung, Vorlagen, Mediengenerierung und Streamable HTTP MCP sind bereits verfügbar.",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "Cloud-HTML-Vorlagen und Projekterstellung in Design Studio sind für Phase 2 geplant."
   },
   "fr": {
     "Prototype": "Prototype",
@@ -380,7 +400,12 @@
     "Tags": "Étiquettes",
     "Example brief": "Exemple de brief",
     "Type @ to mention templates or skills": "Tapez @ pour mentionner des modèles ou compétences",
-    "Mention template or skill": "Mentionner un modèle ou une compétence"
+    "Mention template or skill": "Mentionner un modèle ou une compétence",
+    "Design Studio is coming in Phase 2": "Design Studio arrive en phase 2",
+    "Design Studio is coming in Phase 2.": "Design Studio arrive en phase 2.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "Les projets HTML cloud, instantanés de version et annotations de Design Studio sont prévus pour la phase 2.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "Les projets HTML cloud, instantanés et annotations de Design Studio sont prévus pour la phase 2. Le montage vidéo, les modèles, la génération média et Streamable HTTP MCP sont déjà disponibles.",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "Les modèles HTML cloud et la création de projets dans Design Studio sont prévus pour la phase 2."
   },
   "ru": {
     "Prototype": "Прототип",
@@ -454,7 +479,12 @@
     "Tags": "Теги",
     "Example brief": "Пример брифа",
     "Type @ to mention templates or skills": "Введите @, чтобы упомянуть шаблоны или навыки",
-    "Mention template or skill": "Упомянуть шаблон или навык"
+    "Mention template or skill": "Упомянуть шаблон или навык",
+    "Design Studio is coming in Phase 2": "Design Studio появится во 2-й фазе",
+    "Design Studio is coming in Phase 2.": "Design Studio появится во 2-й фазе.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "Облачные HTML-проекты, снимки версий и аннотации Design Studio запланированы на 2-ю фазу.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "Облачные HTML-проекты, снимки версий и аннотации Design Studio запланированы на 2-ю фазу. Видеомонтаж, шаблоны, генерация медиа и Streamable HTTP MCP уже доступны.",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "Облачные HTML-шаблоны и создание проектов в Design Studio запланированы на 2-ю фазу."
   },
   "es": {
     "Prototype": "Prototipo",
@@ -528,7 +558,12 @@
     "Tags": "Etiquetas",
     "Example brief": "Brief de ejemplo",
     "Type @ to mention templates or skills": "Escribe @ para mencionar plantillas o habilidades",
-    "Mention template or skill": "Mencionar plantilla o habilidad"
+    "Mention template or skill": "Mencionar plantilla o habilidad",
+    "Design Studio is coming in Phase 2": "Design Studio llegará en la fase 2",
+    "Design Studio is coming in Phase 2.": "Design Studio llegará en la fase 2.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "Los proyectos HTML en la nube, instantáneas de versión y anotaciones de Design Studio están previstos para la fase 2.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "Los proyectos HTML en la nube, instantáneas y anotaciones de Design Studio están previstos para la fase 2. La edición de vídeo, plantillas, generación multimedia y Streamable HTTP MCP ya están disponibles.",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "Las plantillas HTML en la nube y la creación de proyectos en Design Studio están previstas para la fase 2."
   },
   "pt-BR": {
     "Prototype": "Protótipo",
@@ -602,7 +637,12 @@
     "Tags": "Tags",
     "Example brief": "Exemplo de briefing",
     "Type @ to mention templates or skills": "Digite @ para mencionar modelos ou skills",
-    "Mention template or skill": "Mencionar modelo ou skill"
+    "Mention template or skill": "Mencionar modelo ou skill",
+    "Design Studio is coming in Phase 2": "O Design Studio chegará na Fase 2",
+    "Design Studio is coming in Phase 2.": "O Design Studio chegará na Fase 2.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "Projetos HTML na nuvem, snapshots de versão e anotações do Design Studio estão previstos para a Fase 2.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "Projetos HTML na nuvem, snapshots e anotações do Design Studio estão previstos para a Fase 2. Edição de vídeo, modelos, geração de mídia e Streamable HTTP MCP já estão disponíveis.",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "Modelos HTML na nuvem e criação de projetos no Design Studio estão previstos para a Fase 2."
   },
   "it": {
     "Prototype": "Prototipo",
@@ -676,7 +716,12 @@
     "Tags": "Tag",
     "Example brief": "Esempio di brief",
     "Type @ to mention templates or skills": "Digita @ per menzionare modelli o skill",
-    "Mention template or skill": "Menziona modello o skill"
+    "Mention template or skill": "Menziona modello o skill",
+    "Design Studio is coming in Phase 2": "Design Studio arriverà nella Fase 2",
+    "Design Studio is coming in Phase 2.": "Design Studio arriverà nella Fase 2.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "I progetti HTML cloud, gli snapshot di versione e le annotazioni di Design Studio sono previsti nella Fase 2.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "I progetti HTML cloud, gli snapshot e le annotazioni di Design Studio sono previsti nella Fase 2. Editing video, modelli, generazione media e Streamable HTTP MCP sono già disponibili.",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "I modelli HTML cloud e la creazione di progetti in Design Studio sono previsti nella Fase 2."
   },
   "tr": {
     "Prototype": "Prototip",
@@ -750,6 +795,11 @@
     "Tags": "Etiketler",
     "Example brief": "Örnek özet",
     "Type @ to mention templates or skills": "Şablon veya beceri eklemek için @ yazın",
-    "Mention template or skill": "Şablon veya beceri ekle"
+    "Mention template or skill": "Şablon veya beceri ekle",
+    "Design Studio is coming in Phase 2": "Design Studio Faz 2’de gelecek",
+    "Design Studio is coming in Phase 2.": "Design Studio Faz 2’de gelecek.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2.": "Bulut HTML Design Studio projeleri, sürüm anlık görüntüleri ve notlar Faz 2 için planlanmıştır.",
+    "Cloud HTML Design Studio projects, version snapshots, and annotations are scheduled for Phase 2. Video editing, templates, media generation, and Streamable HTTP MCP are available now.": "Bulut HTML Design Studio projeleri, sürüm anlık görüntüleri ve notlar Faz 2 için planlanmıştır. Video düzenleme, şablonlar, medya üretimi ve Streamable HTTP MCP şu anda kullanılabilir.",
+    "Cloud HTML Design Studio templates and project creation are scheduled for Phase 2.": "Bulut HTML Design Studio şablonları ve proje oluşturma Faz 2 için planlanmıştır."
   }
 }

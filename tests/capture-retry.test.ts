@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { fixCaptureModule } from '../shared/hyperframes-capture-fix.mjs';
-import { browserAutomation } from '../browser.ts';
+import { browserAutomation } from '../shared/browser-executable.ts';
 import { HYPERFRAMES_VERSION, runHyperframes, runtimeEnv } from '../hyperframes.ts';
 
 const captureUrl = new URL('../node_modules/hyperframes/dist/chunk-IAZ2A7D6.js', import.meta.url);

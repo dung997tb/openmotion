@@ -436,7 +436,7 @@ Brand Kit 章节记录品牌身份、语气和已确认的产品信息；Design 
 
 > “使用 Motion.md 中的 Brand Kit 和已确认脚本，生成开场美术、插入视频、背景音乐和 TTS。把选中的结果加入重建工程，对齐声画，再展示完整剪辑。”
 
-[内置模型目录](../gateway/catalog.ts) · [供应商配置与端点注册](model-gateway.md)
+[内置模型目录](../src/services/model-gateway.ts) · [供应商配置与端点注册](model-gateway.md)
 
 <a id="technical-guide"></a>
 <a id="安装与技术文档"></a>
@@ -652,13 +652,13 @@ BYOA 连接已有 Agent 客户端；素材工作区支持直接用模型生成�
 | 层次 | 技术 | 阅读入口 |
 | --- | --- | --- |
 | **Studio 与编辑器界面** | React 19、TypeScript 5.9、Vite 6、Tailwind CSS 4、Zustand、CodeMirror、Dockview | [Studio 源码](../studio/src) · [Motion 应用](../studio/src/motion/MotionApp.tsx) · [编辑器开发](editor-fork.md) |
-| **应用运行时** | CI 固定 Node.js 26.11.1，原生 HTTP、TypeScript 执行和本地文件/JSON | [server.ts](../server.ts) · [workspace.ts](../workspace.ts) · [会话架构](session-architecture.md) |
-| **Agent 接入** | 本地 stdio MCP、五个核心 Skills 和生成的宿主适配器 | [mcp.ts](../mcp.ts) · [phase1.ts](../phase1.ts) · [适配器生成](../scripts/export-adapters.ts) |
-| **多模态生成** | Codex 媒体适配器、Atlas Cloud predictions、fal.ai 队列集成与持久化生成任务 | [Gateway 服务](../gateway/service.ts) · [供应商适配器](../gateway/providers.ts) · [模型目录](../gateway/catalog.ts) |
-| **合成与动效** | HTML/CSS/JS、GSAP、固定版本合成引擎与原生时间轴/历史 | [引擎集成](../hyperframes.ts) · [模板源码](../template-library) · [版本适配器](../phase1-versions.ts) |
+| **应用运行时** | CI 固定 Node.js 26.11.1，原生 HTTP、TypeScript 执行和本地文件/JSON | [server.ts](../server.ts) · [工作区服务](../src/services/workspace-service.ts) · [会话架构](session-architecture.md) |
+| **Agent 接入** | 本地 stdio MCP、五个核心 Skills 和生成的宿主适配器 | [MCP HTTP](../src/mcp/http-transport.ts) · [工具分发](../src/mcp/tool-dispatcher.ts) · [适配器生成](../scripts/export-adapters.ts) |
+| **多模态生成** | Codex 媒体适配器、Atlas Cloud predictions、fal.ai 队列集成与持久化生成任务 | [Gateway 服务](../src/services/model-gateway.ts) · [供应商适配器](../src/services/opendesign-adapter.ts) · [模型目录](../src/services/model-gateway.ts) |
+| **合成与动效** | HTML/CSS/JS、GSAP、固定版本合成引擎与原生时间轴/历史 | [引擎集成](../hyperframes.ts) · [模板源码](../template-library) · [版本历史](../src/services/version-history-service.ts) |
 | **渲染与媒体** | Chromium、Puppeteer Core、FFmpeg、FFprobe | [渲染服务](../server.ts) · [导出校验器](../scripts/verify-export.ts) · [原生运行时锁定](../scripts/runtime-lock.json) |
 | **创作知识** | Markdown、源码包、预设和对比证据 | [Motion.md](motion-md.zh-CN.md) · [核心 Skills](../skills) · [社区资源库](../library/README.zh-CN.md) |
-| **验证与打包** | Node 测试运行器、Vitest、Studio 检查、npm 锁文件和显式分发清单 | [测试](../tests) · [Studio 测试](../studio/tests) · [CI](../.github/workflows/ci.yml) · [分发](../scripts/distribution.ts) |
+| **验证与打包** | Node 测试运行器、Vitest、Studio 检查、npm 锁文件和显式分发清单 | [测试](../tests) · [Studio 测试](../studio/tests) · [CI](../.github/workflows/ci.yml) · [容器构建](../deploy/Dockerfile) |
 | **发布与学习 — 规划中** | 平台适配器、排期、版本关联反馈与检索，实现仍待设计 | [Studio 蓝图](product/studio-vision.md) |
 
 依赖锁定在 [package.json](../package.json)、[package-lock.json](../package-lock.json) 和[运行时锁文件](../scripts/runtime-lock.json)中。模型和第三方库保留各自条款；应用采用 Apache-2.0。
@@ -668,7 +668,7 @@ BYOA 连接已有 Agent 客户端；素材工作区支持直接用模型生成�
 | 你的方向 | 可贡献的内容 | 入口 |
 | --- | --- | --- |
 | **前端与交互** | 改进时间轴、媒体生成控件、无障碍或预览行为 | [Studio](../studio/src) · [媒体生成器](../studio/src/motion/MediaGenerator.tsx) |
-| **AI 与模型基础设施** | 沿用共享任务与媒体流程，新增供应商适配器或模型预设 | [Gateway 设计](product/media-generation-design.md) · [供应商适配器](../gateway/providers.ts) |
+| **AI 与模型基础设施** | 沿用共享任务与媒体流程，新增供应商适配器或模型预设 | [Gateway 设计](product/media-generation-design.md) · [供应商适配器](../src/services/opendesign-adapter.ts) |
 | **Agent 与开发工具** | 改进宿主适配器、Skill、资源指引或工程工具流程 | [Agent 适配器](agent-adapters.md) · [MCP 契约](mcp-phase1-tools.md) |
 | **动效与创意编程** | 分享组件、原生模板或带真实改编的 Motion.md 包 | [组件](../library/components/README.md) · [条目清单](../library/ENTRY_TEMPLATE.md) |
 | **视频与渲染** | 改进导出可靠性、媒体处理或可复现验证 | [引擎说明](hyperframes.md) · [导出校验器](../scripts/verify-export.ts) |

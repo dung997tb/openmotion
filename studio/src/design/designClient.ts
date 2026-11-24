@@ -35,8 +35,10 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     try {
       const payload = await res.json();
       if (payload?.error?.code) code = String(payload.error.code);
+      else if (typeof payload?.code === 'string') code = payload.code;
       if (payload?.error?.message) message = String(payload.error.message);
       else if (typeof payload?.error === 'string') message = payload.error;
+      else if (typeof payload?.message === 'string') message = payload.message;
     } catch { /* non-JSON error body */ }
     throw new DesignApiError(code, message, res.status);
   }

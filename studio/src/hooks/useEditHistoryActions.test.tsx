@@ -41,6 +41,7 @@ function mount(
   claims: () => number = () => 7,
 ) {
   const editHistory = {
+    projectWide: false,
     canUndo: true,
     canRedo: true,
     undo: vi.fn<EditHistoryHandle["undo"]>(async () => result),
@@ -88,6 +89,45 @@ describe("useEditHistoryActions", () => {
     expect(deps.waitForPendingDomEditSaves).not.toHaveBeenCalled();
     expect(deps.readProjectFile).not.toHaveBeenCalled();
     expect(deps.showToast).not.toHaveBeenCalled();
+  });
+  it("queues rapid cloud undo and redo in press order until the previous preview is restored", async () => {
+    const { deps, actions } = mount({ ok: true, label: "Edit title" });
+    deps.editHistory.projectWide = true;
+    deps.editHistory.canRedo = false;
+    const gate = Promise.withResolvers<void>();
+    deps.syncHistoryPreviewAfterApply.mockImplementationOnce(async () => {
+      await gate.promise;
+      deps.editHistory.canRedo = true;
+    });
+    await act(async () => {
+      const undo = actions.undo();
+      const redo = actions.redo();
+      await vi.waitFor(() => expect(deps.syncHistoryPreviewAfterApply).toHaveBeenCalledOnce());
+      expect(deps.editHistory.redo).not.toHaveBeenCalled();
+      gate.resolve();
+      await Promise.all([undo, redo]);
+    });
+    expect(deps.editHistory.redo).toHaveBeenCalledOnce();
+  });
+
+  it("drains a cloud save and steps shared history without reverting a local preview", async () => {
+    const { deps, actions } = mount({ ok: true, label: "Agent caption", paths: ["captions.srt"] });
+    deps.editHistory.projectWide = true;
+    const revert = vi.fn(() => () => {});
+    const saving = beginStudioPendingEdit(revert);
+    let finish!: () => void;
+    deps.waitForPendingDomEditSaves.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(undefined); }));
+    try {
+      const undo = actions.undo();
+      await vi.waitFor(() => expect(deps.waitForPendingDomEditSaves).toHaveBeenCalled());
+      expect(revert).not.toHaveBeenCalled();
+      expect(deps.editHistory.undo).not.toHaveBeenCalled();
+      saving.settle();
+      finish();
+      await act(() => undo);
+      expect(deps.editHistory.undo.mock.calls[0]![0].claimedAfter).toBeUndefined();
+      expect(deps.syncHistoryPreviewAfterApply).toHaveBeenCalledWith({ paths: ["captions.srt"], files: undefined });
+    } finally { saving.settle(); }
   });
   it("can still take back an edit saving before its history step is available", async () => {
     const { deps, actions } = mount({ ok: false, reason: "empty" });

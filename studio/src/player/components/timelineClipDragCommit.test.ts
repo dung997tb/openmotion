@@ -1,3 +1,4 @@
+import { setCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import type { DraggedClipState } from "./useTimelineClipDrag";
@@ -215,6 +216,24 @@ describe("commitDraggedClipMove", () => {
     expect(onMoveElements.mock.calls[0][2]).toBe("lane-reorder");
     expect(map.a).toEqual({ start: 20, track: 1 });
     expect(map.b).toBeUndefined(); // the other clip is NOT rewritten
+  });
+
+  it("includes paint in the same cloud lane gesture for moves and inserts", async () => {
+    setCachedCloudDisklessMode(true);
+    try {
+      for (const insertRow of [null, -0.5]) {
+        const elements = overlapping();
+        const writePaint = vi.fn();
+        const {onMoveElements} = runClipMove(drag(elements[0], {previewStart:0, previewTrack:0, desiredTrack:0, insertRow}),
+          {elements, trackOrder:[0,1], readZIndex:zOf, onStackingPatches:writePaint});
+        await flushMicrotasks();
+        expect(writePaint).not.toHaveBeenCalled();
+        expect(onMoveElements).toHaveBeenCalledTimes(1);
+        expect(onMoveElements.mock.calls[0]![2]).toMatchObject({kind:"laneWithPaint", paint:{ranks:expect.any(Array)}});
+      }
+    } finally {
+      setCachedCloudDisklessMode(null);
+    }
   });
 
   it("persists a lane change in AUTHORED track space when the file is sparse", () => {
@@ -1693,4 +1712,31 @@ describe("persistMoveEdits convergence", () => {
     expect([liveTrack, liveAuthoredTrack]).toEqual([0, 0]);
     expect(updateElement).toHaveBeenCalledTimes(2);
   });
+});
+
+it.each(["saved", "rejected"])("keeps video and audio on separate display rows while a track insert is %s", async (outcome) => {
+  const intro = el("intro", 0, 0, 3);
+  const reel = el("reel", 0, 3, 4);
+  const audio = { ...el("audio", 1, 0, 20, "audio"), authoredTrack: 0 };
+  const elements = [intro, reel, audio];
+  const tracks = () => usePlayerStore.getState().elements.map(e => e.track);
+  const pending = Promise.withResolvers<void>();
+  const save = vi.fn((_moves: TimelineMoveEdit[]) => pending.promise);
+  usePlayerStore.setState({ elements });
+  try {
+    commitDraggedClipMove(drag(reel, { previewStart: 3, previewTrack: 0, insertRow: 0 }), {
+      elements, trackOrder: [0, 1], updateElement: usePlayerStore.getState().updateElement, onMoveElements: save,
+    });
+    expect(tracks()).toEqual([1, 0, 2]);
+    expect(save.mock.calls[0][0].map(move => move.element.id)).not.toContain("audio");
+    expect(usePlayerStore.getState().elements[2].authoredTrack).toBe(0);
+    if (outcome === "saved") pending.resolve();
+    else pending.reject(new Error("save rejected"));
+    await flushMicrotasks();
+    expect(tracks()).toEqual(outcome === "saved" ? [1, 0, 2] : [0, 0, 1]);
+  } finally {
+    pending.resolve();
+    await flushMicrotasks();
+    usePlayerStore.getState().reset();
+  }
 });

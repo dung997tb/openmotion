@@ -1,4 +1,6 @@
-type ExternalFileReloadListener = (path: string) => void;
+import type { RemoteFileRead } from "./remoteFileReads";
+
+type ExternalFileReloadListener = (path: string, read?: RemoteFileRead) => void;
 
 const listeners = new Set<ExternalFileReloadListener>();
 
@@ -7,10 +9,10 @@ export function addExternalFileReloadListener(listener: ExternalFileReloadListen
   return () => listeners.delete(listener);
 }
 
-export function notifyExternalFileReload(path: string): void {
+export function notifyExternalFileReload(...change: Parameters<ExternalFileReloadListener>): void {
   for (const listener of listeners) {
     try {
-      listener(path);
+      listener(...change);
     } catch {
       // A stale SDK owner must not prevent sibling owners from reloading.
     }

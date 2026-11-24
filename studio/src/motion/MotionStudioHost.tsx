@@ -16,9 +16,14 @@ import { workspacePresentation } from '../../../shared/workspace-url';
 import { WorkspaceProject } from './WorkspaceProject';
 import { ProjectAgentAction } from './ProjectAgentAction';
 import { WorkspaceSaveStatus } from './WorkspaceSaveStatus';
+import {
+  recordPerformanceMetric,
+  setObservabilityContext,
+} from '@openmotion/observability/browser';
 import { trackMotion } from './tracking';
 import { installEditorTracking, openTemplateFields, projectFields, projectScaleFields, setProjectTemplate } from './editorTracking';
 import { OpenMotionAgentTools } from './OpenMotionAgentTools';
+import { bindThumbnailPageLifecycle } from '../player/lib/thumbnailPageLifecycle';
 
 installEditorTracking(trackMotion);
 
@@ -36,14 +41,25 @@ export function MotionEditorFrame({ children }: { children: ReactNode }) {
   // The workspace catalogue already says which template a project came from; exports are attributed to it.
   const templateId = chrome?.workspace.projects.find(project => project.id === projectId)?.templateId;
   useEffect(() => { setProjectTemplate(templateId); return () => setProjectTemplate(undefined); }, [templateId]);
+  useEffect(() => { setObservabilityContext({ projectId: projectId ?? null }); }, [projectId]);
   useEffect(() => {
     if (load.current.sent) return;
     load.current.sent = true;
     setProjectTemplate(templateId);
     // Whatever is in memory right now; the timeline and file tree are usually still loading, so `unknown`.
     const player = usePlayerStore.getState();
+    const loadDurationMs = Math.min(86_400_000, Math.round(performance.now()));
+    const embedded = workspacePresentation(location.search).embedded;
+    const project = projectFields(projectId);
+    recordPerformanceMetric('openmotion.studio.load_ms', loadDurationMs, {
+      unit: 'millisecond',
+      attributes: {
+        embedded,
+        ...(project.project_scope ? { project_scope: project.project_scope } : {}),
+      },
+    });
     void trackMotion('studio_load_result', { load_id: load.current.id, outcome: 'success',
-      embedded: workspacePresentation(location.search).embedded, duration_ms: Math.min(86_400_000, Math.round(performance.now())), ...projectFields(projectId),
+      embedded, duration_ms: loadDurationMs, ...project,
       ...projectScaleFields(player.timelineReady ? player.elements.length : undefined), ...openTemplateFields() });
   }, []);
   const blocked = renderQueue.isRendering || historyOperation.busy || Boolean(writeBlockedReason);
@@ -101,6 +117,14 @@ const host: StudioHost = {
   desktopLink: false,
   feedback: false,
 };
+
+export function MotionEditorHost({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    return bindThumbnailPageLifecycle(window, document);
+  }, []);
+  return <MotionHistoryProvider><StudioHostContext.Provider value={host}><OpenMotionAgentTools polyfillOnly />{children}</StudioHostContext.Provider></MotionHistoryProvider>;
+}
 
 export function MotionStudioHost({ children }: { children: ReactNode }) {
   return <I18nProvider><MotionHistoryProvider><StudioHostContext.Provider value={host}><StudioErrorBoundary><OpenMotionAgentTools />{children}</StudioErrorBoundary></StudioHostContext.Provider></MotionHistoryProvider></I18nProvider>;

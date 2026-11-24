@@ -10,6 +10,7 @@ import { useI18n } from "../i18n/I18n";
 
 type CatalogItem = RegistryItem & {
   category: BlockCategory;
+  compositionFile?: string;
 };
 
 let catalogCache: CatalogItem[] | null = null;
@@ -19,9 +20,10 @@ function loadCatalog(): Promise<CatalogItem[]> {
   catalogRequest ??= studioApiFetch("/api/registry/blocks")
     .then((response) => {
       if (!response.ok) throw new Error("Failed to load catalog");
-      return response.json() as Promise<RegistryItem[]>;
+      return response.json() as Promise<RegistryItem[] | { blocks: RegistryItem[] }>;
     })
-    .then((items) => {
+    .then((body) => {
+      const items = Array.isArray(body) ? body : body.blocks;
       catalogCache = items
         .map((item) => ({ ...item, category: resolveBlockCategory(item.tags) }))
         .sort((a, b) => {
@@ -36,6 +38,10 @@ function loadCatalog(): Promise<CatalogItem[]> {
       throw error;
     });
   return catalogRequest;
+}
+
+export function cachedMotionComponent(name: string) {
+  return catalogCache?.find(item => item.name === name && item.compositionFile);
 }
 
 export function useBlockCatalog() {

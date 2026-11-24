@@ -1,3 +1,5 @@
+import { IsolatedCanvasOverlay } from "../editor/IsolatedCanvasOverlay";
+import { isolatedPreviewOrigin } from "../../player/lib/previewLease";
 import { Button } from "open-design-ui/button";
 import { IconButton } from "open-design-ui/icon-button";
 import { useMvpEditor } from "../../motion/StudioHost";
@@ -138,12 +140,14 @@ export function PreviewOverlays({
     <>
       <TopologyLens iframeRef={previewIframeRef} activeCompositionPath={activeCompPath} />
       {!mvp && <GridOverlay />}
-      <ConnectedDomEditOverlay
+      {isolatedPreviewOrigin() ? (
+        !readOnly && !isPlaying && !isGestureRecording && <IsolatedCanvasOverlay />
+      ) : <ConnectedDomEditOverlay
         activeCompositionPath={activeCompPath}
         showHoverSelection={!previewCaptionEditMode && !compositionLoading && !isPlaying}
         shouldShowSelectedDomBounds={shouldShowSelectedDomBounds}
         isGestureRecording={isGestureRecording}
-      />
+      />}
       {!mvp && <SnapToolbar />}
       {!mvp && !readOnly && (
         <MotionPathOverlay

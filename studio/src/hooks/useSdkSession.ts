@@ -1,3 +1,6 @@
+import { confirmedSource as savedSource, observePendingSourceRead, observeSourceRead } from "../utils/confirmedTextSources";
+import type { RemoteFileRead } from "./remoteFileReads";
+import { optionalProjectSourceUrl } from "../utils/projectRouting";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { openComposition } from "@hyperframes/sdk";
 import type { Composition } from "@hyperframes/sdk";
@@ -5,8 +8,10 @@ import { isSelfWriteEcho } from "./sdkSelfWriteRegistry";
 import { trackStudioEvent } from "../utils/studioTelemetry";
 import type { PublishSdkSession } from "../utils/sdkCutover";
 import { addExternalFileReloadListener } from "./externalFileReloadBus";
-import { whenPreviewBooted } from "../player/store/playerStore";
-import { studioApiFetch } from "../utils/studioApiFetch";
+import { beginTimelineSourceRead } from "../player/lib/peerTimeline";
+import { rememberCompositionPosterSource } from "../player/lib/compositionPosterSource";
+import { usePlayerStore, whenPreviewBooted } from "../player/store/playerStore";
+import { readVersionedSource, type SourceVersion } from "../utils/readVersionedSource";
 
 /**
  * Why an optional project-file read produced no usable content. `stage: "read"`
@@ -68,7 +73,7 @@ type ProjectFileReadFailure =
   | { ok: false; reason: "invalid_json"; contentType: string }
   | { ok: false; reason: "network"; elapsedMs: number; hidden: boolean };
 
-type ProjectFileReadResult = { ok: true; content: string } | ProjectFileReadFailure;
+type ProjectFileReadResult = { ok: true; content: string; version?: string } | ProjectFileReadFailure;
 
 /** The three ways a 200 can carry no composition — old combined label plus its split. */
 const EMPTY_READ_REASONS = new Set<ProjectFileReadFailure["reason"]>([
@@ -155,6 +160,7 @@ async function httpReadFailureWhy(res: Response): Promise<string | undefined> {
 
 interface ProjectFileBody {
   content?: string;
+  version?: string | null;
   /** Present only from a server that separates its shim from a real 0-byte file. */
   missing?: boolean;
 }
@@ -171,7 +177,7 @@ interface ProjectFileBody {
  */
 function classifyProjectFileBody(data: ProjectFileBody): ProjectFileReadResult {
   if (typeof data.content !== "string") return { ok: false, reason: "missing_content" };
-  if (data.content !== "") return { ok: true, content: data.content };
+  if (data.content !== "") return { ok: true, content: data.content, ...(typeof data.version === "string" && { version: data.version }) };
   if (data.missing === true) return { ok: false, reason: "absent" };
   if (data.missing === false) return { ok: false, reason: "empty_file" };
   return { ok: false, reason: "absent_or_empty" };
@@ -186,18 +192,36 @@ function classifyProjectFileBody(data: ProjectFileBody): ProjectFileReadResult {
 async function readProjectFileOptional(
   projectId: string,
   path: string,
+  base?: SourceVersion,
+  sharedRead?: RemoteFileRead,
 ): Promise<ProjectFileReadResult> {
   // Reject traversal / NUL before building the request URL — `path` is a
   // user-influenced composition path (mirrors the guard in timelineEditingHelpers,
   // and closes the CodeQL client-side-request-forgery flag). encodeURIComponent
   // already confines both values to single segments of this same-origin URL.
   if (path.includes("\0") || path.includes("..")) return { ok: false, reason: "unsafe_path" };
+  const previewState = usePlayerStore.getState();
+  const rememberSource = beginTimelineSourceRead(projectId, path);
+  function publishRead(file: ProjectFileBody) {
+    const result = classifyProjectFileBody(file);
+    if (result.ok) {
+      rememberSource(result.content);
+      rememberCompositionPosterSource(previewState, projectId, path, result.content, result.version);
+    }
+    return result;
+  }
+  const shared = sharedRead?.(projectId, path);
+  if (shared) {
+    try {
+      return publishRead(await shared);
+    } catch {
+      // Retry through the diagnostic reader so a missing project or a network fault stays visible.
+    }
+  }
   let res: Response;
   const fetchStarted = performance.now();
   try {
-    res = await studioApiFetch(
-      `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(path)}?optional=1`,
-    );
+    res = await readVersionedSource(optionalProjectSourceUrl(projectId, path), base);
   } catch {
     return networkReadFailure(fetchStarted);
   }
@@ -219,7 +243,8 @@ async function readProjectFileOptional(
       contentType: res.headers.get("content-type") ?? "",
     };
   }
-  return classifyProjectFileBody(data);
+  observeSourceRead(projectId, path, res, data);
+  return publishRead({ ...data, version: data.version ?? res.headers?.get("etag") });
 }
 
 /**
@@ -255,13 +280,10 @@ export interface SdkSessionHandle {
   /** Atomically publish a fully persisted candidate session. */
   publish: PublishSdkSession;
   /**
-   * Force a session reload immediately, bypassing the self-write suppress
-   * window. Call after undo/redo writes the active composition file so the
-   * SDK in-memory document reflects the reverted content. Without it the
-   * window swallows the file-change and the session stays stale; the write
-   * side of that path is covered by usePersistentEditHistory.test.ts.
+   * Reopen after a write made outside the SDK, including undo/redo. A canvas
+   * receipt identifies the changed files and the exact source safe to reuse.
    */
-  forceReload: () => void;
+  forceReload: (receipt?: { projectId: string; versions: Readonly<Record<string, string>> }) => void;
   /**
    * Set when this server answered the composition read with a 404 for the
    * project it was asked to open. In the CLI-embedded host — the only host
@@ -368,10 +390,13 @@ export function useSdkSession(
   const ownedSessionRef = useRef<OwnedSdkSession | null>(null);
   const sessionOwnersRef = useRef(new WeakMap<Composition, SdkSessionOwner>());
   const generationRef = useRef(0);
+  const confirmedSource = useRef<(SourceVersion & { projectId: string; path: string }) | null>(null);
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
   const activeCompPathRef = useRef(activeCompPath);
   activeCompPathRef.current = activeCompPath;
+  const externalRead = useRef<{ read?: RemoteFileRead } | null>(null);
+  const localRead = useRef<RemoteFileRead | undefined>(undefined);
   const [reloadToken, setReloadToken] = useState(0);
   const reloadTokenRef = useRef(reloadToken);
   reloadTokenRef.current = reloadToken;
@@ -408,9 +433,10 @@ export function useSdkSession(
 
   useEffect(
     () =>
-      addExternalFileReloadListener((changedPath) => {
+      addExternalFileReloadListener((changedPath, read) => {
         // "." is a project-wide change (a reconnect or a replaced folder): every session reloads.
         if (changedPath === "." || changedPath === activeCompPathRef.current) {
+          externalRead.current = { read };
           setReloadToken((token) => token + 1);
         }
       }),
@@ -419,6 +445,10 @@ export function useSdkSession(
 
   // ── Open / re-open the session ──
   useEffect(() => {
+    // An external delivery owns the read even when it asks us to refetch with no version hint.
+    const sharedRead = externalRead.current ? externalRead.current.read : localRead.current;
+    externalRead.current = null;
+    localRead.current = undefined;
     const generation = ++generationRef.current;
     let cancelled = false;
 
@@ -429,6 +459,7 @@ export function useSdkSession(
     setOwnedSession(null);
     if (previous) disposeSdkSession(previous.session);
 
+    if (confirmedSource.current?.projectId !== projectId || confirmedSource.current?.path !== activeCompPath) confirmedSource.current = null;
     if (!projectId || !activeCompPath) {
       setUnreachableProject(null);
       setCompositionMissing(false);
@@ -448,17 +479,20 @@ export function useSdkSession(
     // the first frame and play do not need it, so it waits for the live preview to boot.
     whenPreviewBooted(projectId)
       .then((booted) =>
-        cancelled || !booted ? null : readProjectFileOptional(projectId, activeCompPath),
+        cancelled || !booted ? null : observePendingSourceRead(projectId, activeCompPath,
+          readProjectFileOptional(projectId, activeCompPath, confirmedSource.current ?? undefined, sharedRead)),
       )
       .then(async (read) => {
         if (!read || cancelled) return;
         if (!read.ok) {
+          confirmedSource.current = null;
           handleReadFailure(read, projectId, activeCompPath);
           return;
         }
         setUnreachableProject(null);
         setCompositionMissing(false);
         const content = read.content;
+        confirmedSource.current = read.version ? { projectId, path: activeCompPath, content, version: read.version } : null;
         // No persist queue: Studio's writeProjectFile (via sdkCutover's
         // persistSdkSerialize) is the SINGLE writer. Wiring the SDK persist
         // queue too would double-write the file (queue auto-writes on every
@@ -535,7 +569,20 @@ export function useSdkSession(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeCompPath, reloadToken]);
 
-  const forceReload = useCallback(() => setReloadToken((t) => t + 1), []);
+  const forceReload = useCallback<SdkSessionHandle["forceReload"]>((receipt) => {
+    const path = activeCompPathRef.current;
+    if (receipt && (receipt.projectId !== projectIdRef.current || !path || !Object.hasOwn(receipt.versions, path))) {
+      return;
+    }
+    localRead.current = receipt
+      ? (projectId, file) => {
+          if (projectId !== receipt.projectId || file !== path) return;
+          const source = savedSource(projectId, file);
+          if (source && source.version === receipt.versions[file]) return Promise.resolve({ ...source, missing: false });
+        }
+      : undefined;
+    setReloadToken(t => t + 1);
+  }, []);
   const publish = useCallback<PublishSdkSession>(({ candidate, expectedSession, targetPath }) => {
     const expectedOwner = sessionOwnersRef.current.get(expectedSession);
     const current = ownedSessionRef.current;

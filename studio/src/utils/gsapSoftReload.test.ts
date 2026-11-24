@@ -451,6 +451,15 @@ describe("applySoftReloadFinalization", () => {
     expect(applySoftReloadFinalization(iframe, 0)).toBe(false);
   });
 
+  it("never reads runtime globals from an isolated window", () => {
+    const contentWindow = new Proxy({}, {
+      get() { throw new DOMException("Blocked a frame with origin", "SecurityError"); },
+    });
+    const iframe = { contentWindow, contentDocument: null } as HTMLIFrameElement;
+    expect(applySoftReloadFinalization(iframe, 2)).toBe(false);
+    expect(applySoftReload(iframe, SCRIPT_TEXT)).toBe("cannot-soft-reload");
+  });
+
   it("returns false when the rebind throws (caller full-reloads)", () => {
     const { iframe } = buildMockIframe({
       __hfForceTimelineRebind: vi.fn(() => {

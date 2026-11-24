@@ -7,7 +7,7 @@ import { Popover } from '../components/ui/Popover';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { creativeStudios, studioIconTone, mediaLabels, modelDestination, sceneDestination, scenesForStudio, supportsScene, type StudioDestination } from './creativeStudios';
-import { mcpClients, supportsLocalConnection, type McpClient } from './mcpClients';
+import { mcpClients, type McpClient } from './mcpClients';
 import { useMediaCatalog } from './useMediaCatalog';
 import speakerStudio from './scene-art/speaker-studio.webp';
 import { imageScene, menuFamilies, withOpenDesignModels } from './imageMenuModels';
@@ -20,6 +20,7 @@ import type { SoundTabId } from './soundTabs';
 import type { ScenarioId } from '../../../shared/scenarios';
 import { ScenarioMegaMenu } from './ScenarioMegaMenu';
 import { preloadStudioRoute, preloadWorkspacePage } from '../router/lazyPages';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 export type CreativeNavigationProps = {
   onChooseStudio: (studio: CreativeStudio, kind?: Modality) => void;
@@ -99,6 +100,11 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
   const strip = useRef<HTMLDivElement>(null);
   const more = useRef<HTMLDivElement>(null);
   const hasWorkflows = Boolean(onOpenScenario && onOpenScenarioHub);
+  const gameStudioEnabled = useCloudFeatureEnabled('gameStudio');
+  const designStudioEnabled = useCloudFeatureEnabled('designStudio');
+  const visibleStudios = creativeStudios.filter(studio =>
+    (gameStudioEnabled || studio.id !== 'game') && (designStudioEnabled || studio.id !== 'design'),
+  );
 
   const choose = (action: () => void) => {
     const navigation = rail.current;
@@ -143,7 +149,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
   ];
   const splitStart = 1;
   const studioStart = splitStart + menuDestinations.length;
-  const count = studioStart + creativeStudios.length;
+  const count = studioStart + visibleStudios.length;
   const hasMore = visibleCount < count || Boolean(overflowActions);
 
   useLayoutEffect(() => {
@@ -176,7 +182,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
     const observer = new ResizeObserver(update);
     [viewport, trigger, ...items].forEach(element => observer.observe(element));
     return () => observer.disconnect();
-  }, [studioStart]);
+  }, [studioStart, visibleStudios.length]);
 
   useLayoutEffect(() => {
     setOpen(null);
@@ -205,7 +211,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
             {id === 'mcp' ? <>
               <h2 lang="en">{menuLabel}</h2>
               <div className="om-mcp-client-grid">
-                {mcpClients.filter(supportsLocalConnection).map(client => <Button variant="plain" className="om-nav-item" key={client.id} onClick={() => { track('select_client', { ...where, client: client.id }); choose(() => onOpenPage('mcp', client.id)); }}>
+                {mcpClients.map(client => <Button variant="plain" className="om-nav-item" key={client.id} onClick={() => { track('select_client', { ...where, client: client.id }); choose(() => onOpenPage('mcp', client.id)); }}>
                   <McpClientAvatar client={client} /><span>{t(client.name)}</span>
                 </Button>)}
               </div>
@@ -243,7 +249,7 @@ export function CreativeNavigation({ specialty, onChooseStudio, destination, sou
       <RemixIcon name="global-line" size={17} /><span>{t('Explore')}</span>
     </Button>;
     if (index < studioStart) return splitItem(index, inPanel);
-    const studio = creativeStudios[index - studioStart];
+    const studio = visibleStudios[index - studioStart];
     const isCurrent = studio.surface === 'editor' ? motionActive
       : (studio.id === 'design' && Boolean(designActive)) || (studio.id === 'cinema' && Boolean(cinemaActive))
         || (studio.id === destination?.studio.id && !destination?.landing && !destination?.mediaTab) || studio.id === specialty?.id;

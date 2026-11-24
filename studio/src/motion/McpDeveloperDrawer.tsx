@@ -2,11 +2,12 @@ import { Button } from 'open-design-ui/button';
 import { useEffect, useState } from 'react';
 import { canvasPresets } from '../../../shared/composition-canvas';
 import { platformExportTargets } from '../../../shared/platform-export';
-import type { IntegrationInfo } from '../../../shared/integration';
+import { isStreamableHttpTransport, type IntegrationInfo } from '../../../shared/integration';
 import { PlatformIcon } from '../../../packages/design-system/react/PlatformIcon';
 import { Tab, TabPanel, Tabs, TabsList } from '../components/ui/Tabs';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 import { GITHUB_REPOSITORY } from './githubRepository';
 import { mcpCapabilities, mcpClientComparison, mcpFaq, mcpReviewGuide, mcpScenarios, mcpWorkflowComparison } from './mcpCapabilities';
 import { SettingsError } from './settingsPrimitives';
@@ -75,6 +76,44 @@ export function McpDeveloperDrawer({
   const { t } = useI18n();
   const [open, setOpen] = useState(Boolean(deepLinkExample));
   const [tab, setTab] = useState<DevTab>('tools');
+  const isHttp = isStreamableHttpTransport(info?.transport);
+  const designStudio = useCloudFeatureEnabled('designStudio');
+  const workflows = useCloudFeatureEnabled('workflows');
+  const reviewComments = useCloudFeatureEnabled('reviewComments');
+  const brandKit = useCloudFeatureEnabled('brandKit');
+  const asr = useCloudFeatureEnabled('asr');
+  const visibleExamples = [...mcpCapabilities, ...mcpScenarios].filter(({ id }) => {
+    if (!designStudio && id.startsWith('design-')) return false;
+    if (!workflows && id.startsWith('scenario-')) return false;
+    if (!reviewComments && id === 'review-comments') return false;
+    if (!asr && id === 'transcript') return false;
+    if (!isHttp && ['project-file', 'project-edit', 'clip-move'].includes(id)) return false;
+    return true;
+  });
+  const visibleFaq = mcpFaq.filter(([question]) => {
+    if (!brandKit && question === 'How is a Brand Kit different from a Template?') return false;
+    if (!designStudio && question === 'How does Design Studio work in Cloud Phase 1?') return false;
+    if (!workflows && question === 'How does my Agent run a workflow and save results to Assets?') return false;
+    return true;
+  });
+  const costs = isHttp ? [
+    'Connecting does not run a model or start a render. Agent subscriptions and OpenDesign media charges are separate.',
+    'Media generation routes through the unified OpenDesign Model Gateway and depends on workspace plan entitlement and available balance. Local development supports MODEL_GATEWAY_MODE=mock without external billing.',
+    'Use the same generation or export job to check progress. Cancellation depends on the task and worker state; it does not guarantee a refund.',
+  ] : [
+    'Connecting does not run a model or start a render. Agent subscriptions and media-provider charges are separate.',
+    'Generation depends on provider access, model support and available quota. There is no universal free-generation allowance or fixed completion time.',
+    'Use the same generation or export job to check progress. Cancellation depends on the task and provider; it does not guarantee a refund.',
+  ];
+  const privacy = isHttp ? [
+    'External MCP Agents authenticate via OAuth 2.1 or scoped Personal Access Tokens—browser session cookies are never accepted on /mcp.',
+    'All projects, snapshots, assets and renders stay isolated per workspace in Postgres and S3 content-addressed storage. No BYOK third-party API keys are stored in workspaces.',
+    'Cloud media generation sends only the requested prompt and pinned reference assets to the OpenDesign Model Gateway. Revoke any Personal Access Token anytime under Account settings.',
+  ] : [
+    'The local Agent receives access to workspace tools. Keep your existing MCP servers and connect the correct installation.',
+    'Provider credentials are stored outside projects and injected by the local service. Never paste API keys into a conversation.',
+    'Cloud generation sends the required prompt and reference material to the selected provider. Projects and local exports remain in your workspace.',
+  ];
 
   useEffect(() => {
     if (!deepLinkExample) return;
@@ -149,11 +188,13 @@ export function McpDeveloperDrawer({
 
             <div className="om-mcp-dev-subhead">
               <h3>{t('Your visual MCP guide')}</h3>
-              <p className="om-muted">{t('Choose a task and copy its example into your connected Agent. Projects and assets stay in your workspace; media generation uses your configured providers.')}</p>
+              <p className="om-muted">{t(isHttp
+                ? 'Choose a task and copy its example into your connected Agent. Projects and assets stay in your cloud workspace; media generation routes through the OpenDesign Model Gateway.'
+                : 'Choose a task and copy its example into your connected Agent. Projects and assets stay in your workspace; media generation uses your configured providers.')}</p>
             </div>
 
             <div className="om-mcp-capability-grid">
-              {[...mcpCapabilities, ...mcpScenarios].map(item => (
+              {visibleExamples.map(item => (
                 <article className="om-mcp-feature" key={item.id} id={'mcp-example-' + item.id} tabIndex={-1} data-mcp-scenario={item.id}>
                   <RemixIcon name={item.icon} size={22} />
                   <h3>{t(item.title)}</h3>
@@ -221,7 +262,9 @@ export function McpDeveloperDrawer({
               columns={['Capability', 'Codex / Claude Code / Cursor / DeepSeek', 'Desktop / other MCP clients', 'ChatGPT Cloud']}
               rows={mcpClientComparison}
             />
-            <p className="om-mcp-footnote">{t('Support here describes this local installation. Your Agent must expose the tools and resources; media generation also needs an available provider.')}</p>
+            <p className="om-mcp-footnote">{t(isHttp
+              ? 'Every client connects to the same Streamable HTTP /mcp endpoint using OAuth 2.1 or a workspace Personal Access Token. ChatGPT Cloud requires a public HTTPS URL with OAuth 2.1.'
+              : 'Support here describes this local installation. Your Agent must expose the tools and resources; media generation also needs an available provider.')}</p>
             <div className="om-mcp-dev-subhead" id="mcp-comparison">
               <h3>{t('Choose the workflow that fits your idea')}</h3>
             </div>
@@ -238,34 +281,30 @@ export function McpDeveloperDrawer({
               <div>
                 <h3>{t('Costs & limits')}</h3>
                 <ul>
-                  {[
-                    'Connecting does not run a model or start a render. Agent subscriptions and media-provider charges are separate.',
-                    'Generation depends on provider access, model support and available quota. There is no universal free-generation allowance or fixed completion time.',
-                    'Use the same generation or export job to check progress. Cancellation depends on the task and provider; it does not guarantee a refund.',
-                  ].map(text => <li key={text}>{t(text)}</li>)}
+                  {costs.map(text => <li key={text}>{t(text)}</li>)}
                 </ul>
                 <Button variant="ghost" className="om-button h-auto" onClick={onOpenProviders}>
                   <RemixIcon name="sparkling-line" size={16} />
-                  {t('Manage providers')}
+                  {t(isHttp ? 'Model gateway' : 'Manage providers')}
                 </Button>
               </div>
               <div>
                 <h3>{t('Privacy & permissions')}</h3>
                 <ul>
-                  {[
-                    'The local Agent receives access to workspace tools. Keep your existing MCP servers and connect the correct installation.',
-                    'Provider credentials are stored outside projects and injected by the local service. Never paste API keys into a conversation.',
-                    'Cloud generation sends the required prompt and reference material to the selected provider. Projects and local exports remain in your workspace.',
-                  ].map(text => <li key={text}>{t(text)}</li>)}
+                  {privacy.map(text => <li key={text}>{t(text)}</li>)}
                 </ul>
               </div>
             </div>
 
             <div className="om-mcp-capability-grid om-mcp-dev-docs" id="mcp-connections">
               {([
-                ['plug-line', 'MCP', 'MCP connects compatible Agents to your local workspace. Use the same tools to create and edit projects, discover templates and import assets.', 'docs/mcp-phase1-tools.md'],
+                isHttp
+                  ? ['plug-line', 'Streamable HTTP MCP', 'Connect compatible cloud and desktop Agents directly to /mcp with OAuth 2.1 or a PAT. Create and edit projects, discover templates and import assets without docker exec.', 'docs/mcp-phase1-tools.md']
+                  : ['plug-line', 'MCP', 'MCP connects compatible Agents to your local workspace. Use the same tools to create and edit projects, discover templates and import assets.', 'docs/mcp-phase1-tools.md'],
                 ['file-text-line', 'Production Skills', 'Give your Agent the creative workflow, reference guides and verification rules. Installed Skills and MCP resources share the maintained guidance.', 'docs/skills.md'],
-                ['code-s-slash-line', 'Local API & CLI', 'For local development and automation. Use the documented application boundary and project safeguards; no hosted public API is provided here.', 'docs/agent-adapters.md'],
+                isHttp
+                  ? ['code-s-slash-line', 'Cloud HTTP API', 'Authenticated workspace REST endpoints for Studio, presigned S3 asset uploads, OpenDesign model jobs and remote-worker MP4 exports.', 'docs/product/architecture.md']
+                  : ['code-s-slash-line', 'Local API & CLI', 'For local development and automation. Use the documented application boundary and project safeguards; no hosted public API is provided here.', 'docs/agent-adapters.md'],
               ] as const).map(([icon, title, body, doc]) => (
                 <article className="om-mcp-feature" key={title}>
                   <RemixIcon name={icon} size={22} />
@@ -288,7 +327,7 @@ export function McpDeveloperDrawer({
 
           <TabPanel value="faq" keepMounted className="om-mcp-dev-pane om-mcp-faq" data-active={tab === 'faq' || undefined}>
             <div className="om-mcp-dev-faq-list">
-              {mcpFaq.map(([question, answer], index) => (
+              {visibleFaq.map(([question, answer], index) => (
                 <details
                   key={question}
                   className="om-mcp-faq-acc"

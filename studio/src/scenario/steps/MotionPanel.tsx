@@ -65,8 +65,7 @@ export function MotionPanel({
   const motionTemplates = useExploreTemplates(
     active && templateSource === 'motion' ? 'motion' : undefined,
     locale,
-    '',
-    6,
+    { search: '', limit: 6 },
   );
   const shelfItems = useMemo(
     () => motionTemplates.pages.flatMap(page => page.items).slice(0, 6),

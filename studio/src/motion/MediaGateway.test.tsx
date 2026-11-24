@@ -82,7 +82,7 @@ it('generates for its own project while another project is globally active, then
     if (url.includes('models/capabilities')) return Response.json({ providers: [{ id: 'codex', available: true }], agents: [], routes: {}, capabilities: [] });
     if (url.includes('/models?')) return Response.json({ models: [model], nextOffset: null });
     if (url.includes('project/status')) return Response.json({ projectId: url.includes('projectId=native-project') ? 'native-project' : 'workspace-project' });
-    if (url.endsWith('/generations') && init?.method === 'POST') {
+    if ((url.endsWith('/generations') || url.endsWith('/models/generate')) && init?.method === 'POST') {
       submitted = JSON.parse(init.body as string);
       const job = { id: 'job-1', projectId: 'native-project', state: 'queued', prompt: 'a forest', model, modality: 'image', parameters: {}, createdAt: 1, updatedAt: 1, requestHash: 'hash', assets: [] } as GenerationJob;
       jobs.push(job); return Response.json({ job });
@@ -119,7 +119,7 @@ it('edits a reference with a supported model, preserves placement and applies on
     if (url.includes('models/capabilities')) return Response.json({ providers: [{ id: 'codex', available: true }, { id: 'fal', available: true }], routes: { image: 'fal:flux' } });
     if (url.includes('/models?')) return Response.json({ models: [{ ...model, supportsImageReference: true }, { ...model, id: 'fal:flux', provider: 'fal', label: 'Flux' }], nextOffset: null });
     if (url.includes('project/status')) return Response.json({ projectId: 'native' });
-    if (url.endsWith('/generations') && init?.method === 'POST') {
+    if ((url.endsWith('/generations') || url.endsWith('/models/generate')) && init?.method === 'POST') {
       submitted = JSON.parse(init.body as string);
       const job = { id: 'edited-image', projectId: 'native', state: 'completed', model, prompt: 'golden sunset', reference: { path: reference.path, sha256: 'test', mimeType: 'image/png', bytes: 20 }, assets: [{ path: 'assets/generated/sunset.png', mimeType: 'image/png', bytes: 20 }] } as GenerationJob;
       jobs.push(job); return Response.json({ job });

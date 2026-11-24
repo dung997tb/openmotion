@@ -194,20 +194,27 @@ function FeatureModuleCarousel({
   );
 }
 
+const modulesWithoutBrandKits = mcpShowcaseModules.map(module => ({
+  ...module,
+  slides: module.slides.filter(slide => slide.target.kind !== 'brand-kit'),
+}));
+
 export function McpFeatureCarousels({
   enabled,
+  brandKitEnabled,
   onCopy,
 }: {
   enabled: boolean;
+  brandKitEnabled: boolean;
   onCopy: (slideId: string, prompt: string) => Promise<boolean>;
 }) {
   const { t } = useI18n();
   return (
     <section className="om-mcp-section" id="showcase" aria-label={t('Featured MCP capabilities')}>
       <div className="om-mcp-carousel-modules">
-        {mcpShowcaseModules.map((module, idx) => (
+        {(brandKitEnabled ? mcpShowcaseModules : modulesWithoutBrandKits).map((module, idx) => (
           <FeatureModuleCarousel
-            key={module.id}
+            key={module.id + module.slides.length}
             module={module}
             moduleIndex={idx}
             enabled={enabled}

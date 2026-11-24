@@ -1,7 +1,12 @@
 import { readFile, stat } from 'node:fs/promises';
 import { normalizeTranscript } from '../shared/transcript.ts';
-import { connectionBaseUrl } from './connections.ts';
 import { ProviderError, publicProviderFetch, type Fetcher } from './network.ts';
+
+function normalizeTranscriptionBaseUrl(raw: string): string {
+  const parsed = new URL(raw);
+  if (parsed.protocol !== 'https:') throw new Error('Transcription baseUrl must use HTTPS');
+  return parsed.toString().replace(/\/+$/, '');
+}
 
 export const TRANSCRIPTION_CHUNK_SECONDS = 600;
 const TRANSCRIPTION_TIMEOUT_MS = 10 * 60_000;
@@ -47,7 +52,7 @@ export async function transcribeAudio(input: { file: string; modelId: string; ba
   }
   // The shared DNS-pinned HTTPS transport accepts bytes, not FormData streams.
   const encoded = new Response(form);
-  const response = await fetcher(connectionBaseUrl(input.baseUrl) + '/audio/transcriptions', {
+  const response = await fetcher(normalizeTranscriptionBaseUrl(input.baseUrl) + '/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${input.key}`, 'Content-Type': encoded.headers.get('content-type')! },
     body: new Uint8Array(await encoded.arrayBuffer()), redirect: 'error', signal: AbortSignal.any([input.signal, AbortSignal.timeout(TRANSCRIPTION_TIMEOUT_MS)]),
   });

@@ -1,3 +1,4 @@
+import { projectPreviewAdapter } from "../player/lib/projectPreviewAdapter";
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { TimelineElement } from "../player";
 import {
@@ -21,6 +22,7 @@ import {
 import { reapplyPositionEditsAfterSeek } from "../components/editor/manualEdits";
 import { holdScenesOf } from "../utils/sceneHold";
 import { useStudioTestHooks } from "./useStudioTestHooks";
+import { inspectIsolatedElement } from "../components/editor/isolatedInspector";
 import { logSelect } from "../utils/selectDebug";
 import { announceTimelineSelection as announceSelectionToTimeline } from "./domSelectionTimelineMirror";
 import type {
@@ -197,6 +199,24 @@ export function useDomSelection({
     [announceTimelineSelection, setRightCollapsed, setRightPanelTab],
   );
 
+  useEffect(() => {
+    const receive = async (event: MessageEvent) => {
+      if (captionEditMode || event.data?.type !== "select-element" || event.data.inspect !== true) return;
+      const iframe = previewIframeRef.current;
+      const adapter = projectPreviewAdapter(iframe, projectId);
+      if (!adapter?.accepts(event) || !event.data.selection) return;
+      const seq = ++timelineSelectSeqRef.current;
+      const selection = await inspectIsolatedElement(adapter, event.data.selection, isMasterView);
+      if (selection !== undefined && seq === timelineSelectSeqRef.current && iframe === previewIframeRef.current)
+        applyDomSelection(selection);
+    };
+    window.addEventListener("message", receive);
+    return () => {
+      ++timelineSelectSeqRef.current;
+      window.removeEventListener("message", receive);
+    };
+  }, [applyDomSelection, captionEditMode, isMasterView, projectId, previewIframeRef]);
+
   const clearDomSelection = useCallback(() => {
     applyDomSelection(null, { revealPanel: false });
   }, [applyDomSelection]);
@@ -300,6 +320,10 @@ export function useDomSelection({
     // fallow-ignore-next-line complexity
     async (element: TimelineElement): Promise<DomEditSelection | null> => {
       const iframe = previewIframeRef.current;
+      const adapter = projectPreviewAdapter(iframe, projectId);
+      if (adapter) return (await inspectIsolatedElement(adapter, {
+        elementId: element.domId || (element.hfId ? undefined : element.id), hfId: element.hfId, sourceFile: element.sourceFile,
+      }, isMasterView)) ?? null;
       let doc: Document | null = null;
       try {
         doc = iframe?.contentDocument ?? null;
@@ -323,7 +347,7 @@ export function useDomSelection({
           })
         : null;
     },
-    [activeCompPath, buildDomSelectionFromTarget, compIdToSrc, isMasterView, previewIframeRef],
+    [activeCompPath, buildDomSelectionFromTarget, compIdToSrc, isMasterView, previewIframeRef, projectId],
   );
 
   const handleTimelineElementSelect = useCallback(
@@ -363,6 +387,15 @@ export function useDomSelection({
       const stillSelected = () =>
         domEditSelectionsTargetSame(domEditSelectionRef.current, selection);
       if (!stillSelected()) return;
+      if (selection.isolatedTarget) {
+        const adapter = projectPreviewAdapter(iframe, projectId);
+        if (!adapter) return;
+        const next = await inspectIsolatedElement(adapter, selection.isolatedTarget, isMasterView);
+        if (next !== undefined && domEditSelectionRef.current === selection && iframe === previewIframeRef.current &&
+            projectPreviewAdapter(iframe, projectId)?.token === adapter.token)
+          applyDomSelection(next, { revealPanel: false, preserveGroup: true });
+        return;
+      }
       let doc: Document | null = null;
       try {
         doc = iframe?.contentDocument ?? null;
@@ -396,7 +429,7 @@ export function useDomSelection({
         });
       }
     },
-    [activeCompPath, applyDomSelection, buildDomSelectionFromTarget, previewIframeRef],
+    [activeCompPath, applyDomSelection, buildDomSelectionFromTarget, previewIframeRef, projectId, isMasterView],
   );
 
   const refreshDomEditGroupSelectionsFromPreview = useCallback(

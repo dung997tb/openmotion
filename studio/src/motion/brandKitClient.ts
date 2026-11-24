@@ -2,7 +2,7 @@ import type { GalleryTemplate } from "../../../shared/catalog";
 import { brandCatalogFile, brandCoverRevision } from "../../../shared/brand-catalog";
 import { brandKitShowcase, brandKitWebsite } from "../../../shared/brand-kit";
 import type { BrandKit } from "../../../shared/brand-kit";
-import { gatewayRequest } from "./gatewayClient";
+import { gatewayRequest, type CloudApiError } from "./gatewayClient";
 export {
   brandKitInstruction,
   brandKitShowcase,
@@ -16,8 +16,15 @@ export const brandRequest = <T>(suffix = "", method = "GET", body?: unknown) =>
 /** Status reads must never strand the polling loop behind a stalled request. */
 export async function loadBrandKits(signal: AbortSignal): Promise<BrandKit[]> {
   const response = await fetch("/motion-api/brand-kits", { signal, cache: "no-store" });
-  if (!response.ok) throw new Error("Could not load Brand Kits");
-  return (await response.json()).kits;
+  const data = await response.json().catch(() => ({})) as { kits?: BrandKit[]; error?: string | { message?: string; code?: string }; code?: string; message?: string };
+  if (!response.ok) {
+    const message = typeof data.error === "string" ? data.error : data.error?.message || data.message || "Could not load Brand Kits";
+    const err = new Error(message) as CloudApiError;
+    err.status = response.status;
+    err.code = typeof data.code === "string" ? data.code : (typeof data.error === "object" ? data.error?.code : undefined);
+    throw err;
+  }
+  return data.kits ?? [];
 }
 export const brandStage: Record<BrandKit["state"], string> = {
   queued: "Queued",

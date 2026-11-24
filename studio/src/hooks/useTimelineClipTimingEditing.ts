@@ -1,3 +1,8 @@
+import { holdIsolatedTimelineChanges } from "../player/lib/isolatedTimelineEdits";
+import { previewTimelinePaint } from "./timelinePaintPreview";
+import { saveCloudTimeline, timelineTimingEdits } from "../utils/cloudTimelineEdit";
+import { planClipMove } from "../../../packages/edit-core";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { useCallback, type MutableRefObject } from "react";
 import type { TimelineElement } from "../player";
 import { toAuthoredStart, toCompositionTime } from "../player/store/timelineElement";
@@ -15,6 +20,7 @@ import {
 import { playbackStartAttributeForElement } from "../player/lib/timelineElementHelpers";
 import {
   captureDurationRollback,
+  refreshCommittedTimeline,
   finishClipTimingFallback,
   sdkTimingGsapSync,
   readFileContent,
@@ -125,27 +131,36 @@ export function useTimelineClipTimingEditing({
         // persist like any other move, or the lane snaps back on reload.
         const trackChanged = updates.track !== element.track;
         const authoredStart = toAuthoredStart(element, updates.start);
+        const command = startChanged && !trackChanged && sdkSession && element.hfId &&
+          !element.link && !element.implicitTextTiming && targetPath === activeCompPath && getCachedCloudDisklessMode()
+          ? planClipMove(sdkSession, element.hfId, Number(formatTimelineAttributeNumber(authoredStart))) : undefined;
         if (startChanged || trackChanged) {
           const liveAttrs: Array<[string, string]> = [];
           if (element.implicitTextTiming) liveAttrs.push(["data-duration", formatTimelineAttributeNumber(element.duration)]);
           if (startChanged)
-            liveAttrs.push(["data-start", formatTimelineAttributeNumber(authoredStart)]);
+            liveAttrs.push(["data-start", command ? String(command.start) : formatTimelineAttributeNumber(authoredStart)]);
           if (trackChanged) {
             liveAttrs.push(["data-track-index", formatTimelineAttributeNumber(updates.track)]);
           }
           patchIframeDomTiming(previewIframeRef.current, element, liveAttrs, activeCompPath);
         }
 
-        const reorderDone = applyTimelineStackingReorder({
-          element,
-          stackingReorder: updates.stackingReorder,
-          timelineElements,
-          iframe: previewIframeRef.current,
-          activeCompPath,
-          commit: handleDomZIndexReorderCommitRef?.current,
+        const cloud = !!getCachedCloudDisklessMode();
+        const ranks = element.tag === "audio" ? [] : (updates.stackingReorder?.zIndexChanges ?? []).map(change => {
+          const sibling = timelineElements.find(el => (el.key ?? el.id) === change.key);
+          return { zIndex: change.zIndex, element: {
+            hfId: sibling?.hfId, domId: change.domId ?? sibling?.domId, selector: change.selector ?? sibling?.selector,
+            selectorIndex: change.selectorIndex ?? sibling?.selectorIndex, sourceFile: change.sourceFile ?? sibling?.sourceFile,
+          } };
         });
-
-        if (!startChanged && !trackChanged) return reorderDone;
+        const { paint, rollback: rollbackPaint } = previewTimelinePaint(
+          cloud && ranks.length ? { ranks } : undefined, previewIframeRef.current, activeCompPath,
+        );
+        const reorderDone = cloud ? Promise.resolve() : applyTimelineStackingReorder({
+          element, stackingReorder: updates.stackingReorder, timelineElements, iframe: previewIframeRef.current,
+          activeCompPath, commit: handleDomZIndexReorderCommitRef?.current,
+        });
+        if (!startChanged && !trackChanged && !(cloud && paint)) return reorderDone;
 
         // Snapshot the duration BEFORE the optimistic updates below so a failed
         // persist can roll the readout + live root back (see captureDurationRollback).
@@ -172,6 +187,7 @@ export function useTimelineClipTimingEditing({
           finishClipTimingFallback({
             iframe: previewIframeRef.current,
             reloadPreview,
+            invalidateGsapCache,
             projectId: projectIdRef.current,
             targetPath,
             domId: element.domId,
@@ -181,13 +197,24 @@ export function useTimelineClipTimingEditing({
             writeProjectFile,
             edit: { kind: "shift", delta: updates.start - element.start },
             sdkGsap,
-          }).finally(() => invalidateGsapCache?.());
+          });
         const moveFallback = () =>
           enqueueEdit(element, "Move timeline clip", buildMovePatches, step).then(() =>
             finishMoveGsapSync(),
           );
+        const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, [{
+          element, start: updates.start, ...(trackChanged && { track: updates.track }),
+        }], activeCompPath);
         return reorderDone
           .then(() => {
+            if (cloud && projectIdRef.current) {
+              const edits = command && !paint ? [{path: targetPath, command}]
+                : timelineTimingEdits(startChanged || trackChanged ? [{
+                    element, start: updates.start, ...(trackChanged && {track: updates.track}),
+                  }] : [], activeCompPath, paint);
+              return saveCloudTimeline(projectIdRef.current, edits, writeProjectFile, recordEdit, "Move timeline clip",
+                refreshCommittedTimeline(previewIframeRef.current, activeCompPath ?? "index.html", projectIdRef.current, reloadPreview)).then(() => forceReloadSdkSession?.());
+            }
             // SDK setTiming writes start only; a lane change needs the fallback's track patch.
             if (sdkSession && element.hfId && !element.link && !element.implicitTextTiming && !needsExtension && !trackChanged) {
               return sdkTimingPersist(
@@ -216,6 +243,8 @@ export function useTimelineClipTimingEditing({
           .then(() => syncRestoredTimelineFromPreview(previewIframeRef.current?.contentDocument))
           .catch((error) => {
             // Failed persist: revert the optimistic duration readout + live root.
+            releaseTiming();
+            rollbackPaint();
             rollbackDuration();
             showToast(getStudioSaveErrorMessage(error), "error");
             throw error;
@@ -228,6 +257,7 @@ export function useTimelineClipTimingEditing({
       enqueueEdit,
       activeCompPath,
       sdkSession,
+      forceReloadSdkSession,
       publishSdkSession,
       recordEdit,
       writeProjectFile,
@@ -248,8 +278,8 @@ export function useTimelineClipTimingEditing({
     ) => {
       const authoredStart = toAuthoredStart(element, updates.start);
       const liveAttrs: Array<[string, string]> = [
-        ["data-start", formatTimelineAttributeNumber(authoredStart)],
-        ["data-duration", formatTimelineAttributeNumber(updates.duration)],
+        ["data-start", String(authoredStart)],
+        ["data-duration", String(updates.duration)],
       ];
       if (updates.playbackStart != null) {
         const liveAttr = playbackStartAttributeForElement(element);
@@ -258,6 +288,7 @@ export function useTimelineClipTimingEditing({
       patchIframeDomTiming(previewIframeRef.current, element, liveAttrs, activeCompPath);
       // Snapshot the duration BEFORE the optimistic updates below so a failed
       // persist can roll the readout + live root back (see captureDurationRollback).
+      const releaseTiming = holdIsolatedTimelineChanges(previewIframeRef.current, [{element, ...updates}], activeCompPath);
       const rollbackDuration = captureDurationRollback(previewIframeRef.current);
       // Read before the readout sync below: the SDK path (setTiming) can't grow the root duration.
       const needsExtension = extendRootDurationIfNeeded(updates.start + updates.duration);
@@ -279,6 +310,7 @@ export function useTimelineClipTimingEditing({
         finishClipTimingFallback({
           iframe: previewIframeRef.current,
           reloadPreview,
+          invalidateGsapCache,
           projectId: projectIdRef.current,
           targetPath,
           domId: element.domId,
@@ -292,13 +324,15 @@ export function useTimelineClipTimingEditing({
             to: { start: toCompositionTime(element, updates.start), duration: updates.duration },
           },
           sdkGsap,
-        }).finally(() => invalidateGsapCache?.());
+        });
       const resizeFallback = () =>
         enqueueEdit(element, "Resize timeline clip", buildResizePatches, step).then(() =>
           finishResizeGsapSync(),
         );
-      const persistDone =
-        sdkSession && element.hfId && !element.link && !hasPbsAdjustment && !needsExtension
+      const persistDone = getCachedCloudDisklessMode() && projectIdRef.current
+        ? saveCloudTimeline(projectIdRef.current, timelineTimingEdits([{element, ...updates}], activeCompPath),
+            writeProjectFile, recordEdit, "Resize timeline clip", refreshCommittedTimeline(previewIframeRef.current, activeCompPath ?? "index.html", projectIdRef.current, reloadPreview)).then(() => forceReloadSdkSession?.())
+        : sdkSession && element.hfId && !element.link && !hasPbsAdjustment && !needsExtension
           ? sdkTimingPersist(
               element.hfId,
               targetPath,
@@ -322,6 +356,7 @@ export function useTimelineClipTimingEditing({
           : resizeFallback();
       return persistDone.then(() => syncRestoredTimelineFromPreview(previewIframeRef.current?.contentDocument)).catch((error) => {
         // Failed persist: revert the optimistic duration readout + live root.
+        releaseTiming();
         rollbackDuration();
         showToast(getStudioSaveErrorMessage(error), "error");
         throw error;
@@ -332,6 +367,7 @@ export function useTimelineClipTimingEditing({
       enqueueEdit,
       activeCompPath,
       sdkSession,
+      forceReloadSdkSession,
       publishSdkSession,
       recordEdit,
       writeProjectFile,

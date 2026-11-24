@@ -12,8 +12,6 @@ import { gatewayRequest, type Modality } from './gatewayClient';
 import { assetRequest } from './assetClient';
 import { IconButton } from 'open-design-ui/icon-button';
 import { AssetTaskHistory } from './AssetTaskHistory';
-import type { AssetChatSummary, AssetTaskMode } from './assetTasks';
-import { AssetConversation } from './AssetConversation';
 import { AssetGenerationCard, creationKinds } from './AssetCreationVisuals';
 import { GenerationParameters, emptyParameters, parameterInputImageRatio, requestParameters, shotParameters, type ParameterDraft } from './GenerationParameters';
 import { notifyProvidersChanged } from './useProviderDirectory';
@@ -32,12 +30,10 @@ import { registeredProvider } from '../../../shared/provider-registry';
 import { ProviderSetupNotice } from './ProviderSetupNotice';
 
 export interface AssetDraft { modality: Modality; prompt: string; relight?: RelightChoices; videoChoices?: Record<string, string>; shotPreferences?: { aspect: string; duration?: number }; preferredModel?: string; model?: string; parameters?: Record<string, unknown>; target?: { asset: LibraryAsset; versionId: string }; references: { reference: AssetReference; name: string }[] }
-export function AssetComposer({ active, studio, draft, setDraft, agentReferences, setAgentReferences, jobs, showCurrentJob = true, mode, onMode, taskIds, history, selectingTask, onNew, onChatChanged, onChatStarted, onCancel, onView, onRetrySave, onResume, onReference, onUploadReference, onUploadFiles, uploadingReferences = false, onCreated, onError, onInfo, onClose }: {
-  active: boolean; studio?: StudioCreation; draft: AssetDraft; setDraft: Dispatch<SetStateAction<AssetDraft>>; jobs: GenerationJob[]; showCurrentJob?: boolean;
-  agentReferences: AssetDraft['references']; setAgentReferences: (references: AssetDraft['references']) => void;
-  mode: AssetTaskMode; onMode: (mode: AssetTaskMode) => void; taskIds: { direct?: string; agent?: string };
+export function AssetComposer({ active, studio, draft, setDraft, promptAppliedToken = 0, jobs, showCurrentJob = true, taskId, history, selectingTask, onNew, onCancel, onView, onRetrySave, onResume, onReference, onUploadReference, onUploadFiles, uploadingReferences = false, onCreated, onError, onInfo, onClose }: {
+  active: boolean; studio?: StudioCreation; draft: AssetDraft; setDraft: Dispatch<SetStateAction<AssetDraft>>; promptAppliedToken?: number; jobs: GenerationJob[]; showCurrentJob?: boolean;
+  taskId?: string;
   history: Omit<ComponentProps<typeof AssetTaskHistory>, 'trigger'>; selectingTask: boolean; onNew: () => void;
-  onChatChanged: (chat: AssetChatSummary) => void; onChatStarted: (id: string) => void;
   onCancel: (job: GenerationJob) => void; onView: (job: GenerationJob) => void; onRetrySave?: (job: GenerationJob) => Promise<void>; onReference: () => void; onUploadReference?: () => void;
   onUploadFiles?: (files: File[], source?: 'drop' | 'paste') => void; uploadingReferences?: boolean;
   onCreated: (job: GenerationJob) => void; onResume?: (job: GenerationJob) => Promise<void>; onError: (message: string) => void; onInfo?: (message: string) => void; onClose: () => void;
@@ -56,9 +52,24 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const featureMode = isFeatureScene(scene);
   const modelId = studio?.destination.model ?? draft.model;
   const promptId = useId();
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [promptHighlight, setPromptHighlight] = useState<'a' | 'b'>();
+  useEffect(() => {
+    if (!promptAppliedToken) return;
+    const input = promptRef.current;
+    if (input) {
+      input.scrollIntoView?.({ block: 'nearest' });
+      input.focus();
+      const end = input.value.length;
+      input.setSelectionRange?.(end, end);
+    }
+    setPromptHighlight(promptAppliedToken % 2 === 1 ? 'a' : 'b');
+    const timer = window.setTimeout(() => setPromptHighlight(undefined), 900);
+    return () => window.clearTimeout(timer);
+  }, [promptAppliedToken]);
   const libraryCatalog = useMediaCatalog(active && !studio);
   const { catalog: gateway, failed, retry } = studio?.catalog ?? libraryCatalog;
-  const [busy, setBusy] = useState(false), [agentSending, setAgentSending] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [parameterDrafts, setParameterDrafts] = useState<Record<string, ParameterDraft>>({});
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -67,7 +78,7 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const dragDepth = useRef(0);
   const prevModelSwitchRef = useRef<{ sceneId?: string; refCount: number; modelId?: string; modelLabel?: string; modelLimit: number } | undefined>(undefined);
   const selectedTask = history.tasks.find(task => task.key === history.selectedKey);
-  const switching = busy || agentSending || selectingTask;
+  const switching = busy || selectingTask;
   const resolvedModels = creationModels(
     gateway, draft.modality, modelId, scene, featureMode, draft.references.length, draft.preferredModel,
   );
@@ -75,7 +86,7 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const preferredProvider = preferred && gateway?.status.providers.find(provider => provider.id === preferred.provider);
   const unconfiguredPreferred = Boolean(studio && gateway && preferred && !selected && preferredProvider && !preferredProvider.available);
   const providerLabel = preferredProvider?.label ?? (preferred && registeredProvider(preferred.provider)?.label) ?? preferred?.provider ?? '';
-  const accountNotIncluded = selected?.provider === 'account' && preferredProvider?.mediaEntitlement === 'not-included';
+  const accountNotIncluded = (selected?.provider === 'account' || selected?.provider === 'opendesign') && preferredProvider?.mediaEntitlement === 'not-included';
   const maximumReferences = selected ? Math.min(modelReferenceLimit(selected), featureRule?.maxReferences ?? Infinity) : 0;
   const attachableReferences = scene ? attachableReferenceLimit(resolvedModels, scene) : maximumReferences;
   const showReferenceSection = Boolean(scene && (needsImage(scene) || ((scene.modality === 'image' || Boolean(videoFeature)) && maximumReferences > 0)));
@@ -159,7 +170,7 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const onUploadFilesRef = useRef(onUploadFiles);
   useLayoutEffect(() => { onUploadFilesRef.current = onUploadFiles; }, [onUploadFiles]);
   useEffect(() => {
-    if (!active || mode !== 'direct' || !showReferenceSection || !hasUploadFiles) return;
+    if (!active || !showReferenceSection || !hasUploadFiles) return;
     const isImageClipboardFile = (file: File) => file.type.startsWith('image/')
       || (!file.type && /\.(png|jpe?g|webp|gif|avif|heic|heif|bmp|tiff?)$/i.test(file.name));
     const handleDocumentPaste = (event: ClipboardEvent) => {
@@ -182,15 +193,14 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
     };
     document.addEventListener('paste', handleDocumentPaste);
     return () => document.removeEventListener('paste', handleDocumentPaste);
-  }, [active, hasUploadFiles, mode, showReferenceSection]);
+  }, [active, hasUploadFiles, showReferenceSection]);
   const unknownReferences = selected?.provider === 'opendesign' && selected.modality === 'image' && selected.supportsImageReference === undefined;
   const cloudModelMissing = !!gateway && !!modelId?.startsWith('opendesign:') && !selected && !unconfiguredPreferred;
   const openDesignMissing = Boolean(studio && gateway && featureMode && !compatible.length);
   const setupProvider = unconfiguredPreferred ? preferred!.provider : openDesignMissing ? 'opendesign' : undefined;
   const syncModels = async () => {
-    const provider = selected?.provider ?? (cloudModelMissing ? 'opendesign' : undefined);
-    if (!provider || syncing) return; setSyncing(true);
-    try { await gatewayRequest(`settings/providers/${provider}/sync`, 'POST', {}); notifyProvidersChanged(); }
+    if (syncing) return; setSyncing(true);
+    try { await gatewayRequest('models/catalog?refresh=true', 'GET'); notifyProvidersChanged(); }
     catch (error) { onError((error as Error).message); }
     finally { if (mounted.current) setSyncing(false); }
   };
@@ -216,7 +226,7 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const parameters = parameterModel ? parameterDrafts[parameterKey] ?? restoredParameters(parameterModel) : emptyParameters;
   const inputImageRatio = selected && parameterInputImageRatio(selected, parameters, draft.references.length > 0);
   const kind = creationKinds.find(k => k.id === draft.modality)!;
-  const latest = jobs.find(job => job.id === taskIds.direct);
+  const latest = jobs.find(job => job.id === taskId);
   const promptReady = Boolean(draft.prompt.trim() || featureRule?.promptOptional);
   const submit = async () => {
     if (!selected || !promptReady || busy || uploadingReferences || invalidReferences) return; setBusy(true);
@@ -257,12 +267,12 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   };
   const promptField = imageWorkspace ? <div className="om-label">
     <label className="om-eyebrow" htmlFor={promptId}>{t('Detailed description')}</label>
-    <div className="om-field" data-form-field="intrinsic">
-      <FieldTextarea {...promptInput} appearance="embedded" className="om-image-prompt" />
+    <div className="om-field" data-form-field="intrinsic" data-prompt-applied={promptHighlight}>
+      <FieldTextarea ref={promptRef} {...promptInput} appearance="embedded" className="om-image-prompt" />
     </div>
-  </div> : <div className="om-creation-prompt">
+  </div> : <div className="om-creation-prompt" data-prompt-applied={promptHighlight}>
     <label className="om-eyebrow" htmlFor={promptId}><RemixIcon name="pen-nib-line" size={14} />{t(speechPrompt ? 'Speech text' : 'Your idea')}</label>
-    <textarea {...promptInput} />
+    <textarea ref={promptRef} {...promptInput} />
     {!scene && (maximumReferences > 0 || draft.references.length > 0) && references}
     <div className="om-creation-prompt-footer">
       <span className="om-eyebrow">{t(draft.references.length ? 'References stay linked to their versions' : 'Start with a few words. Make it your own.')}</span>
@@ -333,7 +343,7 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
     <RemixIcon name="arrow-right-line" size={18} />
   </Button>;
 
-  return <aside className="om-asset-composer om-creation-surface" data-active={active} data-mode={mode}
+  return <aside className="om-asset-composer om-creation-surface" data-active={active} data-mode="direct"
     data-form-surface={imageWorkspace ? 'subtle' : undefined} data-image-workspace={imageWorkspace || undefined} aria-label={t('Create asset')}
     onDragOver={handleComposerDragOver} onDrop={handleComposerDrop}>
     {scene ? showSceneIntro && <header className="om-studio-form-heading" data-landing={studio?.destination.landing}>
@@ -342,13 +352,12 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
       <p className="om-muted">{t(scene.hint)}</p>
     </header> : <header className="om-task-toolbar">
       <h2 className="om-sr-only">{t(draft.target ? 'Create a new version' : 'Creative studio')}</h2>
-      {/* Temporarily hide the Agent tab; existing conversations remain available in Tasks. */}
-      <div className="om-choice-tabs om-task-modes" role="group" aria-label={t('Task type')}>{(['direct'] as const).map(value => <Tooltip label={t(value === 'direct' ? 'Direct generation' : 'Agent conversation')} wrap key={value}><Button variant="plain" className="om-nav-item" aria-pressed={mode === value} aria-label={t(value === 'direct' ? 'Direct generation' : 'Agent conversation')} disabled={switching} onClick={() => onMode(value)}><RemixIcon name={value === 'direct' ? 'sparkling-line' : 'chat-1-line'} size={15} /><span>{t(value === 'direct' ? 'Generate' : 'Agent')}</span></Button></Tooltip>)}</div>
+      <div className="om-choice-tabs om-task-modes" role="group" aria-label={t('Task type')}><Tooltip label={t('Direct generation')} wrap><Button variant="plain" className="om-nav-item" aria-pressed aria-label={t('Direct generation')} disabled={switching}><RemixIcon name="sparkling-line" size={15} /><span>{t('Generate')}</span></Button></Tooltip></div>
       <AssetTaskHistory tooltip={selectedTask?.title ?? t('New task')} {...history} trigger={<Button variant="plain" className="om-nav-item om-task-picker" aria-label={t('Select task')} disabled={switching}><span>{selectingTask ? t('Loading tasks…') : selectedTask?.title ?? t('New task')}</span><RemixIcon name="arrow-down-s-line" size={14} /></Button>} />
       <Tooltip label={t('New task')} wrap><IconButton aria-label={t('New task')} icon={<RemixIcon name="add-line" size={17} />} disabled={switching} onClick={onNew} /></Tooltip>
       <Tooltip label={t('Close creator')} wrap><IconButton aria-label={t('Close creator')} icon={<RemixIcon name="close-line" size={17} />} onClick={onClose} /></Tooltip>
     </header>}
-    {!scene && <div className="om-asset-chat-panel" hidden={mode !== 'agent'}><AssetConversation conversationId={taskIds.agent} onChanged={onChatChanged} onStarted={onChatStarted} onSending={setAgentSending} active={active && mode === 'agent'} references={agentReferences.map(r => r.reference)} referenceControls={referenceControls(agentReferences, setAgentReferences)} jobs={jobs} onCancel={onCancel} onView={onView} onRetrySave={onRetrySave} onResume={onResume} onError={onError} /></div>}{mode === 'direct' && <><div className="om-asset-direct-scroll">
+    <div className="om-asset-direct-scroll">
       {showCurrentJob && latest && <div className="om-asset-current-job"><AssetGenerationCard job={latest} onCancel={onCancel} onView={onView} onRetrySave={onRetrySave} onResume={onResume} /></div>}
       <div className="om-asset-direct">
       {draft.target && <div className="om-card om-asset-edit-target"><span><RemixIcon name="history-line" size={16} />{draft.target.asset.name} · V{draft.target.asset.versions.findIndex(v => v.id === draft.target!.versionId) + 1}</span><Button variant="plain" className="om-nav-item" onClick={() => setDraft({ ...draft, target: undefined })}>{t('Create separately')}</Button></div>}
@@ -423,7 +432,6 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
       <div className="om-image-submit">{generate}</div>
     </>}
     </div>
-    {!imageWorkspace && <div className="om-creation-submit">{generate}<p className="om-creation-save-note"><RemixIcon name="stack-line" size={13} />{t('Saved automatically to your library')}</p><p className="om-eyebrow om-creation-billing">{t('Model usage is billed to your configured account.')}</p></div>}
-    </>}
+    {!imageWorkspace && <div className="om-creation-submit">{generate}<p className="om-creation-save-note"><RemixIcon name="stack-line" size={13} />{t('Saved automatically to your library')}</p><p className="om-eyebrow om-creation-billing">{t('Model usage is billed to your OpenDesign platform account.')}</p></div>}
   </aside>;
 }

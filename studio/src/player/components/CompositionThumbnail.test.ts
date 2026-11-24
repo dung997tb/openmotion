@@ -4,8 +4,9 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockResizeObserver, reportResize } from "../../hooks/resizeObserverTestUtils";
+import { setCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { thumbnailScheduler } from "../lib/thumbnailScheduler";
-import { buildCompositionThumbnailUrl, CompositionThumbnail } from "./CompositionThumbnail";
+import { buildCompositionThumbnailUrl, CompositionThumbnail, compositionThumbnailRequest } from "./CompositionThumbnail";
 
 Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
   configurable: true,
@@ -47,14 +48,32 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root?.unmount());
   root = null;
+  setCachedCloudDisklessMode(null);
   vi.useRealTimers();
   thumbnailScheduler.invalidateProject("/api/projects/demo/preview");
+  thumbnailScheduler.invalidateProject("demo");
   globalThis.ResizeObserver = originalResizeObserver;
   globalThis.Image = originalImage;
   globalThis.fetch = originalFetch;
   URL.createObjectURL = originalCreateObjectURL;
   URL.revokeObjectURL = originalRevokeObjectURL;
   document.body.replaceChildren();
+});
+
+it("checks the cache after enqueue and cancels pending polls when the card is released", async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 202 }))
+    .mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetch);
+  const controller = new AbortController();
+  const url = "/api/projects/demo/thumbnail/index.html?t=3";
+  const task = compositionThumbnailRequest(url, "demo").load(controller.signal);
+  const rejected = expect(task).rejects.toMatchObject({ name: "AbortError" });
+  await vi.advanceTimersByTimeAsync(550);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual([url, url + "&cached=1"]);
+  controller.abort();
+  await rejected;
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
 });
 
 describe("buildCompositionThumbnailUrl", () => {
@@ -270,5 +289,56 @@ describe("CompositionThumbnail", () => {
     });
     expect(MockImage.instances).toHaveLength(1);
     expect(MockImage.instances[0]?.src).toBe("blob:composition-thumbnail");
+  });
+
+  it("renders a single leading frame without cloning it across a wide clip", async () => {
+    Object.defineProperty(host, "clientWidth", { configurable: true, value: 900 });
+    Object.defineProperty(host, "clientHeight", { configurable: true, value: 44 });
+    const probe = await renderThumbnail();
+
+    await act(async () => {
+      probe.naturalWidth = 1920;
+      probe.naturalHeight = 1080;
+      probe.onload?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(host.querySelectorAll("img")).toHaveLength(1);
+    expect(host.querySelector('[data-composition-strip="media"]')).not.toBeNull();
+  });
+
+  it("renders a single non-repeating text composition bar in cloud mode when no hero media exists", async () => {
+    setCachedCloudDisklessMode(true);
+    Object.defineProperty(host, "clientWidth", { configurable: true, value: 640 });
+    Object.defineProperty(host, "clientHeight", { configurable: true, value: 44 });
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({
+        content:
+          '<template><div data-composition-id="welcome-reel" data-width="1920" data-height="1080">' +
+          '<img src="assets/brand-mark.svg" style="width:42px;height:42px">' +
+          '<canvas aria-label="Editable motion artwork montage"></canvas>' +
+          "</div></template>",
+      }),
+    );
+
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        React.createElement(CompositionThumbnail, {
+          previewUrl: "/api/projects/demo/preview/comp/compositions/reel.html",
+          label: "",
+          labelColor: "#fff",
+          projectId: "demo",
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(host.querySelectorAll("img")).toHaveLength(0);
+    const strip = host.querySelector('[data-composition-strip="text"]');
+    expect(strip).not.toBeNull();
+    expect(strip?.textContent).toContain("Editable motion artwork montage");
+    expect(strip?.textContent).toContain("reel");
+    expect(strip?.textContent).not.toContain("reel.html");
   });
 });

@@ -6,7 +6,7 @@ import { packagedSkills } from '../shared/workflow.ts';
 import { isMain } from '../shared/entry.ts';
 import { integrationConfig } from '../shared/integration.ts';
 import type { IntegrationInfo } from '../shared/integration.ts';
-import { zip } from './package.ts';
+import { zip } from './zip.mjs';
 import { designSystemDocuments } from '../packages/design-system/index.js';
 
 // Local adapters reference one installed runtime; these ZIPs are not portable installers.
@@ -105,7 +105,7 @@ export async function exportAdapters(runtimePath: string, dataPath: string, outp
         const manifest = { name: 'openmotion', version: pkg.version,
           description: manifestDescription ?? 'OpenMotion with the shared local MCP runtime.',
           author: { name: 'OpenDesign' }, skills: './skills/', mcpServers: './.mcp.json' };
-        text(`.${host}-plugin/plugin.json`, host === 'codex' ? { ...manifest, requires_local_executor: true,
+        text(`.${host}-plugin/plugin.json`, host === 'codex' ? { ...manifest, ...(info.transport.type === 'stdio' ? { requires_local_executor: true } : {}),
           interface: { ...runtimeInterface, displayName: 'OpenMotion', shortDescription: manifestShortDescription ?? 'OpenMotion production with the shared local runtime.' } } : manifest);
         text('.mcp.json', host === 'codex' ? { mcpServers: { openmotion: info.transport } } : integrationConfig(info, 'mcp').text);
       }

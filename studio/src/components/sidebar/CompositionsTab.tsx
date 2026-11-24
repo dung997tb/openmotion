@@ -1,8 +1,10 @@
+import { isolatedPreviewOrigin } from "../../player/lib/previewLease";
+import { IsolatedHoverPlayer } from "../../player/components/IsolatedHoverPlayer";
 import { IconButton } from "open-design-ui/icon-button";
 import { RemixIcon } from "../../icons/RemixIcons";
 import { useI18n } from "../../i18n/I18n";
 import { buildProjectApiPath } from "../../utils/projectRouting";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useThumbnailLease } from "../../hooks/useThumbnailLease";
 import {
   thumbnailScheduler,
@@ -15,6 +17,15 @@ import {
   resolveThumbnailSeekTime,
   THUMBNAIL_SEEK_TIME_SECONDS,
 } from "../../player/components/CompositionThumbnail";
+import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
+import {
+  canCaptureCompositionInBrowser,
+  createClientCompositionCaptureRequest,
+  getCompositionCacheRevision,
+  peekCachedCompositionCapture,
+  retainCachedCompositionCapture,
+  subscribeCompositionCacheRevision,
+} from "../../player/lib/clientCompositionCapture";
 import { setPreviewMediaMuted } from "../../player/lib/timelineIframeHelpers";
 import { postFrameDisplayScale } from "../../player/lib/runtimeProtocol";
 import { usePlayerStore } from "../../player/store/playerStore";
@@ -138,15 +149,22 @@ export function syncIframePlayback(iframe: HTMLIFrameElement | null, shouldPlay:
 }
 
 const imageUrlOf = (snapshot: ThumbnailSnapshot) =>
-  snapshot.status === "ready" && snapshot.value.kind === "image" ? snapshot.value.url : null;
+  snapshot.status === "ready"
+    ? snapshot.value.kind === "image"
+      ? snapshot.value.url
+      : snapshot.value.kind === "filmstrip"
+        ? (snapshot.value.urls[0] ?? null)
+        : null
+    : null;
 
 // A layout effect takes the old frame's lease before the passive cleanup drops the first one.
 function useLastFrame(request: ThumbnailRequest | null, snapshot: ThumbnailSnapshot) {
   const current = imageUrlOf(snapshot);
   const [kept, setKept] = useState<{ request: ThumbnailRequest; url: string } | null>(null);
+  if (!request && kept) setKept(null);
   if (request && current && kept?.request !== request) setKept({ request, url: current });
   useLayoutEffect(() => {
-    if (!kept || kept.request === request) return;
+    if (!request || !kept || kept.request === request) return;
     const lease = thumbnailScheduler.acquire(kept.request, () => {});
     return () => lease.release();
   }, [kept, request]);
@@ -157,15 +175,15 @@ function useNearViewport<T extends Element>(): [(element: T | null) => void, boo
   const [element, setElement] = useState<T | null>(null);
   const [near, setNear] = useState(false);
   useEffect(() => {
-    if (!element || near) return;
+    if (!element) return;
     if (typeof IntersectionObserver === "undefined") return setNear(true);
     const observer = new IntersectionObserver(
-      (entries) => entries.some((entry) => entry.isIntersecting) && setNear(true),
+      ([entry]) => setNear(entry.isIntersecting),
       { root: element.closest("[data-composition-list]"), rootMargin: "200px" },
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [element, near]);
+  }, [element]);
   return [setElement, near];
 }
 
@@ -179,7 +197,6 @@ function CompCard({
   isRendering,
   onAddToTimeline,
   contentRevision,
-  previewBooted,
 }: {
   projectId: string;
   comp: string;
@@ -190,9 +207,9 @@ function CompCard({
   isRendering?: boolean;
   onAddToTimeline?: () => void;
   contentRevision: number;
-  previewBooted: boolean;
 }) {
   const { t } = useI18n();
+  const previewOrigin = isolatedPreviewOrigin();
   const [hovered, setHovered] = useState(false);
   const [stageSize, setStageSize] = useState(DEFAULT_PREVIEW_STAGE);
   const [livePreviewLoaded, setLivePreviewLoaded] = useState(false);
@@ -238,18 +255,76 @@ function CompCard({
   const thumbnailUrl = compositionCardThumbnailUrl(projectId, comp, contentRevision);
   const [thumbnailBox, nearViewport] = useNearViewport<HTMLDivElement>();
   const timelineSessionEpoch = usePlayerStore((state) => state.timelineSessionEpoch);
+  const captureEnabled = nearViewport && getCachedCloudDisklessMode() && canCaptureCompositionInBrowser();
+  const subscribeCacheRev = useCallback(
+    (listener: () => void) =>
+      captureEnabled ? subscribeCompositionCacheRevision(projectId, listener) : () => {},
+    [captureEnabled, projectId],
+  );
+  const getCacheRev = useCallback(
+    () => (captureEnabled ? getCompositionCacheRevision(projectId, previewUrl) : ""),
+    [captureEnabled, previewUrl, projectId],
+  );
+  const compCacheRev = useSyncExternalStore(subscribeCacheRev, getCacheRev, () => "");
+  const syncCachedCover = useMemo(
+    () =>
+      captureEnabled
+        ? peekCachedCompositionCapture({
+            previewUrl,
+            projectId,
+            contentRevision,
+            frameCount: 1,
+          })
+        : null,
+    [captureEnabled, compCacheRev, contentRevision, previewUrl, projectId],
+  );
+  // Keep cached cover object URLs alive while this card renders them, even after LRU eviction.
+  useLayoutEffect(() => retainCachedCompositionCapture(syncCachedCover), [syncCachedCover]);
   const thumbnailRequest = useMemo(
     () =>
-      previewBooted && nearViewport
+      nearViewport && !syncCachedCover
         ? compositionThumbnailRequest(thumbnailUrl, projectId, {
             sessionEpoch: timelineSessionEpoch,
             rich: true,
           })
         : null,
-    [previewBooted, nearViewport, thumbnailUrl, projectId, timelineSessionEpoch],
+    [nearViewport, projectId, syncCachedCover, thumbnailUrl, timelineSessionEpoch],
   );
-  const thumbnail = useThumbnailLease(thumbnailRequest);
-  const frameUrl = useLastFrame(thumbnailRequest, thumbnail);
+  const captureRequest = useMemo(
+    () =>
+      captureEnabled && !syncCachedCover
+        ? createClientCompositionCaptureRequest({
+            previewUrl,
+            projectId,
+            sessionEpoch: timelineSessionEpoch,
+            contentRevision,
+            frameCount: 1,
+            seekTime: THUMBNAIL_SEEK_TIME_SECONDS,
+            priority: "overscan",
+            rich: true,
+          })
+        : null,
+    [captureEnabled, compCacheRev, contentRevision, previewUrl, projectId, syncCachedCover, timelineSessionEpoch],
+  );
+  const posterThumbnail = useThumbnailLease(thumbnailRequest);
+  const captureThumbnail = useThumbnailLease(captureRequest);
+  const activeRequest = syncCachedCover
+    ? null
+    : captureThumbnail.status === "ready"
+      ? captureRequest
+      : thumbnailRequest;
+  const thumbnail: ThumbnailSnapshot = syncCachedCover
+    ? { status: "ready", value: syncCachedCover }
+    : captureThumbnail.status === "ready"
+      ? captureThumbnail
+      : posterThumbnail;
+  const lastFrameUrl = useLastFrame(activeRequest, thumbnail);
+  const frameUrl =
+    syncCachedCover?.kind === "image"
+      ? syncCachedCover.url
+      : syncCachedCover?.kind === "filmstrip"
+        ? (syncCachedCover.urls[0] ?? null)
+        : lastFrameUrl;
   const thumbnailFailed = thumbnail.status === "error";
   const posterUrl = !thumbnailFailed && frameUrl !== failedFrameUrl ? frameUrl : null;
   const posterLoaded = !!posterUrl && loadedFrameUrl === posterUrl;
@@ -263,8 +338,8 @@ function CompCard({
   const thumbnailOffsetY = (CARD_H - stageSize.height * previewScale) / 2;
 
   useEffect(() => {
-    if (hovered) requestIframePlaybackSync(true);
-  }, [hovered, requestIframePlaybackSync]);
+    if (hovered && !previewOrigin) requestIframePlaybackSync(true);
+  }, [hovered, previewOrigin, requestIframePlaybackSync]);
 
   useEffect(() => {
     if (livePreviewLoaded) postFrameDisplayScale(iframeRef.current);
@@ -350,7 +425,13 @@ function CompCard({
             }`}
           />
         )}
-        {hovered && (
+        {hovered && previewOrigin && (
+          <div className="absolute inset-0 pointer-events-none" style={{ visibility: livePreviewLoaded ? "visible" : "hidden" }}>
+            <IsolatedHoverPlayer source={previewUrl} origin={previewOrigin} onReady={setLivePreviewLoaded}
+              onError={() => setLivePreviewLoaded(false)} />
+          </div>
+        )}
+        {hovered && !previewOrigin && (
           <iframe
             ref={iframeRef}
             src={previewUrl}
@@ -447,7 +528,6 @@ export const CompositionsTab = memo(function CompositionsTab({
 }: CompositionsTabProps) {
   const { t } = useI18n();
   const thumbnailRevisions = usePlayerStore((state) => state.thumbnailRevisions);
-  const previewBooted = usePlayerStore((state) => state.previewBooted);
   if (compositions.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center px-4">
@@ -470,7 +550,6 @@ export const CompositionsTab = memo(function CompositionsTab({
           onAddToTimeline={onAddToTimeline ? () => onAddToTimeline(comp) : undefined}
           isRendering={isRendering}
           contentRevision={thumbnailRevisionOf(thumbnailRevisions, comp)}
-          previewBooted={previewBooted}
         />
       ))}
     </div>

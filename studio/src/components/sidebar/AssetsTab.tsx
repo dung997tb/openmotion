@@ -1,7 +1,9 @@
 import { Button } from 'open-design-ui/button';
+import { FileListLoading } from "./FileListLoading";
 import { AssetImportMenu } from '../../motion/AssetLibraryImport';
 import { useFileManagerContextOptional } from '../../contexts/FileManagerContext';
 import { ManualImportResults } from './ManualImportResults';
+import { PendingExternalImports } from './PendingExternalImports';
 import { RemixIcon } from "../../icons/RemixIcons";
 import { clickOption, searchStarted, trackStudioClick } from "../../motion/editorTracking";
 import { useMvpEditor } from "../../motion/StudioHost";
@@ -34,6 +36,7 @@ import type { FileTreeRefreshOptions } from '../../hooks/useFileTree';
 interface AssetsTabProps {
   projectId: string;
   assets: string[];
+  loading?: boolean;
   assetNames?: Record<string, string>;
   onImport?: (files: FileList, entryPoint?: "assets_button" | "assets_drop") => void | Promise<void>;
   onLibraryImport?: (options: FileTreeRefreshOptions) => Promise<void>;
@@ -129,6 +132,7 @@ function EmptyState({
 export const AssetsTab = memo(function AssetsTab({
   projectId,
   assets,
+  loading,
   assetNames,
   onImport,
   onLibraryImport,
@@ -329,6 +333,14 @@ export const AssetsTab = memo(function AssetsTab({
         data-assets-list
         ref={listRef}
       >
+        {fileManager && fileManager.pendingImports.length > 0 && (
+          <PendingExternalImports
+            items={fileManager.pendingImports.filter(
+              (item) => !(importBatch?.busy && item.source === "web_upload"),
+            )}
+            onDismiss={fileManager.dismissPendingImport}
+          />
+        )}
         {importBatch && fileManager && <ManualImportResults
           key={importBatch.id}
           batch={importBatch}
@@ -343,7 +355,7 @@ export const AssetsTab = memo(function AssetsTab({
             setLatestImport({ projectId, path });
           } : undefined}
         />}
-        {mediaAssets.length === 0 ? (
+        {loading && !assets.length ? <FileListLoading /> : mediaAssets.length === 0 ? (
           <EmptyState searchQuery={searchQuery} onClearSearch={() => setSearchQuery("")} />
         ) : (
           visibleCategories.map((cat) => (
@@ -381,6 +393,7 @@ export const AssetsTab = memo(function AssetsTab({
                           onRevealUsage={reveal}
                           displayName={assetNames?.[a]}
                           used={usedPaths.has(a)}
+                          optimizing={fileManager?.assetMetadata?.[a]?.optimizationStatus === "optimizing"}
                           meta={manifest.get(a)}
                           onCopy={handleCopyPath}
                           copyFeedback={copyFeedback}
@@ -391,21 +404,25 @@ export const AssetsTab = memo(function AssetsTab({
                       ))}
                     {(cat === "images" || cat === "video") && (
                       <div className="hf-media-card-grid pb-1">
-                        {categorized[cat].map((a) => (
-                          <AssetCard
-                            key={a}
-                            projectId={projectId}
-                            asset={a}
-                            displayName={assetNames?.[a]}
-                            used={usedPaths.has(a)}
-                            duration={manifest.get(a)?.duration}
-                            onCopy={handleCopyPath}
-                            copyFeedback={copyFeedback}
-                            onDelete={onDelete}
-                            onRename={onRename}
-                            onAddAssetToTimeline={onAddAssetToTimeline}
-                          />
-                        ))}
+                        {categorized[cat].map((a) => {
+                          const serverMeta = fileManager?.assetMetadata?.[a];
+                          return (
+                            <AssetCard
+                              key={a}
+                              projectId={projectId}
+                              asset={a}
+                              displayName={assetNames?.[a]}
+                              used={usedPaths.has(a)}
+                              duration={manifest.get(a)?.duration ?? serverMeta?.duration}
+                              optimizing={serverMeta?.optimizationStatus === "optimizing"}
+                              onCopy={handleCopyPath}
+                              copyFeedback={copyFeedback}
+                              onDelete={onDelete}
+                              onRename={onRename}
+                              onAddAssetToTimeline={onAddAssetToTimeline}
+                            />
+                          );
+                        })}
                       </div>
                     )}
                     {cat === "fonts" &&

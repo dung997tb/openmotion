@@ -12,7 +12,7 @@ import { readPreviewComplexity } from "../../player/hooks/usePreviewFirstFrameTe
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const playerMounts: string[] = [];
-let livePlayerProps: { onReadyToShowChange?: (ready: boolean) => void } = {};
+let livePlayerProps: { showInitialLoading?: boolean; onReadyToShowChange?: (ready: boolean) => void } = {};
 
 const measured = vi.hoisted(() => ({ size: null as { width: number; height: number } | null }));
 vi.mock("../../utils/previewCompositionSize", async (original) => ({
@@ -107,22 +107,22 @@ function renderPreview(
   const render = (directUrl?: string, projectId = "timeline-edit-playground", presentationMode = false) =>
     act(() => {
       root.render(
-        React.createElement(StudioHostContext.Provider, { value: { mvpEditor: mvp } }, React.createElement(NLEPreview, {
-          projectId,
-          directUrl,
-          iframeRef,
-          onIframeLoad: () => {},
-          previewSlots,
-          onShadowIframeLoad: () => {},
-          onShadowReadyChange: () => {},
-          onShadowError: () => {},
-          setShadowIframeNode: () => {},
-          resetPreviewSlots: () => {},
-          fillBox,
-          presentationMode,
-          zoomControlsTarget,
-          compositionSizeHint,
-        })),
+          React.createElement(StudioHostContext.Provider, { value: { mvpEditor: mvp } }, React.createElement(NLEPreview, {
+            projectId,
+            directUrl,
+            iframeRef,
+            onIframeLoad: () => {},
+            previewSlots,
+            onShadowIframeLoad: () => {},
+            onShadowReadyChange: () => {},
+            onShadowError: () => {},
+            setShadowIframeNode: () => {},
+            resetPreviewSlots: () => {},
+            fillBox,
+            presentationMode,
+            zoomControlsTarget,
+            compositionSizeHint,
+          })),
       );
     });
   render();
@@ -545,6 +545,7 @@ describe("NLEPreview", () => {
     );
     expect(poster()?.style.zIndex).toBe("2");
 
+    expect(livePlayerProps.showInitialLoading).toBe(true);
     act(() => livePlayerProps.onReadyToShowChange?.(false));
     expect(poster()?.hidden).toBe(false);
     act(() => livePlayerProps.onReadyToShowChange?.(true));

@@ -26,6 +26,25 @@ export function assertSkillFrontmatterYaml(frontmatter: string, skill: string) {
   }
 }
 
+async function stripTypeScriptRecursive(folder: string): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(folder, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  for (const entry of entries) {
+    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'build') continue;
+    const full = path.join(folder, entry.name);
+    if (entry.isDirectory()) {
+      await stripTypeScriptRecursive(full);
+    } else if (entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
+      stripTypeScriptTypes(await readFile(full, 'utf8'), { mode: 'strip' });
+    }
+  }
+}
+
 export async function check() {
   const manifest = JSON.parse(await readFile(path.join(root, '.codex-plugin/plugin.json'), 'utf8'));
   const marketplace = JSON.parse(await readFile(path.join(root, 'marketplace.example.json'), 'utf8'));
@@ -39,17 +58,16 @@ export async function check() {
   assert.equal(lock.packages['node_modules/hyperframes'].version, pkg.dependencies.hyperframes);
   assert.equal(manifest.mcpServers, './.mcp.json');
   const mcp = JSON.parse(await readFile(path.join(root, '.mcp.json'), 'utf8'));
-  assert.equal(mcp.mcpServers.openmotion.type, 'stdio');
-  assert.deepEqual(mcp.mcpServers.openmotion.args, ['--experimental-strip-types', 'mcp.ts']);
-  assert.equal(mcp.mcpServers.openmotion.cwd, '.');
+  assert.equal(mcp.mcpServers.openmotion.type, 'http');
+  assert.match(mcp.mcpServers.openmotion.url, /^https?:\/\/[^/]+\/mcp$/);
   assert.ok(!JSON.stringify(mcp).includes('${'), 'MCP launch paths cannot depend on placeholder expansion');
   assert.equal(marketplace.plugins[0].source.path, './');
-  for (const folder of ['web', 'shared', 'scripts', 'tests', 'gateway', 'tracking']) {
-    for (const file of await readdir(path.join(root, folder))) {
-      if (file.endsWith('.ts')) stripTypeScriptTypes(await readFile(path.join(root, folder, file), 'utf8'), { mode: 'strip' });
-    }
+  for (const folder of ['src', 'web', 'shared', 'scripts', 'tests', 'gateway', 'tracking']) {
+    await stripTypeScriptRecursive(path.join(root, folder));
   }
-  for (const file of ['server.ts', 'browser.ts', 'workspace.ts', 'mcp.ts', 'mcp-tools.ts', 'editor-runtime.ts', 'phase1.ts', 'phase1-versions.ts', 'project-archive.ts', 'project-management.ts', 'design-projects.ts', 'game-projects.ts', 'inline-video.ts', 'preview.ts', 'hyperframes.ts', 'template-library.ts', 'template-catalog.ts', 'prism-templates.ts', 'editor-server.ts']) stripTypeScriptTypes(await readFile(path.join(root, file), 'utf8'), { mode: 'strip' });
+  for (const file of ['server.ts', 'design-projects.ts', 'review-comments.ts', 'hyperframes.ts', 'template-library.ts', 'template-catalog.ts', 'prism-templates.ts', 'drizzle.config.ts']) {
+    stripTypeScriptTypes(await readFile(path.join(root, file), 'utf8'), { mode: 'strip' });
+  }
   for (const folder of ['skills', 'library/skills']) for (const entry of await readdir(path.join(root, folder), { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
     const document = await readFile(path.join(root, folder, entry.name, 'SKILL.md'), 'utf8');

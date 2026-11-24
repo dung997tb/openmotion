@@ -37,13 +37,23 @@ export const assetUseTool = {
     .map(([action, required]) => ({ type: 'object', properties: { action: { enum: [action] } }, required, additionalProperties: true })),
   },
 };
+const workspaceActions = {
+  brand_kit: ['brandKit'],
+  transcript: ['transcript'],
+  scenario: ['scenario'],
+  list_components: [],
+  install_component: ['projectId', 'requestId', 'name'],
+};
 export const workspaceAssetUseTool = {
   ...assetUseTool,
-  description: assetUseTool.description + ' Use action=brand_kit with a brandKit command to browse, extract and manage style-only Brand Kits. Use get to read job status and expectedUpdatedAt for package or edits. Brand Kits never determine the film timeline.' + transcriptToolDescription + scenarioToolDescription,
+  description: assetUseTool.description + ' Use action=brand_kit with a brandKit command to browse, extract and manage style-only Brand Kits. Use get to read job status and expectedUpdatedAt for package or edits. Brand Kits never determine the film timeline.' + transcriptToolDescription + scenarioToolDescription + ' In cloud Studio, list_components searches motion effects by query (offset and limit paginate). install_component takes the selected name, projectId and requestId, preserves existing files, and returns project-relative paths. To install and place in one undo step, provide hostFile with the host path, observed baseVersion and edited content mounting the listed compositionFile. Omit hostFile to install for later use.',
   annotations: { ...assetUseTool.annotations, destructiveHint: true },
   inputSchema: {
     ...assetUseTool.inputSchema, properties: { ...assetUseTool.inputSchema.properties,
-      action: { enum: [...assetUseTool.inputSchema.properties.action.enum, 'brand_kit', 'transcript', 'scenario'] }, brandKit: brandKitToolArguments, transcript: transcriptToolArguments, scenario: scenarioToolArguments },
-    oneOf: [...assetUseTool.inputSchema.oneOf, ...(['brand_kit', 'transcript', 'scenario'] as const).map(action => ({ type: 'object', properties: { action: { enum: [action] } }, required: [action === 'brand_kit' ? 'brandKit' : action], additionalProperties: true }))],
+      hostFile: object({ path: { type: 'string' }, baseVersion: { type: 'string' }, content: { type: 'string' } }, ['path', 'baseVersion', 'content']),
+      action: { enum: [...assetUseTool.inputSchema.properties.action.enum, ...Object.keys(workspaceActions)] }, brandKit: brandKitToolArguments, transcript: transcriptToolArguments, scenario: scenarioToolArguments },
+    oneOf: [...assetUseTool.inputSchema.oneOf, ...Object.entries(workspaceActions).map(([action, required]) => ({
+      type: 'object', properties: { action: { enum: [action] } }, required, additionalProperties: true,
+    }))],
   },
 };

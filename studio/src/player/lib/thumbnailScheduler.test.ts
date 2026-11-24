@@ -488,6 +488,55 @@ describe("ThumbnailScheduler", () => {
     expect(load).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
+
+  it("isolates client-capture concurrency from composition poster fetches while still preempting on preview reload", async () => {
+    const scheduler = new ThumbnailScheduler(
+      resolveTimelineViewportBudgets({
+        concurrentCompositionFetches: 2,
+        concurrentClientCompositionCaptures: 3,
+      }),
+    );
+    const captureSignals: AbortSignal[] = [];
+    const starts: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      scheduler.acquire(
+        request(
+          `cap-${i}`,
+          (signal) => {
+            starts.push(`cap-${i}`);
+            captureSignals.push(signal);
+            return new Promise<ThumbnailLoadedResult>((_, reject) => {
+              signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+            });
+          },
+          "visible",
+          { kind: "composition", concurrencyBucket: "client-capture" },
+        ),
+        vi.fn(),
+      );
+    }
+    for (let i = 0; i < 2; i++) {
+      scheduler.acquire(
+        request(
+          `poster-${i}`,
+          () => {
+            starts.push(`poster-${i}`);
+            return deferred<ThumbnailLoadedResult>().promise;
+          },
+          "visible",
+          { kind: "composition" },
+        ),
+        vi.fn(),
+      );
+    }
+    // 3 client captures AND 2 posters run simultaneously without blocking each other.
+    expect(starts).toEqual(["cap-0", "cap-1", "cap-2", "poster-0", "poster-1"]);
+
+    // Preview reload still preempts client-capture jobs because their kind is "composition".
+    scheduler.setPreviewReloading(true);
+    await flush();
+    expect(captureSignals.every((s) => s.aborted)).toBe(true);
+  });
 });
 
 describe("createThumbnailKey", () => {

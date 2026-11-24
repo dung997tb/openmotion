@@ -1,3 +1,4 @@
+import { getCachedCloudDisklessMode } from '../utils/cloudRuntime';
 import { saveProjectFilesWithHistory } from "../utils/studioFileHistory";
 import { patchMediaColorGradingInHtml } from "./editor/colorGradingScopePatch";
 import { hasRelativeLutSource } from "./studioMediaJobs";
@@ -71,6 +72,7 @@ export async function applyColorGradingScopeUpdate({
   };
   const paths = colorGradingScopePaths(scope, selectedSourceFile, compositionPaths);
   const changedPaths = await saveProjectFilesWithHistory({
+    ...(getCachedCloudDisklessMode() && { commandForWrite: () => ({ kind: 'gradeMedia' as const, value }) }),
     projectId,
     label: value ? "Apply color grading" : "Clear color grading",
     files: Object.fromEntries(paths.map((path) => [path, patchGrading])),

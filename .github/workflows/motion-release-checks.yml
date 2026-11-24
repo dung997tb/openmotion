@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '26.11.1'
-      - name: Check standalone release scripts
+      - name: Check release control scripts
         run: |
           for script in .github/scripts/*.mjs scripts/runtime-assets.mjs scripts/release-version.mjs scripts/install-guide.mjs; do
             node --check "$script"

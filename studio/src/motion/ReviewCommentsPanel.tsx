@@ -20,12 +20,15 @@ import { reviewFrameMatches, useReviewMarkupStore } from './reviewMarkupStore';
 import { ReviewMarkupTools, ReviewAnnotationLabel } from './ReviewMarkupTools';
 import { ReviewCommentCard } from './ReviewCommentCard';
 import { useReviewPresentationStore } from './reviewPresentationStore';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 const scopeLabels = { project: 'Whole video', frame: 'Current frame', element: 'Selected element' } as const;
 type Draft = { anchor: ReviewAnchor; sourceRevision: string; requestId: string; annotated: boolean };
 
 export function ReviewCommentsPanel() {
+  const reviewCommentsEnabled = useCloudFeatureEnabled('reviewComments');
   const shell = useStudioShellContext();
+  if (!reviewCommentsEnabled) return null;
   return <ProjectReviewComments key={shell.projectId} />;
 }
 
@@ -269,6 +272,11 @@ function ProjectReviewComments() {
       </Menu>
     </div>}
     <div className="min-h-0 flex-1 overflow-y-auto p-3" data-review-scroll>
+      {review.deferred ? <div role="status" data-deferred-p2="true" className="flex flex-col items-center gap-3 px-3 py-8 text-center text-text-3">
+        <RemixIcon name="time-line" size={24} />
+        <p className="text-text-1">{t('Review comments are coming in Phase 2')}</p>
+        <p>{t('Frame-anchored comments and visual markup annotations are scheduled for Phase 2.')}</p>
+      </div> : <>
       {review.error && <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-border p-4 text-text-2">
         <p>{t('Could not load comments')}</p><p className="text-text-3">{t('Check the connection and try again.')}</p><Button size="sm" disabled={review.busy} onClick={() => run(review.refresh)}>{t('Retry')}</Button>
       </div>}
@@ -279,6 +287,7 @@ function ProjectReviewComments() {
           selecting={selecting} checked={selected.has(comment.id)} onCheck={value => setSelected(previous => { const next = new Set(previous); if (value) next.add(comment.id); else next.delete(comment.id); return next; })}
           onLocate={() => locate(comment)} onComplete={() => run(async () => { await review.change(comment, 'update', comment.status === 'open' ? 'resolved' : 'open'); showToast(t('Comment updated')); })}
           onDelete={() => run(async () => { await review.change(comment, 'delete'); showToast(t('Comment deleted')); })} />)}</div>}
+      </>}
       {manualCopy && <textarea ref={copyFallback} className="om-field mt-3 min-h-32 w-full" aria-label={t('Review instruction')} readOnly value={manualCopy} onFocus={event => event.currentTarget.select()} />}
     </div>
     {comments.length > 0 && <div className="flex shrink-0 flex-col gap-2 border-t border-border p-3" data-review-footer>

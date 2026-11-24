@@ -5,6 +5,8 @@ import type { DomEditSelection } from "../components/editor/domEditing";
 import type { TimelineAssetKind } from "./timelineAssetDrop";
 import { roundToCenti } from "./rounding";
 import { studioApiFetch } from "./studioApiFetch";
+import { getCachedCloudDisklessMode } from "./cloudRuntime";
+import { waitForMediaDerived } from "./mediaDerivedBus";
 import { getHistoryShortcutLabel } from "./historyShortcuts";
 import { encodeUrlPath } from "@hyperframes/parsers";
 
@@ -13,6 +15,8 @@ export { getHistoryShortcutLabel };
 export interface EditingFile {
   path: string;
   content: string | null;
+  /** Editor text that produced a normalized write receipt (e.g. generated element IDs). */
+  submitted?: string;
 }
 
 export interface AppToast {
@@ -335,9 +339,7 @@ export function clampNumber(value: number, min: number, max: number): number {
 // fallow-ignore-next-line unused-export
 export { COMPOSITION_ROOT_OPEN_TAG_RE } from "./compositionPatterns";
 
-export function collectHtmlIds(source: string): string[] {
-  return Array.from(source.matchAll(/\bid="([^"]+)"/g), (match) => match[1] ?? "");
-}
+export { collectHtmlIds } from "../../../packages/edit-core/asset-placement";
 
 const pendingDurationProbes = new Map<string, Promise<number>>();
 
@@ -356,12 +358,88 @@ export function resolveDroppedAssetDuration(
   return probe;
 }
 
+async function fetchServerMediaMetadata(
+  projectId: string,
+  assetPath: string,
+): Promise<{ duration?: number; width?: number; height?: number; hasAudio?: boolean } | null> {
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await studioApiFetch(mediaMetadataUrl(projectId, assetPath));
+      if (response.status === 202 && attempt === 0) {
+        const pendingBody = (await response.json().catch(() => null)) as { sha256?: string } | null;
+        const expectedSha = typeof pendingBody?.sha256 === "string" ? pendingBody.sha256 : undefined;
+        await waitForMediaDerived(
+          (evt) => evt.kind === "metadata" && (!expectedSha || evt.sha256 === expectedSha),
+          2500,
+        ).catch(() => null);
+        continue;
+      }
+      if (!response.ok) return null;
+      const data: unknown = await response.json();
+      if (!isPlainRecord(data)) return null;
+      const meta = isPlainRecord(data.metadata) ? data.metadata : data;
+      const durationCandidate =
+        typeof meta.durationSec === "number"
+          ? meta.durationSec
+          : typeof meta.duration === "number"
+            ? meta.duration
+            : typeof data.durationSec === "number"
+              ? data.durationSec
+              : typeof data.duration === "number"
+                ? data.duration
+                : undefined;
+      const widthCandidate =
+        typeof meta.width === "number"
+          ? meta.width
+          : typeof data.width === "number"
+            ? data.width
+            : undefined;
+      const heightCandidate =
+        typeof meta.height === "number"
+          ? meta.height
+          : typeof data.height === "number"
+            ? data.height
+            : undefined;
+      const hasAudioCandidate =
+        typeof meta.hasAudio === "boolean"
+          ? meta.hasAudio
+          : typeof data.hasAudio === "boolean"
+            ? data.hasAudio
+            : undefined;
+      return {
+        ...(durationCandidate !== undefined && Number.isFinite(durationCandidate) && durationCandidate > 0
+          ? { duration: durationCandidate }
+          : {}),
+        ...(widthCandidate !== undefined && Number.isFinite(widthCandidate) && widthCandidate > 0
+          ? { width: widthCandidate }
+          : {}),
+        ...(heightCandidate !== undefined && Number.isFinite(heightCandidate) && heightCandidate > 0
+          ? { height: heightCandidate }
+          : {}),
+        ...(hasAudioCandidate !== undefined ? { hasAudio: hasAudioCandidate } : {}),
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function probeDroppedAssetDuration(
   projectId: string,
   assetPath: string,
   kind: TimelineAssetKind,
 ): Promise<number> {
   if (kind === "image" || kind === "text") return 3;
+
+  const isCloudMode = getCachedCloudDisklessMode();
+  if (isCloudMode) {
+    // Prefer server PG metadata in cloud mode (zero video download, immune to slow cloud range reads).
+    const serverMeta = await fetchServerMediaMetadata(projectId, assetPath);
+    if (serverMeta?.duration && serverMeta.duration > 0) {
+      return roundToCenti(serverMeta.duration);
+    }
+  }
 
   const media = document.createElement(kind === "video" ? "video" : "audio");
   media.preload = "metadata";
@@ -372,7 +450,7 @@ async function probeDroppedAssetDuration(
         window.clearTimeout(timeout);
         reject(new Error("Could not read media duration. Try adding the file again."));
       };
-      const timeout = window.setTimeout(fail, 3000);
+      const timeout = window.setTimeout(fail, isCloudMode ? 10_000 : 3000);
       const finalize = (value: number) => {
         window.clearTimeout(timeout);
         resolve(value);
@@ -419,16 +497,8 @@ export async function resolveAssetHasAudio(
   projectId: string,
   assetPath: string,
 ): Promise<boolean | null> {
-  try {
-    const response = await studioApiFetch(mediaMetadataUrl(projectId, assetPath));
-    if (!response.ok) return null;
-    const data: unknown = await response.json();
-    const metadata = isPlainRecord(data) ? data.metadata : undefined;
-    const hasAudio = isPlainRecord(metadata) ? metadata.hasAudio : undefined;
-    return typeof hasAudio === "boolean" ? hasAudio : null;
-  } catch {
-    return null;
-  }
+  const meta = await fetchServerMediaMetadata(projectId, assetPath);
+  return typeof meta?.hasAudio === "boolean" ? meta.hasAudio : null;
 }
 
 export async function resolveDroppedAssetDimensions(
@@ -437,6 +507,16 @@ export async function resolveDroppedAssetDimensions(
   kind: TimelineAssetKind,
 ): Promise<{ width: number; height: number } | null> {
   if (kind === "audio" || kind === "text") return null;
+
+  const isCloudMode = getCachedCloudDisklessMode();
+  if (isCloudMode) {
+    const serverMeta = await fetchServerMediaMetadata(projectId, assetPath);
+    if (serverMeta?.width && serverMeta.height) {
+      return { width: serverMeta.width, height: serverMeta.height };
+    }
+  }
+
+  const timeoutMs = isCloudMode ? 10_000 : 3000;
   const src = buildProjectApiPath(projectId, `/preview/${encodeUrlPath(assetPath)}`);
 
   if (kind === "image") {
@@ -452,7 +532,7 @@ export async function resolveDroppedAssetDimensions(
         img.src = "";
         resolve(value);
       };
-      const timeout = window.setTimeout(() => finalize(null), 3000);
+      const timeout = window.setTimeout(() => finalize(null), timeoutMs);
       img.onload = () =>
         finalize(
           img.naturalWidth > 0 && img.naturalHeight > 0
@@ -478,7 +558,7 @@ export async function resolveDroppedAssetDimensions(
       video.load();
       resolve(value);
     };
-    const timeout = window.setTimeout(() => finalize(null), 3000);
+    const timeout = window.setTimeout(() => finalize(null), timeoutMs);
     video.onloadedmetadata = () =>
       finalize(
         video.videoWidth > 0 && video.videoHeight > 0

@@ -1,11 +1,15 @@
 /* Workspace navigation, project conversation and native editing are separate surfaces. */
+.om-assets-host { container: asset-workspace / inline-size; flex: 1; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.om-assets-host[hidden] { display: none; }
+.om-skills-host { flex: 1; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.om-skills-host[hidden] { display: none; }
+.om-asset-pagination { display: flex; justify-content: center; align-items: center; gap: var(--motion-space-16); margin-block: var(--motion-space-24); }
 .motion-workspace { position: relative; display: flex; height: 100%; min-height: 0; width: 100%; overflow: hidden; color: var(--motion-text); background: var(--motion-bg); }
 /* The workspace is fixed; focusing portaled dock controls must not scroll it. */
 .motion-workspace-content { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; container-type: inline-size; background: var(--motion-panel); overflow: clip; }
 .motion-workspace-content > .h-full { flex: 1; min-height: 0; height: auto; }
-.motion-project-surface, .motion-project-presentation { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.motion-project-surface { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
 .motion-project-editor { position: absolute; inset: 0; display: flex; flex-direction: column; }
-.motion-project-presentation[data-editor-initializing="true"] > .motion-project-editor { visibility: hidden; }
 .motion-editor-loading { position: absolute; inset: 0; }
 .motion-editor-placeholder { position: absolute; inset: 0; display: grid; }
 .motion-editor-placeholder-header { display: flex; align-items: center; padding-inline: var(--motion-space-12); }

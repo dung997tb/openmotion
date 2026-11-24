@@ -6,9 +6,10 @@ import englishReadme from '../../../README.md?raw';
 import chineseReadme from '../../../README.zh-CN.md?raw';
 import { I18nProvider, languages, translate, type Locale } from '../i18n/I18n';
 import { McpConnectionPage } from './McpConnectionPage';
+import { setCachedCloudDisklessMode } from '../utils/cloudRuntime';
 import { formatMcpAgentPrompt, localizedMcpExample, mcpHeroBeats, mcpShowcaseModules } from './mcpShowcaseData';
 import { mcpGalleryCards } from './mcpGallery';
-import { containerIntegration, manualConnection, setupPrompt, type IntegrationInfo } from '../../../shared/integration';
+import { buildCloudIntegrationInfo, containerIntegration, manualConnection, setupPrompt, type IntegrationInfo } from '../../../shared/integration';
 
 // Reporting is covered separately. Its lazy initialization/retries must not
 // add transport requests to this page's discovery and read-only assertions.
@@ -124,7 +125,7 @@ it('loads Docker discovery through the real hook and enables container setup, co
   }
 });
 
-it.each(['en', 'zh-CN'] as const)('explains bundled project-preview delivery independently of MCP activation in %s', async locale => {
+it.each(['en', 'zh-CN'] as const)('explains optional in-client MCP Apps and Studio playback in %s', async locale => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('template-catalog') ? { items: [] } : info)));
   await mount(locale);
   const faq = [...document.querySelectorAll<HTMLDetailsElement>('.om-mcp-faq details')]
@@ -132,11 +133,8 @@ it.each(['en', 'zh-CN'] as const)('explains bundled project-preview delivery ind
   expect(faq).toBeDefined();
   await act(async () => faq.querySelector('summary')!.click());
   expect(faq.open).toBe(true);
-  expect(faq.textContent).toContain(locale === 'en' ? 'self-contained HTML document' : '独立 HTML 文档');
-  expect(faq.textContent).toContain(locale === 'en' ? 'project-preview cards' : '九选三的工程预览卡片');
-  expect(faq.textContent).toContain(locale === 'en' ? 'separate acceptance' : '分别验收');
-  expect(faq.textContent).toContain(locale === 'en' ? 'does not wait for native MCP reload' : '无需等待原生 MCP 重载');
-  expect(faq.textContent).toContain(locale === 'en' ? 'Native original-reference playback' : '原生卡片仍可另行播放原参考片');
+  expect(faq.textContent).toContain('MCP Apps');
+  expect(faq.textContent).toContain('Studio');
 });
 
 it.each(['zh-CN', 'en', 'ja'] as const)('links the FAQ and footer to the README community for %s', async locale => {
@@ -234,6 +232,45 @@ it('explains unavailable remote connections for existing ChatGPT links', async (
 
 });
 
+it('preserves cloud connection, manual download and project-file guidance on the redesigned page', async () => {
+  const cloud = buildCloudIntegrationInfo({ publicOrigin: 'https://motion.example.com', version: '1', workspaceId: 'w', authMode: 'oidc', tools: info.tools });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(cloud)));
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  setCachedCloudDisklessMode(true);
+  try {
+    const { openProviders } = await mount('en', 'project');
+    expect(document.querySelector('[data-mcp-endpoint]')?.textContent).toContain('https://motion.example.com/mcp');
+    expect(document.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(10);
+    expect(document.querySelector('[data-mcp-scenario="review-comments"]')).toBeNull();
+    expect(document.querySelector('[data-mcp-scenario="scenario-workflows"]')).toBeNull();
+    await act(async () => tab('ChatGPT').click());
+    await act(async () => button('Manual setup').click());
+    const download = document.querySelector<HTMLAnchorElement>('a[download="openmotion-chatgpt.json"]');
+    expect(download?.getAttribute('href')).toContain('https%3A%2F%2Fmotion.example.com%2Fmcp');
+    expect(button('Manage API tokens (PAT)')).toBeDefined();
+    await act(async () => (document.querySelector('#dev-drawer > button') as HTMLButtonElement).click());
+    const card = document.querySelector('[data-mcp-scenario="project-file"]')!;
+    await act(async () => card.querySelector('button')!.click());
+    expect(copy.mock.calls[0][0]).toContain('openmotion_get_project({"projectId":"project","file":{"path":"index.html","mode":"sync"');
+    await act(async () => tab('Costs & local permissions').click());
+    await act(async () => button('Model gateway').click());
+    expect(openProviders).toHaveBeenCalledOnce();
+  } finally {
+    setCachedCloudDisklessMode(null);
+  }
+});
+
+it('explains the HTTPS requirement on an HTTP-only ChatGPT workspace', async () => {
+  const cloud = buildCloudIntegrationInfo({ publicOrigin: 'http://127.0.0.1:4173', version: '1', workspaceId: 'w', authMode: 'dev', tools: info.tools });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(cloud)));
+  await mount();
+  await act(async () => tab('ChatGPT').click());
+  expect(document.querySelector('.om-mcp-unavailable h2')?.textContent).toBe('HTTPS required for ChatGPT Cloud');
+  expect(document.querySelector('a[download]')).toBeNull();
+  await act(async () => button('Use Codex instead').click());
+  expect(tab('Codex').getAttribute('aria-selected')).toBe('true');
+});
+
 it('keeps example prompts available while setup discovery is unavailable and can retry', async () => {
   let broken = true;
   vi.stubGlobal('fetch', vi.fn(async () => broken ? Response.json({}, { status: 503 }) : Response.json(info)));
@@ -275,7 +312,7 @@ it('aborts pending setup discovery when leaving the page', async () => {
   }));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   await mount();
-  expect(reads.map(read => read.path)).toEqual(['/motion-api/integration']);
+  expect(reads.map(read => read.path)).toEqual(['/motion-api/account/integration']);
   for (const { path, signal } of reads) expect(signal?.aborted, path).toBe(false);
   expect(button('Copy setup instructions for Codex').disabled).toBe(false);
   await act(async () => button('Copy setup instructions for Codex').click());
@@ -329,15 +366,17 @@ it.each(['en', 'zh-CN'] as const)('copies the complete media onboarding flow in 
   const card = [...document.querySelectorAll('article')].find(node => node.querySelector('h3')?.textContent === (locale === 'en' ? 'Generate images, video, music and voice' : '生成图片、视频、音乐与配音'))!;
   await act(async () => card.querySelector('button')!.click());
   const instruction = copy.mock.calls[0][0];
-  for (const entry of ['agent_media_upgrade_go', 'agent_media_upgrade_free', 'agent_media_signed_out', 'agent_media_key_rejected']) {
-    expect(instruction).toContain('entry=' + entry);
+  expect(instruction).toContain('entry=agent_media_handbook');
+  for (const entry of ['agent_media_upgrade_go', 'agent_media_upgrade_free', 'agent_media_signed_out']) {
+    expect(instruction).toContain(entry);
   }
+  expect(instruction).not.toContain('agent_media_key_rejected');
   expect(instruction).toContain('target=providers');
-  expect(instruction).toContain(locale === 'en' ? 'Upgrade to Plus directly on the opened OpenDesign page' : '直接在已打开的模型供应商 → OpenDesign 页面点击「升级到 Plus」');
+  expect(instruction).toContain(locale === 'en' ? 'Subscription & usage > Manage subscription for OpenDesign Plus or above' : '订阅与用量 > 管理订阅');
   expect(instruction).not.toContain('install.md');
   expect(instruction).not.toContain('quick-start');
-  expect(instruction).toContain(locale === 'en' ? 'inspect again' : '再次检查配置');
-  expect(instruction).toContain(locale === 'en' ? 'original request' : '原来的需求');
+  expect(instruction).toContain(locale === 'en' ? 'inspect again' : '重新 inspect');
+  expect(instruction).toContain(locale === 'en' ? 'original request' : '恢复原始请求');
   expect(document.querySelector('.motion-feedback-layer [role=status]')?.textContent).toContain(locale === 'en' ? 'Copied to clipboard' : '已复制');
 });
 

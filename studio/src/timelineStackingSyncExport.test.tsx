@@ -38,12 +38,13 @@ it("restacks the host's preview when a lane move puts a clip below another", asy
   const commit = vi.fn<TimelineZIndexReorderCommit>(async (entries) => {
     for (const e of entries) e.element.style.zIndex = String(e.zIndex);
   });
+  const move = vi.fn(async () => {});
   const root = mountReactHarness(
     <Timeline
       previewIframeRef={{ current: iframe }}
       onZIndexReorder={commit}
       onMoveElement={async () => {}}
-      onMoveElements={async () => {}}
+      onMoveElements={move}
     />,
   );
   await settle();
@@ -62,7 +63,18 @@ it("restacks the host's preview when a lane move puts a clip below another", asy
   await act(async () => void window.dispatchEvent(pointer("pointerup", targetY)));
   await settle();
 
-  expect(usePlayerStore.getState().elements.find((e) => e.id === "tag")?.track).toBe(2);
+  // Empty display rows collapse. The host still writes authored track 2,
+  // and tag now shares the bottom display row with the non-overlapping note.
+  expect(move).toHaveBeenCalledTimes(1);
+  expect(move.mock.calls[0]).toMatchObject([
+    [{ element: { id: "tag" }, updates: { track: 2 } }],
+    expect.anything(),
+    "lane-reorder",
+  ]);
+  const elements = usePlayerStore.getState().elements;
+  expect(elements.find(e => e.id === "tag")).toMatchObject({ track: 1, authoredTrack: 2 });
+  expect(elements.find(e => e.id === "note")?.track).toBe(1);
+  expect(elements.find(e => e.id === "title")?.track).toBe(0);
   expect(commit).toHaveBeenCalledTimes(1);
   expect(commit.mock.calls[0]![0].every((e) => e.element.ownerDocument === doc)).toBe(true);
   const z = (id: string) => Number(doc.getElementById(id)!.style.zIndex || 0);

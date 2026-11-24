@@ -37,6 +37,16 @@ export interface TimelineLike {
 }
 
 export interface ClipManifestClip extends RuntimeTimelineClipIdentity {
+  authored?: {
+    sourceFile: string;
+    domId?: string;
+    hfId?: string;
+    hidden: boolean;
+    timelineLocked: boolean;
+    muted: boolean;
+    hasAudioAttr?: string | null;
+    volume?: number;
+  };
   zIndex?: number;
   stackingContextId?: string | null;
   compositionAncestors?: string[];

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { subscribeProjectActivity } from "../motion/workspaceRefresh";
 import { sseFileChangeChannel } from "./useExternalFileChangeCoordinator";
 
 describe("external file-change subscription ownership", () => {
@@ -21,7 +22,7 @@ describe("external file-change subscription ownership", () => {
       new URL("./useExternalFileChangeCoordinator.ts", import.meta.url),
       "utf8",
     );
-    expect(coordinator.match(/sseFileChangeChannel\(handler, catchUp\)/g)).toHaveLength(1);
+    expect(coordinator).toContain("sseFileChangeChannel(handler, catchUp, historyHandler)");
   });
 
   it("asks to catch up on every reconnect, since changes made while disconnected are never resent", () => {
@@ -45,6 +46,33 @@ describe("external file-change subscription ownership", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("creates one fresh stream and catches up after a browser offline interval", () => {
+    const network = new EventTarget();
+    const streams: FakeEventSource[] = [];
+    class FakeEventSource extends EventTarget {
+      close = vi.fn();
+      constructor() { super(); streams.push(this); }
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+    vi.stubGlobal("addEventListener", network.addEventListener.bind(network));
+    vi.stubGlobal("removeEventListener", network.removeEventListener.bind(network));
+    try {
+      const catchUp = vi.fn();
+      const stop = sseFileChangeChannel(vi.fn(), catchUp);
+      streams[0].dispatchEvent(new Event("open"));
+      network.dispatchEvent(new Event("offline"));
+      expect(streams[0].close).toHaveBeenCalledOnce();
+      network.dispatchEvent(new Event("online"));
+      expect(streams).toHaveLength(2);
+      streams[1].dispatchEvent(new Event("open"));
+      expect(catchUp).toHaveBeenCalledOnce();
+      stop();
+      network.dispatchEvent(new Event("offline"));
+      network.dispatchEvent(new Event("online"));
+      expect(streams).toHaveLength(2);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it("delivers the raw file-change event from EventSource to the handler and closes on cleanup", () => {
@@ -71,6 +99,32 @@ describe("external file-change subscription ownership", () => {
       stop();
       expect(close).toHaveBeenCalledTimes(1);
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("delivers project history and render invalidations through the shared EventSource", () => {
+    const listeners = new Map<string, (event: unknown) => void>();
+    class FakeEventSource {
+      addEventListener(type: string, listener: (event: unknown) => void) {
+        listeners.set(type, listener);
+      }
+      close = vi.fn();
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const onActivity = vi.fn();
+    const unsubscribe = subscribeProjectActivity(onActivity);
+    try {
+      const onHistoryChanged = vi.fn();
+      const stop = sseFileChangeChannel(vi.fn(), vi.fn(), onHistoryChanged);
+      const event = new MessageEvent("history-changed", { data: JSON.stringify({ projectId: "project-a" }) });
+      listeners.get("history-changed")?.(event);
+      expect(onHistoryChanged).toHaveBeenCalledWith(event);
+      listeners.get("render-updated")?.(new MessageEvent("render-updated", { data: JSON.stringify({ projectId: "project-a", state: "queued" }) }));
+      expect(onActivity).toHaveBeenCalledWith("project-a", "render-updated");
+      stop();
+    } finally {
+      unsubscribe();
       vi.unstubAllGlobals();
     }
   });

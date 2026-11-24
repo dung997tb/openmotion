@@ -1,3 +1,4 @@
+import { getCachedCloudDisklessMode } from '../utils/cloudRuntime';
 import { motionApi, type ProjectCatalog, type WorkspaceStatus } from './useWorkspace';
 import { isEditableTemplate, type GalleryTemplate } from '../../../shared/catalog';
 import { formatLocalizedTemplateHandoff } from '../../../shared/template-prompts';
@@ -18,7 +19,7 @@ export type PreparedTemplateProject = {
   originalProjectId?: string; requestId: string;
 };
 type TemplateProjectRequest = Pick<PreparedTemplateProject, 'templateId' | 'originalProjectId' | 'requestId'>;
-/** A rejected editor guard proves that no creation request was sent. */
+/** The edit guard or template catalog confirmed that no independent project was created. */
 export class TemplatePreparationBlockedError extends Error {}
 export function pendingTemplateProjects(): TemplateProjectRequest[] {
   try {
@@ -83,10 +84,17 @@ export async function prepareTemplateProject(template: GalleryTemplate, original
   // An acknowledged empty session is the same request, even if the UI language
   // (and therefore its display title) changed before the user retried.
   const sessionId = session?.id ?? (await motionApi<{ sessionId: string }>('/sessions', json({ id: requestId, templateId: template.id, mode: 'motion', title: template.title }))).sessionId;
-  const current = await motionApi<WorkspaceStatus>('/project/status', undefined, originalProjectId);
+  // Native sessions guard their active file before adding an artifact. The cloud clone only touches the new project.
+  const current = getCachedCloudDisklessMode() ? undefined : await motionApi<WorkspaceStatus>('/project/status?view=summary', undefined, originalProjectId);
   const result = await motionApi<WorkspaceStatus>(`/sessions/${sessionId}/artifacts`, json({
-    templateId: template.id, expectedRevision: current.revision, expectedProjectId: current.projectId,
-  }), originalProjectId);
+    templateId: template.id, projectType: 'template', requestId,
+    ...(current && { expectedRevision: current.revision, expectedProjectId: current.projectId }),
+  }), originalProjectId).catch((error: unknown) => {
+    if (error instanceof Error && 'code' in error && (error.code === 'TEMPLATE_NOT_COPYABLE' || error.code === 'TEMPLATE_MEDIA_UNAVAILABLE')) {
+      throw new TemplatePreparationBlockedError(error.message);
+    }
+    throw error;
+  });
   return remember({ projectId: result.projectId, sessionId, title: result.projectTitle,
     templateId: template.id, originalProjectId, requestId });
 }

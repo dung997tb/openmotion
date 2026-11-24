@@ -1,6 +1,10 @@
 import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { IconContext } from "@phosphor-icons/react";
+import {
+  createReactRootErrorHandlers,
+  initBrowserObservability,
+} from "@openmotion/observability/browser";
 import { MotionApp } from "./motion/MotionApp";
 import { ShowThemeToggle } from "./components/ThemeToggle";
 import { readIconTokens } from "./styles/iconTokens";
@@ -11,23 +15,25 @@ import {
   isExtensionOnlyStack,
 } from "./utils/rejectionTelemetry";
 import { prefetchPreviewForHash } from "./utils/previewPrefetch";
-import { bindThumbnailPageLifecycle } from "./player/lib/thumbnailPageLifecycle";
 // Shared workspace host and discovery surface styles (imported before studio.css
 // and application.css to preserve exact cascade order across all lazy routes).
-import "./motion/skills.css";
 import "./motion/sceneDiscovery.css";
-import "./motion/assets.css";
 import "./styles/studio.css";
 import "./motion/theme.css";
 import "./motion/workspace.css";
-import "../../packages/design-system/studio.css";
+import "../../packages/design-system/studio-shell.css";
 import "./motion/application.css";
-import { MotionStudioHost } from "./motion/MotionStudioHost";
+import { MotionAppShell } from "./motion/MotionAppShell";
 import { StudioRouterProvider } from "./router/createAppRouter";
 import { initializeDiagnostics, recordBrowserDiagnostic } from './motion/diagnostics';
 import { bindEmbeddedStudioTheme } from './utils/studioTheme';
+import { warmCloudDisklessMode } from './utils/cloudRuntime';
 import { bindVitePreloadErrorReload, lazyWithChunkReload } from './utils/chunkReload';
 import { ensureLocaleLoaded, isLocaleLoaded, readLocale } from './i18n/I18n';
+
+warmCloudDisklessMode();
+
+initBrowserObservability();
 
 const ComponentInspector = new URLSearchParams(location.search).get('debug') === 'ui'
   ? lazyWithChunkReload(() => import('./components/ComponentInspector'))
@@ -41,9 +47,6 @@ import.meta.hot?.dispose(unbindHostTheme);
 
 const stopDiagnostics = initializeDiagnostics();
 import.meta.hot?.dispose(stopDiagnostics);
-
-const unbindThumbnailPageLifecycle = bindThumbnailPageLifecycle(window, document);
-import.meta.hot?.dispose(unbindThumbnailPageLifecycle);
 
 prefetchPreviewForHash(window.location.hash);
 window.addEventListener("hashchange", () => prefetchPreviewForHash(window.location.hash));
@@ -140,18 +143,18 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 function mountStudio() {
-  createRoot(document.getElementById("root")!).render(
+  createRoot(document.getElementById("root")!, createReactRootErrorHandlers()).render(
     <StrictMode>
       {/* One icon size and weight for the whole app, taken from the theme file.
           Icons that pass their own size or weight still win. */}
       <IconContext.Provider value={readIconTokens()}>
         <ShowThemeToggle.Provider value>
-          <MotionStudioHost>
+          <MotionAppShell>
             <StudioRouterProvider>
               <MotionApp />
             </StudioRouterProvider>
             {ComponentInspector && <Suspense fallback={null}><ComponentInspector /></Suspense>}
-          </MotionStudioHost>
+          </MotionAppShell>
         </ShowThemeToggle.Provider>
       </IconContext.Provider>
     </StrictMode>,

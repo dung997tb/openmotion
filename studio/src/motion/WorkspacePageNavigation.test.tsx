@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import type { StudioCreation } from './CreativeWorkspace';
 import { MotionApp } from './MotionApp';
+import { preloadMotionProjectEditor } from './MotionProjectEditor';
 import { I18nProvider } from '../i18n/I18n';
 import { useWorkspaceChrome } from './WorkspaceFrame';
 import { readWorkspacePage, settingsSections } from './workspacePageRouting';
@@ -18,6 +19,7 @@ import { resetBannerDismissal } from './campaignAttribution';
 
 const editor = vi.hoisted(() => ({ mounts: 0, fail: false, wait: async () => {} }));
 vi.mock('./AssetsPage', () => ({ AssetsPage: ({ studio }: { studio?: StudioCreation }) => <input aria-label="Asset draft" defaultValue={studio?.initialDraft?.prompt ?? 'Asset prompt'} /> }));
+vi.mock('./MotionProjectEditor', () => ({ preloadMotionProjectEditor: vi.fn() }));
 vi.mock('./tracking', () => ({ trackMotion: vi.fn() }));
 vi.mock('./ArtifactViewer', () => ({ ArtifactViewer: ({ artifact }: { artifact: { projectId: string } }) => {
   const { registerEditor } = useWorkspaceChrome();
@@ -70,6 +72,7 @@ const returnThroughBreadcrumb = async (label: string) => {
 async function mount(key = 0) { await act(async () => root.render(<I18nProvider initialLocale="en"><MotionApp key={key} /></I18nProvider>)); }
 beforeEach(() => {
   localStorage.clear(); history.replaceState(null, '', firstUrl);
+  vi.mocked(preloadMotionProjectEditor).mockClear();
   editor.mounts = 0; editor.fail = false; editor.wait = async () => {};
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   fetcher = vi.fn(async (input: string, init?: RequestInit) => {
@@ -77,8 +80,8 @@ beforeEach(() => {
     if (url.pathname.endsWith('/projects') && !init?.method) return Response.json(catalog);
     if (url.pathname.includes('/sessions/')) return Response.json(catalog.sessions.find(item => url.pathname.endsWith(item.id)));
     if (url.pathname.includes('/projects/') && url.pathname.endsWith('/open')) return Response.json({ projectId: url.pathname.split('/').at(-2), revision: 'r' });
-    // The OpenAI preset carries media kinds, so it stays visible in the provider list.
-    if (url.pathname.endsWith('/settings/providers')) return Response.json({ providers: [provider, { ...provider, id: 'openai', label: 'OpenAI', protocol: 'openai', category: 'multimodal', kinds: ['text', 'image', 'audio'] }], models: [], defaults: {} });
+    if (url.pathname.endsWith('/models/catalog')) return Response.json({ provider: 'opendesign', mode: 'opendesign', models: [], defaults: {} });
+    if (url.pathname.endsWith('/models/status')) return Response.json({ providers: [{ ...provider, id: 'opendesign', available: true, configured: true, enabled: true }], routes: {}, agents: [], capabilities: [] });
     if (url.pathname.endsWith('/integration')) return Response.json(info);
     if (url.pathname.endsWith('/brand-kits')) return Response.json({ kits: [] });
     if (url.pathname.endsWith('/brand-kits/catalog')) return Response.json({ schemaVersion: 1, entries: [] });
@@ -96,7 +99,8 @@ afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMo
 it('cold-loads whitelisted semantic SPA path URLs directly into the requested surface', async () => {
   history.replaceState(null, '', '/settings/providers');
   await mount(0);
-  expect(container.querySelector('.om-provider-settings')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Model gateway"]')).not.toBeNull();
+  expect(container.textContent).toContain('OpenDesign Model Gateway');
   expect(container.querySelector('.om-settings-sections [aria-current=page]')?.textContent).toContain('Model providers');
   expect(container.querySelector('.om-explore-host')).toBeNull();
 
@@ -153,6 +157,7 @@ it.each(settingsSections)('restores a copied %s page on a fresh mount', async se
   history.replaceState(null, '', firstUrl.replace('#', `&${query}#`));
   for (const key of [0, 1]) {
     await mount(key);
+    expect(preloadMotionProjectEditor).not.toHaveBeenCalled();
     expect(page().settings).toBe(section);
     expect(container.querySelector<HTMLElement>('.motion-workspace-content')?.hidden).toBe(true);
     if (section === 'mcp') {
@@ -246,14 +251,15 @@ it('keeps one history entry per page and returns to the resolved editor after a 
   expect(history.length).toBe(initialLength + 3);
 });
 
-it('restores provider details and returns to the providers list through history', async () => {
-  await mount(); await click('Model providers');
-  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.om-provider-item')].find(node => node.textContent?.includes('OpenAI'))!.click());
-  expect(page().provider).toBe('openai');
-  await mount(1); expect(container.querySelector('.om-provider-items [aria-current=page]')?.textContent).toContain('OpenAI');
-  expect(container.querySelector('.om-provider-settings')?.getAttribute('data-detail')).toBe('true');
-  await traverse(-1); expect(page().provider).toBeNull();
-  expect(container.querySelector('.om-provider-settings')?.getAttribute('data-detail')).toBe('false');
+it('opens the unified Model gateway page and preserves it across reloads and history', async () => {
+  await mount(); await click('Model gateway');
+  expect(page().settings).toBe('providers');
+  expect(container.textContent).toContain('OpenDesign Model Gateway');
+  await mount(1);
+  expect(page().settings).toBe('providers');
+  expect(container.textContent).toContain('OpenDesign Model Gateway');
+  await traverse(-1);
+  expect(page().settings).toBeNull();
 });
 
 it('uses browser history across settings, reloads and new navigation branches', async () => {
@@ -701,6 +707,42 @@ it('browses the complete Motion catalog in batches and filters by its existing t
   expect(cards()).toHaveLength(16);
 });
 
+it('lists editable Motion projects without posters and appends later pages with their original template IDs', async () => {
+  const fallback = fetcher.getMockImplementation()!;
+  const firstBatch = Array.from({ length: 16 }, (_, index) => ({
+    id: index === 0 ? 'motion-cms-first' : `motion-cms-item-${index}`,
+    title: index === 0 ? 'motion-cms-first' : `Motion CMS ${index}`,
+    kind: 'prism', collection: 'example', hasHtmlProject: true, tags: [],
+  }));
+  const secondId = 'motion-cms-later';
+  const pageOffsets: number[] = [];
+  fetcher.mockImplementation(async (input, init) => {
+    const url = new URL(input, location.origin);
+    if (!url.pathname.endsWith('/template-catalog') || url.searchParams.get('category') !== 'all')
+      return fallback(input, init);
+    expect(url.searchParams.get('covered')).not.toBe('true');
+    const offset = Number(url.searchParams.get('offset'));
+    pageOffsets.push(offset);
+    return Response.json(offset === 0
+      ? { items: firstBatch, next: 16, total: 17 }
+      : { items: [{ id: secondId, title: secondId, kind: 'prism', collection: 'example', hasHtmlProject: true, tags: [] }], next: null, total: 17 });
+  });
+  await mount();
+  await click('Motion Studio');
+  const cards = () => [...container.querySelectorAll<HTMLElement>('.om-studio-template-grid article[data-template-id]')].map(card => card.dataset.templateId);
+  expect(pageOffsets).toEqual([0, 16]);
+  expect(cards()).toHaveLength(16);
+  expect(cards()[0]).toBe('motion-cms-first');
+  expect(container.querySelector('.om-gallery-poster-fallback')).toBeTruthy();
+  await click('More templates');
+  expect(cards()).toHaveLength(17);
+  expect(cards().at(-1)).toBe(secondId);
+  expect(container.querySelector('.om-shelf-more')).toBeNull();
+  const card = container.querySelector<HTMLButtonElement>(`article[data-template-id="${secondId}"] button`)!;
+  await act(async () => card.click());
+  expect(new URL(location.href).searchParams.get('template')).toBe(secondId);
+});
+
 it('restores the narrow Motion Studio landing and opens the editor from its banner', async () => {
   vi.stubGlobal('innerWidth', 700);
   history.replaceState(null, '', firstUrl.replace('#', '&page=motion#'));
@@ -746,8 +788,8 @@ it('shows audio feature cards, selectable models and spotlight in the Audio hove
   const fallback = fetcher.getMockImplementation()!;
   fetcher.mockImplementation(async (input: string, init?: RequestInit) => {
     const path = new URL(input, location.origin).pathname;
-    if (path === '/motion-api/models') return Response.json({ models: [speech], nextOffset: null });
-    if (path === '/motion-api/models/capabilities') return Response.json({ providers: [{ id: 'voice', available: true }], routes: {} });
+    if (path === '/motion-api/models' || path === '/motion-api/models/catalog') return Response.json({ models: [speech], nextOffset: null });
+    if (path === '/motion-api/models/capabilities' || path === '/motion-api/models/status') return Response.json({ providers: [{ id: 'voice', available: true }], routes: {} });
     return fallback(input, init);
   });
   await mount();
@@ -780,7 +822,7 @@ it('opens a Video feature scene from Explore under Video without a legacy Cinema
   expect(page().explore).toBe(true);
   await click('Generate with Open Design MCP');
   const clients = [...document.querySelectorAll<HTMLButtonElement>('.om-creative-client-menu button')];
-  expect(clients.some(button => button.textContent?.includes('ChatGPT'))).toBe(false);
+  expect(clients.some(button => button.textContent?.includes('ChatGPT'))).toBe(true);
   const client = clients.find(button => button.textContent === 'Claude Code')!;
   await act(async () => client.click());
   expect(page()).toMatchObject({ explore: false, settings: 'mcp', client: 'claude' });
@@ -1083,6 +1125,7 @@ it('opens the Gemini 4 hub from the third Explore slide and returns with browser
   expect(page()).toMatchObject({ explore: false, modelHub: 'gemini-4' });
   expect(location.pathname).toBe('/model-hub/gemini-4');
   expect(location.search).not.toContain('hub=gemini-4');
+  await act(() => vi.dynamicImportSettled());
   expect(container.querySelector('.om-model-hub-hero h1')?.textContent).toBe('Gemini 4 Neon');
   const wall = () => [...container.querySelectorAll<HTMLButtonElement>('.om-hub-video .om-gallery-cover')];
   expect(wall()).toHaveLength(gemini4Videos.length);
@@ -1911,8 +1954,8 @@ it('opens model cases with a compatible provider and the same prompt from both d
   const other = { ...image, id: 'other:gpt-image-2.6-flare', provider: 'other' };
   fetcher.mockImplementation(async (input: string, init?: RequestInit) => {
     const path = new URL(input, location.origin).pathname;
-    if (path === '/motion-api/models') return Response.json({ models: [other, edit, image], nextOffset: null });
-    if (path === '/motion-api/models/capabilities') return Response.json({ providers: [{ id: 'cloud', available: true }], routes: {} });
+    if (path === '/motion-api/models' || path === '/motion-api/models/catalog') return Response.json({ models: [other, edit, image], nextOffset: null });
+    if (path === '/motion-api/models/capabilities' || path === '/motion-api/models/status') return Response.json({ providers: [{ id: 'cloud', available: true }], routes: {} });
     return baseFetch(input, init);
   });
   await mount(); await click('Explore');
@@ -1955,8 +1998,8 @@ it.each([
   const baseFetch = fetcher.getMockImplementation()!;
   fetcher.mockImplementation(async (input: string, init?: RequestInit) => {
     const path = new URL(input, location.origin).pathname;
-    if (path === '/motion-api/models') return Response.json({ models: [model], nextOffset: null });
-    if (path === '/motion-api/models/capabilities') return Response.json({ providers: [{ id: 'cloud', available: true }], routes: {} });
+    if (path === '/motion-api/models' || path === '/motion-api/models/catalog') return Response.json({ models: [model], nextOffset: null });
+    if (path === '/motion-api/models/capabilities' || path === '/motion-api/models/status') return Response.json({ providers: [{ id: 'cloud', available: true }], routes: {} });
     return baseFetch(input, init);
   });
   history.replaceState(null, '', firstUrl.replace('#', '&page=model&model=' + encodeURIComponent(model.id) + '#'));
@@ -1982,8 +2025,8 @@ it.each([
   const baseFetch = fetcher.getMockImplementation()!;
   fetcher.mockImplementation(async (input: string, init?: RequestInit) => {
     const path = new URL(input, location.origin).pathname;
-    if (path === '/motion-api/models') return Response.json({ models: [model], nextOffset: null });
-    if (path === '/motion-api/models/capabilities') return Response.json({ providers: [{ id: 'fal', available: true }], routes: {} });
+    if (path === '/motion-api/models' || path === '/motion-api/models/catalog') return Response.json({ models: [model], nextOffset: null });
+    if (path === '/motion-api/models/capabilities' || path === '/motion-api/models/status') return Response.json({ providers: [{ id: 'fal', available: true }], routes: {} });
     return baseFetch(input, init);
   });
   history.replaceState(null, '', firstUrl.replace('#', '&page=model&model=' + encodeURIComponent(id) + '#'));

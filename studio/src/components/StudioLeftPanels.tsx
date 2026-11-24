@@ -1,8 +1,7 @@
 import { useMvpEditor } from "../motion/StudioHost";
 import { trackStudioClick } from "../motion/editorTracking";
 import { useI18n } from "../i18n/I18n";
-import { memo, useCallback, type ReactNode } from "react";
-import { SourceEditor } from "./editor/SourceEditor";
+import { lazy, memo, Suspense, useCallback, type ReactNode } from "react";
 import { TranscriptPanel } from '../motion/TranscriptPanel';
 import { CaptionsPanel } from '../motion/CaptionsPanel';
 import { FileTree } from "./editor/FileTree";
@@ -17,6 +16,9 @@ import { isMediaFile } from "../utils/mediaTypes";
 import { useStudioShellContext } from "../contexts/StudioContext";
 import { useFileManagerContext } from "../contexts/FileManagerContext";
 import { getPersistedRenderSettings } from "./renders/renderSettings";
+import { useCloudFeatureEnabled } from "../utils/cloudFeatures";
+
+const SourceEditor = lazy(() => import('./editor/SourceEditor').then(module => ({ default: module.SourceEditor })));
 
 interface StudioLeftPanelsProps {
   onSelectComposition: (comp: string) => void;
@@ -54,6 +56,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
   onAddCompositionToTimeline,
 }: StudioLeftPanelsProps) {
   const mvp = useMvpEditor();
+  const asrEnabled = useCloudFeatureEnabled('asr');
   const { projectId, activeCompPath, renderQueue, waitForPendingDomEditSaves } = useStudioShellContext();
   const {
     compositions,
@@ -62,6 +65,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
     handleRenameAsset,
     editingFile,
     fileTree,
+    fileTreeLoaded,
     revealSourceOffset,
     handleFileSelect,
     handleCreateFile,
@@ -73,6 +77,8 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
     handleImportFiles,
     refreshFileTree,
     handleContentChange,
+    flushPendingSourceSave,
+    getPendingSourceCandidate,
   } = useFileManagerContext();
 
   const handleRenderComposition = useCallback(
@@ -112,6 +118,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
           <CompositionsPanel
             projectId={projectId}
             compositions={compositions}
+            loading={!fileTreeLoaded}
             onSelect={(...args: Parameters<typeof onSelectComposition>) => {
               trackStudioClick("clips", "select_clip", projectId);
               return onSelectComposition(...args);
@@ -128,6 +135,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
           <AssetsTab
             projectId={projectId}
             assets={assets}
+            loading={!fileTreeLoaded}
             onImport={importAssets}
             onLibraryImport={refreshFileTree}
             onDelete={handleDeleteFile}
@@ -137,7 +145,7 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
           />
         </PanelColumn>
       </Dock.Panel>
-      <Dock.Panel id="transcript"><TranscriptPanel onAddToTimeline={onAddAssetToTimeline} /></Dock.Panel>
+      {asrEnabled && <Dock.Panel id="transcript"><TranscriptPanel onAddToTimeline={onAddAssetToTimeline} /></Dock.Panel>}
       <Dock.Panel id="captions"><CaptionsPanel /></Dock.Panel>
       <Dock.Panel id="code">
         <PanelColumn footer={lintButton}>
@@ -165,6 +173,8 @@ export const StudioLeftPanels = memo(function StudioLeftPanels({
                 editingFile={editingFile}
                 revealOffset={revealSourceOffset}
                 onChange={handleContentChange}
+                onFlush={flushPendingSourceSave}
+                hasPendingChange={() => Boolean(getPendingSourceCandidate())}
               />
             </div>
           </div>
@@ -184,14 +194,17 @@ function CodeBody({
   editingFile,
   revealOffset,
   onChange,
+  onFlush,
+  hasPendingChange,
 }: {
   projectId: string;
-  editingFile: { path: string; content: string | null } | null;
+  editingFile: { path: string; content: string | null; submitted?: string } | null;
   revealOffset: React.ComponentProps<typeof SourceEditor>["revealOffset"];
   onChange: (content: string) => void;
+  onFlush: () => void;
+  hasPendingChange: () => boolean;
 }) {
   const { t } = useI18n();
-  const mvp = useMvpEditor();
   if (!editingFile) {
     return (
       <div className="flex items-center justify-center h-full text-neutral-600 text-sm">
@@ -203,19 +216,21 @@ function CodeBody({
   }
   // Never mount the editor on unloaded content: a keystroke would autosave an
   // empty document over the real file.
-  if (editingFile.content == null) {
-    return (
-      <div className="flex h-full items-center justify-center text-[11px] text-neutral-600">
-        {t("Loading")}{" "}{editingFile.path}…
-      </div>
-    );
-  }
-  return (
+  const loadingFile = (
+    <div className="flex h-full items-center justify-center text-[11px] text-neutral-600">
+      {t("Loading")}{" "}{editingFile.path}…
+    </div>
+  );
+  if (editingFile.content == null) return loadingFile;
+  return <Suspense fallback={loadingFile}>
     <SourceEditor
       content={editingFile.content}
+      submitted={editingFile.submitted}
       filePath={editingFile.path}
       onChange={onChange}
+      onFlush={onFlush}
+      hasPendingChange={hasPendingChange}
       revealOffset={revealOffset}
     />
-  );
+  </Suspense>;
 }

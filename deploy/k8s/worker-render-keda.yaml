@@ -1,0 +1,79 @@
+# KEDA autoscaling for the BullMQ `render-export` worker pool.
+# Requires KEDA v2 CRDs installed in the cluster.
+# Authentication uses `TriggerAuthentication/openmotion-keda-redis-auth`, backed by
+# Secret `openmotion-keda-redis-auth` (key `password`; see deploy/k8s/secret.example.yaml).
+#
+# Why minReplicaCount defaults to 1:
+# QueueService.enqueueRenderExport sets BullMQ v5 priority (export_render=1,
+# render_thumbnail=5), placing waiting jobs in the `bull:render-export:prioritized` ZSET
+# until a worker moves them to `bull:render-export:active`. Because KEDA's native `redis`
+# scaler evaluates Redis Lists (`wait`/`active`), scaling to 0 would deadlock prioritized
+# jobs. Keep minReplicaCount: 1 (warm pool) by default, or lower to 0 only after pairing
+# this ScaledObject with a Prometheus/BullMQ ZSET queue-depth metric trigger.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: openmotion-keda-redis-auth
+  namespace: openmotion
+  labels:
+    app.kubernetes.io/name: openmotion-worker-render
+    app.kubernetes.io/component: worker-render
+    app.kubernetes.io/part-of: openmotion
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: openmotion-keda-redis-auth
+      key: password
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: openmotion-worker-render
+  namespace: openmotion
+  labels:
+    app.kubernetes.io/name: openmotion-worker-render
+    app.kubernetes.io/component: worker-render
+    app.kubernetes.io/part-of: openmotion
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: openmotion-worker-render
+  pollingInterval: 15
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 30
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 4
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+  triggers:
+    - type: redis
+      metadata:
+        address: redis.openmotion.svc.cluster.local:6379
+        listName: bull:render-export:wait
+        listLength: "1"
+        activationListLength: "0"
+        databaseIndex: "0"
+      authenticationRef:
+        name: openmotion-keda-redis-auth
+    - type: redis
+      metadata:
+        address: redis.openmotion.svc.cluster.local:6379
+        listName: bull:render-export:active
+        listLength: "1"
+        activationListLength: "0"
+        databaseIndex: "0"
+      authenticationRef:
+        name: openmotion-keda-redis-auth

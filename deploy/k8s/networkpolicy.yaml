@@ -1,0 +1,293 @@
+# Zero-trust NetworkPolicy baseline for the `openmotion` namespace.
+# 1. Default-deny all ingress and egress for every pod in the namespace.
+# 2. Explicitly allow only the minimum required flows per workload role.
+# 3. `worker-render` (executing untrusted HTML/JS inside Chromium) has ZERO
+#    ingress, ZERO public internet egress, ZERO cloud metadata access
+#    (169.254.169.254/32), and ZERO Kubernetes API server access.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: openmotion
+  labels:
+    app.kubernetes.io/part-of: openmotion
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# API pods: receive HTTP traffic only from the ingress controller; reach DNS,
+# Postgres, Redis, S3/R2, and external OIDC + OpenDesign HTTPS endpoints while
+# blocking link-local / cloud metadata (169.254.0.0/16 incl. 169.254.169.254/32).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openmotion-api
+  namespace: openmotion
+  labels:
+    app.kubernetes.io/name: openmotion-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: openmotion
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openmotion-api
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 4173
+  egress:
+    # Cluster DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # In-cluster Postgres, Redis, and S3 endpoints
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: s3
+      ports:
+        - protocol: TCP
+          port: 9000
+    # External HTTPS (OIDC IdP, OpenDesign Model Gateway, cloud S3/R2) — excludes private & metadata CIDRs
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# worker-media: NO ingress. Egress to DNS, Postgres, Redis, S3, OpenDesign Gateway,
+# and SSRF-checked public HTTPS (port 443 only; private/metadata CIDRs explicitly blocked).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openmotion-worker-media
+  namespace: openmotion
+  labels:
+    app.kubernetes.io/name: openmotion-worker-media
+    app.kubernetes.io/component: worker-media
+    app.kubernetes.io/part-of: openmotion
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openmotion-worker-media
+      app.kubernetes.io/component: worker-media
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    # Cluster DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # In-cluster Postgres, Redis, and S3 endpoints
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: s3
+      ports:
+        - protocol: TCP
+          port: 9000
+    # Public HTTPS only (OpenDesign Gateway, cloud S3/R2, user url_fetch) — blocks RFC1918 & 169.254.169.254/32
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# worker-render: STRICT SANDBOX EGRESS POLICY.
+# - ZERO ingress rules (all inbound connections denied).
+# - Egress permits ONLY cluster DNS, Postgres (5432), Redis (6379), and cluster S3 (9000).
+# - Public internet egress (0.0.0.0/0), cloud metadata (169.254.169.254/32), and the
+#   Kubernetes API server (control-plane IP / port 6443 / 443) are ALL blocked by default-deny.
+# - When using managed external PG/Redis/S3 via PrivateLink or VPC endpoints, replace the
+#   matching podSelector below with exact /32 endpoint CIDRs (never 0.0.0.0/0).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openmotion-worker-render
+  namespace: openmotion
+  labels:
+    app.kubernetes.io/name: openmotion-worker-render
+    app.kubernetes.io/component: worker-render
+    app.kubernetes.io/part-of: openmotion
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openmotion-worker-render
+      app.kubernetes.io/component: worker-render
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    # Cluster DNS only
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Cluster PostgreSQL endpoint only
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Cluster Redis endpoint only
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Cluster S3-compatible object storage endpoint only
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: s3
+      ports:
+        - protocol: TCP
+          port: 9000
+---
+# One-shot Jobs (db-migrate, catalog-sync): NO ingress; egress only to DNS, Postgres, and S3.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openmotion-jobs
+  namespace: openmotion
+  labels:
+    app.kubernetes.io/component: jobs
+    app.kubernetes.io/part-of: openmotion
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - migrate
+          - catalog-sync
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: s3
+      ports:
+        - protocol: TCP
+          port: 9000
+    # Cloud S3/R2 endpoint over HTTPS for catalog-sync (blocks private & metadata CIDRs)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443

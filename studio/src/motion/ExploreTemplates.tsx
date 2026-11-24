@@ -13,18 +13,24 @@ import { motionApi } from './useWorkspace';
 import { useWorkspaceChrome } from './WorkspaceChromeContext';
 
 // Each Explore collection owns its loaded pages. New pages append to the existing collection.
-export function useExploreTemplates(category: string | undefined, locale: string, search = '', limit = 8, firstPages?: Map<string, TemplatePage>) {
-  const cacheKey = JSON.stringify([category, locale, search, limit]);
+interface ExploreTemplateQuery {
+  search?: string;
+  limit?: number;
+  covered?: boolean;
+  firstPages?: Map<string, TemplatePage>;
+}
+
+export function useExploreTemplates(category: string | undefined, locale: string, { search = '', limit = 8, covered = true, firstPages }: ExploreTemplateQuery = {}) {
+  const cacheKey = JSON.stringify([category, locale, search, limit, covered]);
   const cached = firstPages?.get(cacheKey);
   const [pages, setPages] = useState<TemplatePage[]>(() => cached ? [cached] : []);
   const [offset, setOffset] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(Boolean(category) && !cached);
-  const queryKey = JSON.stringify([category, locale, search, limit]);
-  const [loadedQuery, setLoadedQuery] = useState(queryKey);
-  if (loadedQuery !== queryKey) {
-    setLoadedQuery(queryKey);
+  const [loadedQuery, setLoadedQuery] = useState(cacheKey);
+  if (loadedQuery !== cacheKey) {
+    setLoadedQuery(cacheKey);
     setPages(cached ? [cached] : []);
     setOffset(0);
     setError(false);
@@ -33,7 +39,8 @@ export function useExploreTemplates(category: string | undefined, locale: string
   useEffect(() => {
     if (!category) return;
     const controller = new AbortController();
-    const query = new URLSearchParams({ category, locale, covered: 'true', limit: String(limit), offset: String(offset) });
+    const query = new URLSearchParams({ category, locale, limit: String(limit), offset: String(offset) });
+    if (covered) query.set('covered', 'true');
     if (search) query.set('query', search);
     motionApi<TemplatePage>('/template-catalog?' + query, {
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]),
@@ -54,7 +61,7 @@ export function useExploreTemplates(category: string | undefined, locale: string
     }).catch(() => { if (!controller.signal.aborted) setError(true); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [category, locale, offset, attempt, search, limit, firstPages, cacheKey]);
+  }, [category, locale, offset, attempt, search, limit, covered, firstPages, cacheKey]);
   const next = pages.at(-1)?.next;
   function loadMore() {
     if (loading || next == null || next <= offset) return;
@@ -83,7 +90,7 @@ function exploreCategories(purposes: string[]): (readonly [ExploreTemplateFilter
 export function useExploreTemplateShelf(filter: ExploreTemplateFilter, locale: string, enabled: boolean, active: boolean, all: ReturnType<typeof useExploreTemplates>, limit: number) {
   const collection = filter === 'all' ? null : filter;
   const curated = useCoveredTemplates(locale, enabled && active);
-  const filtered = useExploreTemplates(enabled && isFormatCategory(filter) ? filter : undefined, locale, '', limit);
+  const filtered = useExploreTemplates(enabled && isFormatCategory(filter) ? filter : undefined, locale, { limit });
   const page = filter === 'all' ? all : filtered;
   const { categories, industries } = useMemo(() => {
     const { purposes, industries } = curated.catalog ? templateCollectionFacets(curated.catalog) : { purposes: purposeOrder, industries: [] };

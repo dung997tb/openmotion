@@ -447,7 +447,7 @@ sudo() {
   if [[ "$*" == *' install '* ]]; then touch "$RUNNER_TEMP/motion-rendering-apt/fixture.deb"; fi
 }`;
   const env = { ...process.env, APT_CALLS: calls, HYPERFRAMES_BROWSER_PATH: '/usr/bin/true', RUNNER_TEMP: directory };
-  for (const name of ['ci', 'motion-candidate']) {
+  for (const name of ['motion-candidate']) {
     const workflow = await readFile(new URL(`../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
     const step = workflow.split('      - name: Install rendering test tools\n')[1].split('\n      - name: ')[0];
     assert.match(workflow, /path: \$\{\{ runner.temp \}\}\/motion-rendering-apt/);

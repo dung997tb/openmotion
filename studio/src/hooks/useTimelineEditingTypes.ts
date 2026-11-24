@@ -34,7 +34,7 @@ export interface UseTimelineEditingOptions {
   writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
   observeProjectFileVersion?: (path: string, version: string | null) => void;
   recordEdit: (input: RecordEditInput) => Promise<void>;
-  reloadPreview: () => void;
+  reloadPreview: (path?: string) => void;
   previewIframeRef: RefObject<HTMLIFrameElement | null>;
   pendingTimelineEditPathRef: MutableRefObject<Set<string>>;
   uploadProjectFiles: (
@@ -50,7 +50,7 @@ export interface UseTimelineEditingOptions {
   /** Resync the SDK session after a server-authoritative timeline write. */
   forceReloadSdkSession?: () => void;
   /** Reparse authored animations after a timing rewrite changes their positions. */
-  invalidateGsapCache?: () => void;
+  invalidateGsapCache?: (path?: string) => void;
   handleDomZIndexReorderCommitRef?: MutableRefObject<TimelineZIndexReorderCommit | null>;
   /** Refuses a hand edit at the persist boundary when set; absent = Studio unchanged. */
   canEdit?: CanEditTimelineElement;

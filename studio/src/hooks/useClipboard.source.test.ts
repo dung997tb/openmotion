@@ -3,6 +3,9 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
+import { applyContentCommand, isContentCommand, type ContentCommand } from "../../../packages/edit-core/content-commands";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { useClipboard } from "./useClipboard";
 import { usePlayerStore, type TimelineElement } from "../player";
 import type { DomEditSelection } from "../components/editor/domEditing";
@@ -44,6 +47,7 @@ const TITLE: TimelineElement = {
 
 let root: Root | null = null;
 afterEach(() => {
+  setCachedCloudDisklessMode(null);
   act(() => root?.unmount());
   root = null;
   vi.unstubAllGlobals();
@@ -108,9 +112,14 @@ function mountClipboard(
   stubFiles(files, fail, delayMs);
   const iframe = mountPreview(sub, bundle, saved);
   const writes: string[] = [];
+  const commands: ContentCommand[] = [];
   const deleted: string[] = [];
   const domDeleted: DomEditSelection[] = [];
-  const writeProjectFile = async (_path: string, content: string) => {
+  const writeProjectFile = async (_path: string, content: string, before?:string, command?:ProjectEditCommand) => {
+    if (command && isContentCommand(command)) {
+      commands.push(command);
+      expect(applyContentCommand(before!, command)).toBe(content);
+    }
     writes.push(content);
   };
   const showToast = vi.fn();
@@ -118,6 +127,7 @@ function mountClipboard(
   function Harness() {
     api = useClipboard({
       projectId: "p",
+      fileTree: ["compositions/sibling.png"],
       activeCompPath: view.path,
       domEditSelectionRef: domSelectionRef,
       showToast,
@@ -142,6 +152,7 @@ function mountClipboard(
     rerender,
     showToast,
     clipboard,
+    commands,
     writes,
     deleted,
     domDeleted,
@@ -232,6 +243,17 @@ describe("copy takes a clip's saved markup, not the runtime's live styling", () 
   });
 });
 
+it("pastes through the same cloud command without requiring the preview to replay edits", async () => {
+  setCachedCloudDisklessMode(true);
+  selectTitle();
+  const { clipboard, commands, writes } = mountClipboard();
+  clipboard().handleCopy();
+  await clipboard().handlePaste();
+  expect(commands.map(command => command.kind)).toEqual(["pasteClips"]);
+  expect(writes).toHaveLength(1);
+  expect(writes[0]?.match(/>Title<\/h1>/g)).toHaveLength(2);
+});
+
 describe("copy of a clip missing from its saved file", () => {
   it("takes the preview's markup without its lazy loading or look-ahead mark, keeping authored loading", async () => {
     selectTitle();
@@ -245,9 +267,10 @@ describe("copy of a clip missing from its saved file", () => {
     files["index.html"] = SAVED.replace(/<h1[\s\S]*<\/h1>/, "");
     clipboard().handleCopy();
     await clipboard().handlePaste();
-    expect(writes[0]).toMatch(
-      /<img src="plate.png" data-hf-id="[^"]+"><img src="own.png" loading="lazy"/,
-    );
+    const copies = new DOMParser().parseFromString(writes[0]!, "text/html").querySelectorAll("h1:last-of-type img");
+    expect(Array.from(copies, image => [image.getAttribute("src"), image.getAttribute("loading"), !!image.getAttribute("data-hf-id")])).toEqual([
+      ["plate.png", null, true], ["own.png", "lazy", true],
+    ]);
     expect(writes[0]).not.toContain("data-hf-preview-lazy");
     expect(writes[0]).not.toContain("data-hf-upcoming");
   });
@@ -308,6 +331,31 @@ describe("paste of an element styled by its id", () => {
 });
 
 describe("copy of a sub-composition clip", () => {
+  it.each(["same origin", "isolated"])("keeps the video poster when pasting into its parent (%s)", async (mode) => {
+    const poster = "sibling.png?v=2#cover";
+    const projectPoster = `compositions/${poster}`;
+    const sub = `<template id="sub-template"><div data-composition-id="sub" data-duration="4">
+      <video class="clip" poster="${poster}" src="../assets/movie.mp4" data-start="1" data-duration="2"></video>
+    </div></template>`;
+    const hfId = stampedHfId(sub, "video");
+    const clip = { ...TITLE, id: hfId, hfId, tag: "video", sourceFile: "compositions/sub.html" };
+    usePlayerStore.setState({
+      elements: [clip], selectedElementId: clip.id, selectedElementIds: new Set([clip.id]),
+    });
+    const { clipboard, writes, iframe } = mountClipboard(null, sub, (host) => {
+      host.querySelector("video")!.setAttribute("poster", projectPoster);
+    });
+    if (mode === "isolated") {
+      Object.defineProperty(iframe, "contentDocument", { get: () => null });
+    }
+
+    expect(clipboard().handleCopy()).toBe(true);
+    await clipboard().handlePaste();
+    const movie = new DOMParser().parseFromString(writes[0]!, "text/html").querySelector("video");
+    expect(movie?.getAttribute("src")).toBe("assets/movie.mp4");
+    expect(movie?.getAttribute("poster")).toBe(projectPoster);
+  });
+
   it("rebases its relative asset paths to the project root, as the preview does", async () => {
     clearSelection();
     const sub = SUB.replace(
@@ -611,5 +659,50 @@ describe("text insertion with locked visual layers", () => {
     expect(view.showToast).toHaveBeenCalled();
     expect(view.showToast.mock.calls.some(([, kind]) => kind === "error")).toBe(false);
     expect(JSON.stringify(view.showToast.mock.calls)).not.toContain("locked clip would have to move");
+  });
+});
+
+describe("clipboard with an isolated preview", () => {
+  function isolate(iframe: HTMLIFrameElement) {
+    Object.defineProperty(iframe, "contentDocument", {
+      get() { throw new DOMException("Blocked a frame", "SecurityError"); },
+    });
+  }
+
+  it("copies all selected clips by scoped source identity", async () => {
+    const sub = SUB.replace(">Sub<", '><img src="sibling.png?x=1">Sub<');
+    const nested = { ...TITLE, id: "nested", hfId: stampedHfId(sub, "h2"), sourceFile: "compositions/sub.html" };
+    usePlayerStore.setState({ elements: [TITLE, nested], selectedElementId: TITLE.id,
+      selectedElementIds: new Set([TITLE.id, nested.id]) });
+    const { clipboard, writes, iframe } = mountClipboard(null, sub);
+    isolate(iframe);
+    expect(clipboard().handleCopy()).toBe(true);
+    await clipboard().handlePaste();
+    expect(writes[0]).toContain('src="compositions/sibling.png?x=1"');
+    expect(writes[0]?.match(/>Title<\/h1>/g)).toHaveLength(2);
+    expect(await clipboard().handleDuplicate()).toBe(true);
+    expect(writes[1]).toContain(">Sub</h2>");
+  });
+
+  it("preserves the whole selection when any intended cut target is absent from source", async () => {
+    const absent = { ...TITLE, id: "absent", hfId: "gone" };
+    usePlayerStore.setState({ elements: [TITLE, absent], selectedElementId: TITLE.id,
+      selectedElementIds: new Set([TITLE.id, absent.id]) });
+    const { clipboard, iframe, deleted, writes } = mountClipboard();
+    isolate(iframe);
+    expect(await clipboard().handleCut()).toBe(false);
+    expect(deleted).toEqual([]);
+    expect(await clipboard().handleDuplicate()).toBe(false);
+    expect(writes).toEqual([]);
+  });
+
+  it("cuts the matching clip when its source identity also appears in the canvas selection", async () => {
+    selectTitle();
+    const selection = { hfId: TITLE_HF_ID, sourceFile: "index.html" } as DomEditSelection;
+    const { clipboard, iframe, deleted, domDeleted } = mountClipboard(selection);
+    isolate(iframe);
+    expect(await clipboard().handleCut()).toBe(true);
+    expect(deleted).toEqual([TITLE.id]);
+    expect(domDeleted).toEqual([]);
   });
 });

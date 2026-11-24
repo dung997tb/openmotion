@@ -18,15 +18,15 @@ async function render() {
   return { onProvider, hero: () => [...container.querySelectorAll<HTMLButtonElement>('.om-model-hub-hero-copy button')].map(button => button.textContent) };
 }
 
-it('offers to connect when nothing is connected and shows the connection once signed in', async () => {
+it('offers to sign in or open Model gateway when signed out and shows OpenDesign connection once signed in', async () => {
   account.state = 'signed-out';
   let view = await render();
   expect(view.hero()).toContain('Sign in to use Gemini 4 Neon now');
-  expect(view.hero()).toContain('Connect your own API key');
+  expect(view.hero()).toContain('Model gateway');
   container.remove();
   account.state = 'signed-in';
   view = await render();
-  expect(view.hero()).toContain('Connected to OpenDesign');
+  expect(view.hero()).toContain('Connected to Gemini');
   await act(async () => container.querySelector<HTMLButtonElement>('.om-model-hub-connected')!.click());
-  expect(view.onProvider).toHaveBeenCalledWith('account');
+  expect(view.onProvider).toHaveBeenCalledWith('opendesign');
 });

@@ -8,7 +8,6 @@ import { assetRequest } from './assetClient';
 import { gatewayRequest } from './gatewayClient';
 import type { LibraryAsset } from '../../../shared/asset-library';
 import type { GenerationJob } from '../../../shared/gateway';
-import type { AssetChatSummary } from './assetTasks';
 
 vi.mock('../i18n/I18n', () => ({ useI18n: () => ({ t: (text: string, values?: { count: number }) => text.replace('{count}', String(values?.count)), formatDate: () => 'Nov 15' }) }));
 vi.mock('./ResizablePane', () => ({ ResizablePane: ({ children }: { children: ReactNode }) => <div>{children}</div> }));
@@ -20,7 +19,7 @@ vi.mock('./game/gameCatalog', async importOriginal => {
 });
 vi.mock('./AssetComposer', () => ({ AssetComposer: (props: ComponentProps<typeof AssetComposer>) => {
   composer = props;
-  return <aside data-testid="composer"><span>{props.mode}:{props.taskIds[props.mode]}</span>
+  return <aside data-testid="composer"><span>direct:{props.taskId}</span>
     <button onClick={() => props.onCreated(submitted)}>Submit fixture task</button>
     <button onClick={props.onClose}>Close creator</button>
   </aside>;
@@ -28,15 +27,15 @@ vi.mock('./AssetComposer', () => ({ AssetComposer: (props: ComponentProps<typeof
 
 const asset: LibraryAsset = { id: 'picture', name: 'Selected picture', modality: 'image', createdAt: 1, updatedAt: 2, currentVersionId: 'v2', versions: ['v1', 'v2'].map((id, index) => ({ id, createdAt: index + 1, source: 'upload', filename: id + '.png', mimeType: 'image/png', bytes: 1024, sha256: id, references: [] })) };
 function job(id = 'edit', updatedAt = 20, state: GenerationJob['state'] = 'running'): GenerationJob {
-  return { id, state, modality: 'image', prompt: 'Add a warm glow', model: { id: 'codex:image', provider: 'codex', modelId: 'image', label: 'Codex Image', modality: 'image', source: 'builtin', mode: 'text-to-image' }, parameters: { quality: 'high' }, requestHash: '', createdAt: 10, updatedAt, assets: [], library: { assetId: asset.id, parentVersionId: 'v1', references: [{ assetId: asset.id, versionId: 'v1' }] } };
+  return { id, state, modality: 'image', prompt: 'Add a warm glow', model: { id: 'opendesign:image', provider: 'opendesign', modelId: 'image', label: 'OpenDesign Image', modality: 'image', source: 'live', mode: 'text-to-image' }, parameters: { quality: 'high' }, requestHash: '', createdAt: 10, updatedAt, assets: [], library: { assetId: asset.id, parentVersionId: 'v1', references: [{ assetId: asset.id, versionId: 'v1' }] } };
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
 let root: Root, container: HTMLDivElement, composer: ComponentProps<typeof AssetComposer>, submitted: GenerationJob;
-let jobs: GenerationJob[], chats: AssetChatSummary[], offline: boolean;
+let jobs: GenerationJob[], offline: boolean;
 let delayedJobs: ReturnType<typeof deferred<{ jobs: GenerationJob[] }>> | undefined;
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 beforeEach(() => {
-  vi.useFakeTimers(); vi.clearAllMocks(); jobs = []; chats = []; offline = false; delayedJobs = undefined; submitted = job();
+  vi.useFakeTimers(); vi.clearAllMocks(); jobs = []; offline = false; delayedJobs = undefined; submitted = job();
   vi.mocked(assetRequest).mockImplementation(async args => {
     if (args.action === 'jobs') {
       if (delayedJobs) { const pending = delayedJobs; delayedJobs = undefined; return pending.promise; }
@@ -45,10 +44,10 @@ beforeEach(() => {
     }
     if (args.action === 'list') return { assets: [structuredClone(asset)], total: 1, nextOffset: null };
     if (args.action === 'get') return { asset: structuredClone(asset) };
-    if (args.action === 'retry_save') return { job: { ...structuredClone(jobs.find(job => job.id === args.jobId)!), state: 'queued', phase: 'saving', updatedAt: 50 } };
+    if (args.action === 'retry_save') return { job: { ...structuredClone(jobs.find(item => item.id === args.jobId)!), state: 'queued', phase: 'saving', updatedAt: 50 } };
     throw new Error(`Unexpected action ${args.action}`);
   });
-  vi.mocked(gatewayRequest).mockImplementation(async () => ({ conversations: structuredClone(chats) }));
+  vi.mocked(gatewayRequest).mockResolvedValue({});
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); });
@@ -67,7 +66,7 @@ async function selectTask(title: string) {
   expect(row).toBeDefined(); await act(async () => row!.click()); await flush();
 }
 
-it('keeps a submitted task visible after closing the editor and resumes it beside the exact selected version', async () => {
+it('keeps a submitted task visible after closing the editor, resumes it beside the exact version, and never polls assets/conversations', async () => {
   await render(); await click('Selected picture');
   await act(async () => container.querySelectorAll<HTMLButtonElement>('.om-asset-version')[1].click());
   expect(preview()).toContain('/versions/v1/');
@@ -77,25 +76,10 @@ it('keeps a submitted task visible after closing the editor and resumes it besid
   expect(trigger().closest('.om-asset-workspace-header')).not.toBeNull();
   await selectTask('Add a warm glow');
   expect(preview()).toContain('/versions/v1/');
-  expect(composer.taskIds.direct).toBe('edit');
-  expect(composer.draft).toMatchObject({ model: 'codex:image', parameters: { quality: 'high' }, target: { versionId: 'v1' }, references: [{ reference: { assetId: 'picture', versionId: 'v1' } }] });
+  expect(composer.taskId).toBe('edit');
+  expect(composer.draft).toMatchObject({ model: 'opendesign:image', parameters: { quality: 'high' }, target: { versionId: 'v1' }, references: [{ reference: { assetId: 'picture', versionId: 'v1' } }] });
   expect(vi.mocked(assetRequest).mock.calls.some(([args]) => args.action === 'generate')).toBe(false);
-});
-
-it('loads persisted Agent approvals before opening a creator and resumes the exact conversation', async () => {
-  chats = [{ id: 'chat-1', title: 'Polish the poster', state: 'waiting', updatedAt: 30 }];
-  jobs = [job('child', 20)]; jobs[0].library!.conversationId = 'chat-1';
-  await render();
-  expect(trigger().textContent).toContain('1 awaiting approval');
-  await click('Selected picture'); await selectTask('Polish the poster');
-  expect(composer.mode).toBe('agent'); expect(composer.taskIds.agent).toBe('chat-1');
-  expect(preview()).toContain('/versions/v2/');
-  await click('Close creator');
-  expect(trigger().dataset.state).toBe('waiting');
-  chats = [{ ...chats[0], state: 'idle', updatedAt: 40 }]; await tick();
-  expect(trigger().textContent).toContain('1 in progress');
-  await act(async () => composer.onChatChanged({ ...chats[0], state: 'waiting', updatedAt: 30 }));
-  expect(trigger().textContent).toContain('1 in progress');
+  expect(vi.mocked(gatewayRequest)).not.toHaveBeenCalledWith('assets/conversations');
 });
 
 it('updates task state without refreshing the asset list until new output arrives', async () => {
@@ -126,15 +110,15 @@ it('does not lose a new submission when an older empty poll resolves after the c
   await click('Submit fixture task'); await click('Close creator');
   await act(async () => pending.resolve({ jobs: [] })); await flush();
   expect(trigger().textContent).toContain('1 in progress');
-  await selectTask('Add a warm glow'); expect(composer.taskIds.direct).toBe('edit');
+  await selectTask('Add a warm glow'); expect(composer.taskId).toBe('edit');
 });
 
-it('opens a recoverable project task and retries local saving through the shared asset operation', async () => {
+it('opens a recoverable project task and retries saving through the shared asset operation', async () => {
   jobs = [{ ...job('project-save', 40, 'failed'), library: undefined, projectId: 'project', saveToLibrary: true, savePending: true }];
   await render(); await selectTask('Add a warm glow');
-  expect(composer.taskIds.direct).toBe('project-save');
+  expect(composer.taskId).toBe('project-save');
   await act(async () => composer.onRetrySave!(jobs[0]));
   expect(vi.mocked(assetRequest).mock.calls.some(([args]) => args.action === 'retry_save' && args.jobId === 'project-save' && args.requestId === 'save-project-save')).toBe(true);
-  expect(composer.jobs.find(job => job.id === 'project-save')?.state).toBe('queued');
+  expect(composer.jobs.find(item => item.id === 'project-save')?.state).toBe('queued');
   expect(vi.mocked(assetRequest).mock.calls.some(([args]) => args.action === 'generate')).toBe(false);
 });

@@ -41,6 +41,7 @@ it('native registration coexists with the five Studio observation/navigation too
   const studio = buildStudioTools({ current: {} as StudioAgentToolsDeps });
   expect((await registerStudioTools(native, studio, studioController.signal)).failed).toEqual([]);
   await act(async () => root.render(<StrictMode><OpenMotionAgentTools /></StrictMode>));
+  await vi.waitFor(() => expect(native.registered.size).toBe(27));
   expect([...native.registered.keys()].sort()).toEqual([...studio, ...phase1Tools.filter(tool => !tool.name.startsWith('openmotion_game_'))].map(tool => tool.name).sort());
   expect(native.registered.size).toBe(27);
   expect([...native.registered.keys()]).not.toContain('openmotion_studio_set_text');
@@ -60,7 +61,7 @@ it('uses the existing polyfill and unregisters only its own tools on cleanup', a
   const fallback = context(); loadPolyfill.mockResolvedValue(fallback);
   await act(async () => root.render(<OpenMotionAgentTools />));
   expect(loadPolyfill).toHaveBeenCalledOnce();
-  expect(fallback.registered.size).toBe(22);
+  await vi.waitFor(() => expect(fallback.registered.size).toBe(22));
   await act(async () => root.unmount());
   expect(fallback.registered.size).toBe(0);
 });
@@ -85,4 +86,21 @@ it('keeps the page usable when no WebMCP context is available', async () => {
   loadPolyfill.mockResolvedValue(null);
   await act(async () => root.render(<><OpenMotionAgentTools /><p>Editor ready</p></>));
   expect(container.textContent).toBe('Editor ready');
+});
+
+it('skips native document.modelContext when polyfillOnly is set while still falling back to polyfill when absent', async () => {
+  const native = context();
+  Object.defineProperty(document, 'modelContext', { value: native, configurable: true });
+  await act(async () => root.render(<OpenMotionAgentTools polyfillOnly />));
+  expect(native.registerTool).not.toHaveBeenCalled();
+  expect(loadPolyfill).not.toHaveBeenCalled();
+
+  await act(async () => root.unmount());
+  Reflect.deleteProperty(document, 'modelContext');
+  root = createRoot(container);
+  const fallback = context();
+  loadPolyfill.mockResolvedValue(fallback);
+  await act(async () => root.render(<OpenMotionAgentTools polyfillOnly />));
+  expect(loadPolyfill).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(fallback.registered.size).toBe(22));
 });

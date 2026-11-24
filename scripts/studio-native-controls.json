@@ -28,7 +28,6 @@
   "motion/BrandKitInspector.tsx": {"button":1},
   "motion/GalleryFilters.tsx": {"button":2},
   "motion/GenerationParameters.tsx": {"button":1},
-  "motion/MotionSessionFrame.tsx": {"button":1},
   "motion/settingsPrimitives.tsx": {"button":1},
   "player/components/ClipContextMenu.tsx": {"button":6},
   "player/components/KeyframeDiamondContextMenu.tsx": {"button":5},

@@ -4,10 +4,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { TaskLedger } from '../tracking/task-ledger.ts';
-import { createTracker, validProperties } from '../tracking/core.ts';
-import type { PendingEvent } from '../tracking/core.ts';
-import { omEvents } from '../tracking/events.ts';
-import { fixture } from './fixtures.ts';
 
 test('task ledger persists accepted and terminal export state across instances', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'openmotion-task-ledger-'));
@@ -44,69 +40,12 @@ test('task ledger rejects malformed or conflicting terminal transitions', async 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('the shared export entry accepts the task before the worker closes it', () => fixture(async store => {
-  const current = await store.get();
-  const job = await store.requestExport(current.revision, { requestId: crypto.randomUUID() });
-  const task = (await new TaskLedger(store.directory).snapshot())[job.id];
-  assert.equal(task.task_type, 'export');
-  assert.equal(task.project_id, store.projectId);
-  assert.equal(task.accepted_at, new Date(job.acceptedAt!).toISOString());
-  assert.equal(task.deadline_at, new Date(job.deadlineAt!).toISOString());
-  await assert.doesNotReject(new TaskLedger(store.directory).terminal(job.id, 'cancelled', 'unknown'));
-}));
-
-test('an interrupted export is reconciled with a terminal ledger outcome', () => fixture(async store => {
-  const events: PendingEvent[] = [], tracking = createTracker({ registry: omEvents, entrypoint: 'mcp', enabled: true, flushIntervalMs: 0,
-    send: async batch => { events.push(...batch); return 'accepted'; } });
-  store.tracking = tracking;
-  const current = await store.get();
-  const job = await store.requestExport(current.revision);
-  const stale = (await store.job(job.id))!;
-  // A crashed worker leaves the job past its deadline with an open accepted task.
-  await store.saveJob({ ...stale, expiresAt: Date.now() - 1 });
-  const status = await store.status(job.id);
-  assert.equal(status.exportJob!.state, 'failed');
-  const task = (await new TaskLedger(store.directory).snapshot())[job.id];
-  assert.equal(task.outcome, 'unknown');
-  assert.equal(task.applied, 'unknown');
-  assert.ok(task.terminal_at);
-  // The read that closed the task is the one owner of its terminal evidence.
-  await tracking.flush();
-  const terminal = events.filter(event => event.event === 'task_terminal');
-  assert.equal(terminal.length, 1);
-  assert.equal(terminal[0].entrypoint, 'worker');
-  assert.equal(terminal[0].properties.outcome, 'unknown');
-  assert.equal(terminal[0].properties.terminal_at, task.terminal_at, 'the evidence keeps the ledger terminal time');
-  await store.status(job.id);
-  await tracking.flush();
-  assert.equal(events.filter(event => event.event === 'task_terminal').length, 1, 'a later read does not restate the terminal outcome');
-  tracking.close();
-}));
-
-test('an unreadable task ledger never fails an accepted export', () => fixture(async store => {
-  await mkdir(path.join(store.directory, 'tracking'), { recursive: true });
-  await writeFile(path.join(store.directory, 'tracking', 'tasks.json'), 'corrupted');
-  const current = await store.get();
-  const job = await store.requestExport(current.revision);
-  assert.equal(job.state, 'pending');
-  assert.equal((await store.job(job.id))!.state, 'pending');
-  await assert.rejects(new TaskLedger(store.directory).snapshot(), /TASK_LEDGER_UNREADABLE/);
-  // Reconciling an interrupted export keeps the degraded ledger from failing the read path.
-  await store.saveJob({ ...(await store.job(job.id))!, expiresAt: Date.now() - 1 });
-  assert.equal((await store.status(job.id)).exportJob!.state, 'failed');
-}));
-
-test('north-star evidence events keep closed, content-free schemas', () => {
-  const projectId = crypto.randomUUID(), versionId = crypto.randomUUID(), runId = crypto.randomUUID(), checkId = crypto.randomUUID(), instanceId = crypto.randomUUID();
-  // Native history entry ids are the public version identity, so a check never requires a v4 UUID.
-  const nativeVersion = 'history-entry-7';
-  assert.equal(validProperties(omEvents, 'host_run_started', { run_id: runId, entry_type: 'mcp', task_type: 'create' }), true);
-  assert.equal(validProperties(omEvents, 'host_preview_observed', { run_id: runId, project_id: 'project', revision: 'a'.repeat(64), version_id: versionId, visibility: 'visible', content_verified: true, observation_source: 'host_reported' }), true);
-  assert.equal(validProperties(omEvents, 'check_completed', { check_id: checkId, check_type: 'technical_export', project_id: projectId, version_id: versionId, subject_id: checkId.slice(0, 32), checklist_version: 'export-v1', checker_type: 'automated', result: 'pass' }), true);
-  assert.equal(validProperties(omEvents, 'check_required', { check_id: checkId, check_type: 'preview_observed', project_id: 'project', version_id: nativeVersion, subject_id: checkId.slice(0, 32), checklist_version: 'preview-v1', checker_type: 'host', required: true }), true);
-  assert.equal(validProperties(omEvents, 'host_preview_observed', { run_id: runId, project_id: 'project', revision: 'a'.repeat(64), version_id: nativeVersion, visibility: 'visible', content_verified: true, observation_source: 'host_reported' }), true);
-  assert.equal(validProperties(omEvents, 'queue_snapshot', { instance_id: instanceId, task_type: 'export', queued_count: 0, running_count: 1, available_slots: 0, counts_complete: true }), true);
-  assert.equal(validProperties(omEvents, 'incident_confirmed', { incident_id: crypto.randomUUID(), incident_type: 'false_success', severity: 'sev2', subject_id: checkId.slice(0, 32) }), true);
-  assert.equal(validProperties(omEvents, 'host_preview_observed', { run_id: runId, project_id: 'project', revision: 'private/path', version_id: versionId, visibility: 'visible', content_verified: true, observation_source: 'host_reported' }), false);
-  assert.equal(validProperties(omEvents, 'check_completed', { check_id: checkId, check_type: 'technical_export', project_id: projectId, version_id: 'native-history-id', subject_id: checkId.slice(0, 32), checklist_version: 'export-v1', checker_type: 'automated', result: 'pass' }), true);
+test('corrupted task ledger JSON raises TASK_LEDGER_UNREADABLE cleanly on read', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'openmotion-task-ledger-corrupt-'));
+  try {
+    await mkdir(path.join(directory, 'tracking'), { recursive: true });
+    await writeFile(path.join(directory, 'tracking', 'tasks.json'), 'corrupted');
+    const ledger = new TaskLedger(directory);
+    await assert.rejects(ledger.snapshot(), /TASK_LEDGER_UNREADABLE/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

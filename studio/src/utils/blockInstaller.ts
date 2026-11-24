@@ -1,9 +1,11 @@
+import { componentOverlaySource } from "../../../shared/registry-material-compat";
 import { buildProjectApiPath } from "./projectRouting";
 import type { RegistryItem } from "@hyperframes/core/registry";
 import type { TimelineElement } from "../player";
 import {
   insertTimelineAssetIntoSource,
   resolveTimelineAssetCompositionSize,
+  resolveTimelineAssetSrc,
 } from "./timelineAssetDrop";
 import { collectHtmlIds } from "./studioHelpers";
 import { generateId } from "./generateId";
@@ -15,6 +17,10 @@ import { deriveTimelineStoreKeyForDomId } from "../player/lib/timelineElementHel
 import { resolveDropTrack, topTrackZIndex } from "./timelineDropTrackInsert";
 import { usePlayerStore } from "../player";
 import { studioApiFetch } from "./studioApiFetch";
+import { DEFAULT_COMPOSITION_DURATION_SECONDS, MIN_TIMELINE_CLIP_DURATION_SECONDS } from "../../../packages/edit-core/time-bounds";
+import { cachedMotionComponent } from "../hooks/useBlockCatalog";
+import { placeCatalogComponent } from "./studioTextEdits";
+import { roundToCenti } from "./rounding";
 
 function getMaxZIndexFromIframe(iframe: HTMLIFrameElement | null): number {
   try {
@@ -99,10 +105,7 @@ async function makeComponentBackgroundTransparent(
   if (block.type !== "hyperframes:component") return;
   await serializeStudioFileMutation(writeProjectFile, compositionFile, async () => {
     const content = await readProjectFile(compositionFile);
-    const transparentContent = content.replace(
-      /background:\s*(?:#(?:0a0a0a|000000|000|0a0805)|rgba?\([^)]*\))\s*;/g,
-      "background: transparent;",
-    );
+    const transparentContent = componentOverlaySource(content);
     if (transparentContent !== content) await writeProjectFile(compositionFile, transparentContent);
   });
 }
@@ -126,13 +129,13 @@ function resolveBlockPlacement({
   } = placement ?? {};
   const start = Number(formatTimelineAttributeNumber(placementStart));
   const blockDuration = "duration" in block ? (block as { duration: number }).duration : undefined;
-  const duration =
-    placementDuration ??
-    blockDuration ??
-    timelineElements.reduce(
-      (max, element) => Math.max(max, (element.start ?? 0) + (element.duration ?? 0)),
-      10,
-    );
+  const contentEnd = timelineElements.reduce(
+    (end, element) => Math.max(end, (element.start ?? 0) + (element.duration ?? 0)),
+    0,
+  );
+  const remaining = roundToCenti(contentEnd - start);
+  const duration = placementDuration ?? blockDuration ??
+    (remaining > 0 ? Math.max(remaining, MIN_TIMELINE_CLIP_DURATION_SECONDS) : DEFAULT_COMPOSITION_DURATION_SECONDS);
   const nextTrack = Math.max(0, ...timelineElements.map((element) => element.track)) + 1;
   const track = placementTrack ?? (isBlock ? 0 : nextTrack);
   return { duration, isBlock, start, track };
@@ -196,15 +199,13 @@ export async function addBlockToProject(
   } = opts;
 
   try {
-    const installed = await installRegistryItem({ projectId, blockName, showToast });
+    const card = cachedMotionComponent(blockName);
+    const installed = card?.compositionFile
+      ? { block: card, compositionFile: card.compositionFile }
+      : await installRegistryItem({ projectId, blockName, showToast });
     if (!installed) return null;
     const { block, compositionFile } = installed;
-    await makeComponentBackgroundTransparent(
-      block,
-      compositionFile,
-      readProjectFile,
-      writeProjectFile,
-    );
+    if (!card) await makeComponentBackgroundTransparent(block, compositionFile, readProjectFile, writeProjectFile);
 
     const targetPath = activeCompPath || "index.html";
     const relevantElements = timelineElements
@@ -237,7 +238,7 @@ export async function addBlockToProject(
       }
       const subComposition = buildSubCompositionHtml({
         id: hostId,
-        compositionFile,
+        compositionFile: resolveTimelineAssetSrc(targetPath, compositionFile),
         start,
         duration,
         track,
@@ -252,14 +253,16 @@ export async function addBlockToProject(
         start + duration,
       );
     };
-    await saveProjectFilesWithHistory({
-      projectId,
-      label: `Add ${isBlock ? "block" : "component"}: ${block.title}`,
-      files: { [targetPath]: insertHost },
-      readFile: readProjectFile,
-      writeFile: writeProjectFile,
-      recordEdit,
-    });
+    const label = `Add ${isBlock ? "block" : "component"}: ${block.title}`;
+    if (card) {
+      await serializeStudioFileMutation(writeProjectFile, targetPath, () =>
+        placeCatalogComponent(projectId, targetPath, blockName, label, insertHost));
+    } else {
+      await saveProjectFilesWithHistory({
+        projectId, label, files: { [targetPath]: insertHost }, readFile: readProjectFile,
+        writeFile: writeProjectFile, recordEdit,
+      });
+    }
 
     await refreshFileTree();
     reloadPreview();

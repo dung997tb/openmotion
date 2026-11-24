@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState, type RefObject } from "react";
-import { TIMELINE_BLOCK_MIME } from "../../utils/timelineAssetDrop";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { parseTimelineAssetPayload, TIMELINE_ASSET_MIME, TIMELINE_BLOCK_MIME } from "../../utils/timelineAssetDrop";
+import { parseTimelineCompositionPayload, TIMELINE_COMPOSITION_MIME } from "../../utils/timelineCompositionDrop";
 import { usePreviewReadOnly } from "../editor/previewReadOnlyContext";
 
 interface UsePreviewBlockDropOptions {
@@ -11,6 +12,8 @@ interface UsePreviewBlockDropOptions {
    */
   compositionSize?: { width: number; height: number } | null;
   stageRef: RefObject<HTMLDivElement | null>;
+  onAssetDrop?: (path: string, duration: number | undefined, position: { left: number; top: number }) => void;
+  onCompositionDrop?: (sourcePath: string, position: { left: number; top: number }) => void;
   onBlockDrop?: (blockName: string, position: { left: number; top: number }) => void;
 }
 
@@ -69,8 +72,31 @@ export function usePreviewBlockDrop({
   compositionSize,
   stageRef,
   onBlockDrop: onBlockDropProp,
+  onAssetDrop: onAssetDropProp,
+  onCompositionDrop: onCompositionDropProp,
 }: UsePreviewBlockDropOptions) {
-  const onBlockDrop = usePreviewReadOnly() ? undefined : onBlockDropProp;
+  const readOnly = usePreviewReadOnly();
+  const onBlockDrop = readOnly ? undefined : onBlockDropProp;
+  const onAssetDrop = readOnly ? undefined : onAssetDropProp;
+  const onCompositionDrop = readOnly ? undefined : onCompositionDropProp;
+  const accepts = useCallback((types: readonly string[]) =>
+    Boolean((onAssetDrop && types.includes(TIMELINE_ASSET_MIME)) ||
+      (onCompositionDrop && types.includes(TIMELINE_COMPOSITION_MIME)) ||
+      (onBlockDrop && types.includes(TIMELINE_BLOCK_MIME))), [onAssetDrop, onBlockDrop, onCompositionDrop]);
+  const [captureDrag, setCaptureDrag] = useState(false);
+  useEffect(() => {
+    // Native drag events inside an iframe do not bubble to the surrounding Studio document.
+    const start = (event: DragEvent) => setCaptureDrag(accepts(event.dataTransfer?.types ?? []));
+    const end = () => setCaptureDrag(false);
+    window.addEventListener("dragstart", start);
+    window.addEventListener("dragend", end);
+    window.addEventListener("drop", end);
+    return () => {
+      window.removeEventListener("dragstart", start);
+      window.removeEventListener("dragend", end);
+      window.removeEventListener("drop", end);
+    };
+  }, [accepts]);
   const [isDragOver, setIsDragOver] = useState(false);
   // dragenter/dragleave fire for every internal element boundary; a depth
   // counter keeps the drop indicator steady instead of flickering.
@@ -78,23 +104,21 @@ export function usePreviewBlockDrop({
 
   const handleDragEnter = useCallback(
     (e: React.DragEvent) => {
-      if (!onBlockDrop) return;
-      if (!e.dataTransfer.types.includes(TIMELINE_BLOCK_MIME)) return;
+      if (!accepts(e.dataTransfer.types)) return;
       dragDepthRef.current += 1;
       setIsDragOver(true);
     },
-    [onBlockDrop],
+    [accepts],
   );
 
   const handleDragOver = useCallback(
     (e: React.DragEvent) => {
-      if (!onBlockDrop) return;
-      if (!e.dataTransfer.types.includes(TIMELINE_BLOCK_MIME)) return;
+      if (!accepts(e.dataTransfer.types)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
       // dragenter/dragleave own the isDragOver flag (depth-counted).
     },
-    [onBlockDrop],
+    [accepts],
   );
 
   const handleDragLeave = useCallback(() => {
@@ -107,16 +131,10 @@ export function usePreviewBlockDrop({
     (e: React.DragEvent) => {
       dragDepthRef.current = 0;
       setIsDragOver(false);
-      if (!onBlockDrop) return;
-
-      const payload = e.dataTransfer.getData(TIMELINE_BLOCK_MIME);
-      if (!payload) return;
+      if (!accepts(e.dataTransfer.types)) return;
       e.preventDefault();
-
-      const block = parseBlockPayload(payload);
       const stage = stageRef.current;
-      if (!block || !stage) return;
-
+      if (!stage) return;
       const pos = resolveCompositionPosition(
         e.clientX,
         e.clientY,
@@ -126,10 +144,15 @@ export function usePreviewBlockDrop({
       );
       if (!pos) return;
 
-      onBlockDrop(block.name, centerBlockAtPosition(pos, block));
+      const asset = parseTimelineAssetPayload(e.dataTransfer.getData(TIMELINE_ASSET_MIME));
+      if (asset && onAssetDrop) return onAssetDrop(asset.path, asset.duration, pos);
+      const composition = parseTimelineCompositionPayload(e.dataTransfer.getData(TIMELINE_COMPOSITION_MIME));
+      if (composition && onCompositionDrop) return onCompositionDrop(composition.sourcePath, pos);
+      const block = parseBlockPayload(e.dataTransfer.getData(TIMELINE_BLOCK_MIME));
+      if (block) onBlockDrop?.(block.name, centerBlockAtPosition(pos, block));
     },
-    [onBlockDrop, stageRef, compositionSize, portrait],
+    [accepts, onAssetDrop, onBlockDrop, onCompositionDrop, stageRef, compositionSize, portrait],
   );
 
-  return { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop };
+  return { captureDrag, isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop };
 }

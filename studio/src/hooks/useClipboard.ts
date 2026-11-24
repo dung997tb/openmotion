@@ -1,6 +1,8 @@
+import { applyPasteCommand, type PasteCommand } from "../../../packages/edit-core/content-commands";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+export { pasteElementHtml, pasteTimelineClips, resolveFreeTrack, type PlacedClip } from "../../../packages/edit-core/clipboard";
 import { useCallback, useRef } from "react";
 import { trackStudioClick } from "../motion/editorTracking";
-import { EXCLUDED_TAGS, ensureHfIds, mintHfId, walkCompositionDescendants } from "@hyperframes/parsers/hf-ids";
 import type { TimelineElement } from "../player";
 import { usePlayerStore } from "../player";
 import { toAuthoredStart } from "../player/store/timelineElement";
@@ -8,24 +10,15 @@ import type { DomEditSelection } from "../components/editor/domEditing";
 import {
   type ClipboardPayload,
   type TimelineClipboardClip,
-  deduplicateIds,
-  insertAsSibling,
 } from "../utils/clipboardPayload";
-import { timedTextPaste, openPastedTextTrack } from "../utils/timelineTextPaste";
-import { carryLook, renamedIds } from "../utils/clipboardLook";
-import { collectHtmlIds } from "../utils/studioHelpers";
-import { insertTimelineAssetIntoSource } from "../utils/timelineAssetDrop";
-import { extendRootDurationInSource } from "../utils/rootDuration";
-import { saveProjectFilesWithHistory } from "../utils/studioFileHistory";
-import { formatTimelineAttributeNumber } from "../player/components/timelineEditing";
+import { saveProjectFilesWithHistory, type ProjectFileWriter } from "../utils/studioFileHistory";
 import { findElementForSelection } from "../components/editor/domEditingElement";
 import { findTimelineElementInIframe, readFileContent } from "./timelineEditingHelpers";
 import { buildTimelineElementKey } from "../player/lib/timelineElementHelpers";
-import { timeRangesOverlap } from "../player/components/timelineCollision";
 import {
   authoredMarkup,
-  findAuthoredElement,
-  findAuthoredElementById,
+  findAuthoredIdentity,
+  type AuthoredIdentity,
   liveMarkupWithoutPreviewMarks,
   parseSavedSource,
 } from "../utils/authoredSource";
@@ -60,9 +53,10 @@ interface RecordEditInput {
 export interface UseClipboardOptions {
   projectId: string | null;
   activeCompPath: string | null;
+  fileTree?: readonly string[];
   domEditSelectionRef: React.MutableRefObject<DomEditSelection | null>;
   showToast: (message: string, tone?: "error" | "info") => void;
-  writeProjectFile: (path: string, content: string) => Promise<void>;
+  writeProjectFile: ProjectFileWriter;
   recordEdit: (input: RecordEditInput) => Promise<void>;
   reloadPreview: () => void;
   handleTimelineElementsDelete: (elements: TimelineElement[]) => Promise<void>;
@@ -110,162 +104,20 @@ function getSelectedDomElement(
   return findElementForSelection(doc, selection, activeCompositionPath);
 }
 
-function savedMarkupElseLive(saved: Document, live: Element, sourceFile: string): string {
-  const authored = findAuthoredElement(saved, live) ?? findAuthoredElementById(saved, live);
-  return authored
-    ? authoredMarkup(authored, live, sourceFile)
-    : liveMarkupWithoutPreviewMarks(live);
-}
-
-async function readSavedMarkup(
-  readSaved: (path: string) => Promise<string>,
-  paths: string[],
-  lives: Element[],
-): Promise<string[]> {
-  const sources = new Map<string, Promise<Document>>();
-  return Promise.all(
-    paths.map(async (path, index) => {
-      if (!sources.has(path)) sources.set(path, readSaved(path).then(parseSavedSource));
-      const saved = await (sources.get(path) as Promise<Document>);
-      return savedMarkupElseLive(saved, lives[index] as Element, path);
-    }),
-  );
-}
-
-export interface PlacedClip {
-  track: number;
-  start: number;
-  duration: number;
-}
-
-function tracksOverlap(a: PlacedClip, b: PlacedClip): boolean {
-  return (
-    a.track === b.track &&
-    timeRangesOverlap(a.start, a.start + a.duration, b.start, b.start + b.duration)
-  );
-}
-
-/** CapCut: keeps the preferred track if free at the new time, else the next
- *  unused track index. Exported so placement is tested with values directly. */
-export function resolveFreeTrack(preferred: PlacedClip, taken: readonly PlacedClip[]): number {
-  if (!taken.some((t) => tracksOverlap(preferred, t))) return preferred.track;
-  const maxTrack = taken.reduce((max, t) => Math.max(max, t.track), preferred.track);
-  return maxTrack + 1;
-}
-
-/** Gives a clone's root and every descendant a fresh data-hf-id, clear of `taken`. Minted here,
- *  inside the edit, or the server stamps them on the next preview load, behind undo's back.
- *  DOMParser, not a regex, so a `>` inside an attribute value can't defeat it. */
-function remintHfIds(html: string, parser: DOMParser, taken: Set<string>): string {
-  const root = parser.parseFromString(html, "text/html").body.firstElementChild;
-  if (!root) {
-    // A tag the HTML parser hoists out of <body> (title/meta/style/base/link)
-    // never reaches the walk above — fall back to a direct strip so
-    // data-hf-id still can't survive, even though no real clip root is one
-    // of these tags today.
-    return html.replace(/\sdata-hf-id=("[^"]*"|'[^']*')/g, "");
-  }
-  const elements = [root];
-  walkCompositionDescendants(root, (el) => elements.push(el));
-  for (const el of elements) {
-    if (EXCLUDED_TAGS.has(el.tagName.toLowerCase())) el.removeAttribute("data-hf-id");
-    else el.setAttribute("data-hf-id", mintHfId(el, taken));
-  }
-  return root.outerHTML;
-}
-
-const HF_ID_ATTR_RE = /\bdata-hf-id\s*=\s*["']?([^"'\s>]+)/gi;
-const hfIdsInFile = (content: string) =>
-  new Set(Array.from(content.matchAll(HF_ID_ATTR_RE), (match) => match[1]));
-
-export function pasteElementHtml(
-  content: string,
-  payload: { html: string; originSelector?: string; originSelectorIndex?: number },
-  fromThisFile = false,
-  onInserted?: (hfId: string) => void,
-  playhead = 0,
-  liveElements: readonly TimelineElement[] = [],
-): string {
-  const html = timedTextPaste(payload.html, content, playhead, payload.originSelector, payload.originSelectorIndex);
-  const reminted = remintHfIds(html, new DOMParser(), hfIdsInFile(ensureHfIds(content)));
-  const deduped = deduplicateIds(reminted, collectHtmlIds(content));
-  const opened = openPastedTextTrack(content, deduped, liveElements);
-  const pastedRoot = new DOMParser().parseFromString(deduped, "text/html").body.firstElementChild;
-  const hfId = pastedRoot?.getAttribute("data-hf-id");
-  if (hfId) onInserted?.(hfId);
-  const result = insertAsSibling(
-    opened.source,
-    opened.html,
-    payload.originSelector,
-    payload.originSelectorIndex,
-  );
-  return fromThisFile ? carryLook(result, renamedIds(reminted, deduped), 0) : result;
-}
-
-/** Shared insertion path for paste and duplicate, anchored at the playhead or the selection's end. Returns the
- *  final ids so the caller can select what it placed, and the furthest end any clip lands at so it can grow the
- *  root duration to cover it. `fromThisFile`: the clips came from `content`, so a renamed copy takes its
- *  original's look. */
-export function pasteTimelineClips(
-  content: string,
-  clips: readonly TimelineClipboardClip[],
-  anchorTime: number,
-  liveElements: readonly TimelineElement[],
-  fromThisFile = false,
-): { content: string; ids: string[]; requiredEnd: number } {
-  const groupMinStart = Math.min(...clips.map((c) => c.start));
-  let existingIds = collectHtmlIds(content);
-  const taken: PlacedClip[] = liveElements.map((el) => ({
-    track: el.authoredTrack ?? el.track,
-    start: el.start,
-    duration: el.duration,
-  }));
-  const ids: string[] = [];
-  let result = content;
-  let requiredEnd = 0;
-  const domParser = new DOMParser();
-  const takenHfIds = hfIdsInFile(ensureHfIds(content));
-  for (const clip of clips) {
-    const reminted = remintHfIds(clip.html, domParser, takenHfIds);
-    const deduped = deduplicateIds(reminted, existingIds);
-    existingIds = existingIds.concat(collectHtmlIds(deduped));
-    const newStart = anchorTime + (clip.start - groupMinStart);
-    const newTrack = resolveFreeTrack(
-      { track: clip.track, start: newStart, duration: clip.duration },
-      taken,
-    );
-    taken.push({ track: newTrack, start: newStart, duration: clip.duration });
-    requiredEnd = Math.max(requiredEnd, newStart + clip.duration);
-
-    // DOM-only root text may have no authored window yet. Materialize all
-    // three attributes instead of replacing only attributes that already exist.
-    const copy = domParser.parseFromString(deduped, "text/html").body.firstElementChild;
-    if (!copy) continue;
-    copy.classList.add("clip");
-    copy.setAttribute("data-start", formatTimelineAttributeNumber(newStart));
-    copy.setAttribute("data-duration", formatTimelineAttributeNumber(clip.duration));
-    copy.setAttribute("data-track-index", String(newTrack));
-    const opened = clips.length === 1
-      ? openPastedTextTrack(result, copy.outerHTML, liveElements) : {source: result, html: copy.outerHTML};
-    result = opened.source;
-    const withPatched = opened.html;
-    result = insertTimelineAssetIntoSource(result, withPatched);
-    if (fromThisFile) {
-      const rawStart = domParser.parseFromString(reminted, "text/html").body.firstElementChild?.getAttribute("data-start");
-      const authored = rawStart == null ? NaN : Number(rawStart);
-      const authoredStart = Number.isFinite(authored) ? authored : clip.start;
-      result = carryLook(result, renamedIds(reminted, deduped), newStart - authoredStart);
-    }
-
-    const id = copy.id;
-    if (id) ids.push(id);
-  }
-  return { content: result, ids, requiredEnd };
+function clipboardMarkup(saved: Document, sourceFile: string, target: AuthoredIdentity, live: Element | null, files?: readonly string[]): string {
+  const authored = findAuthoredIdentity(saved, {
+    hfId: live?.getAttribute("data-hf-id") || target.hfId,
+    id: live?.id || target.id,
+  });
+  if (authored) return authoredMarkup(authored, live, sourceFile, files);
+  if (live) return liveMarkupWithoutPreviewMarks(live);
+  throw new Error("Cannot copy an element that is missing from its source file.");
 }
 
 export function useClipboard({
   projectId,
   activeCompPath,
+  fileTree,
   domEditSelectionRef,
   showToast,
   writeProjectFile,
@@ -295,52 +147,31 @@ export function useClipboard({
     [waitForPendingDomEditSaves, writeProjectFile],
   );
 
-  // Resolved through findTimelineElementInIframe, the same composition-aware
-  // lookup every other timeline editor uses — unlike findElementForSelection,
-  // it can address a composition-instance clip's root.
-  const findSelectedClips = useCallback((): {
-    elements: TimelineElement[];
-    lives: Element[];
-  } | null => {
-    const selected = getSelectedElements();
-    if (selected.length === 0) return null;
-    const lives: Element[] = [];
-    for (const element of selected) {
-      const live = findTimelineElementInIframe(previewIframeRef.current, element, activeCompPath);
-      if (!live) {
-        showToast(`Unable to copy "${element.label ?? element.id}".`, "info");
-        return null;
-      }
-      lives.push(live);
-    }
-    return { elements: selected, lives };
-  }, [activeCompPath, previewIframeRef, showToast]);
-
   const readClips = useCallback(
-    async (targets: {
-      elements: TimelineElement[];
-      lives: Element[];
-    }): Promise<TimelineClipboardClip[]> => {
-      const paths = targets.elements.map((el) => el.sourceFile || activeCompPath || "index.html");
-      const markup = await readSavedMarkup(readSaved, paths, targets.lives);
-      return targets.elements.map((element, index) => ({
-        html: markup[index] as string,
-        start: element.start,
-        duration: element.duration,
-        // authoredTrack, not track: `track` can be a display-lane number
-        // remapped by normalizeToZones, and writing THAT into data-track-index
-        // re-targets the wrong track in the sparse authored file.
-        track: element.authoredTrack ?? element.track,
+    async (elements: TimelineElement[]): Promise<TimelineClipboardClip[]> => {
+      const documents = new Map<string, Promise<Document>>();
+      return Promise.all(elements.map(async element => {
+        const path = element.sourceFile || activeCompPath || "index.html";
+        let source = documents.get(path);
+        if (!source) {
+          source = readSaved(path).then(parseSavedSource);
+          documents.set(path, source);
+        }
+        const live = findTimelineElementInIframe(previewIframeRef.current, element, activeCompPath);
+        return {
+          html: clipboardMarkup(await source, path, { id: element.domId, hfId: element.hfId }, live, fileTree),
+          start: element.start,
+          duration: element.duration,
+          track: element.authoredTrack ?? element.track,
+        };
       }));
     },
-    [activeCompPath, readSaved],
+    [activeCompPath, fileTree, previewIframeRef, readSaved],
   );
 
-  const copyTimelineSelection = useCallback((): Promise<ClipboardPayload> | null => {
-    const targets = findSelectedClips();
-    if (!targets) return null;
-    const sourceFile = targets.elements[0]?.sourceFile || activeCompPath || "index.html";
-    return readClips(targets).then((clips) => {
+  const copyTimelineSelection = useCallback((elements: TimelineElement[]): Promise<ClipboardPayload> => {
+    const sourceFile = elements[0]?.sourceFile || activeCompPath || "index.html";
+    return readClips(elements).then((clips) => {
       showToast(clips.length > 1 ? `Copied ${clips.length} clips` : "Copied clip", "info");
       return {
         kind: "timeline-clip",
@@ -350,21 +181,22 @@ export function useClipboard({
         copiedInComposition: activeCompPath || "index.html",
       };
     });
-  }, [activeCompPath, findSelectedClips, readClips, showToast]);
+  }, [activeCompPath, readClips, showToast]);
 
   const copyDomSelection = useCallback(
     (domSelection: DomEditSelection): Promise<ClipboardPayload> | null => {
       const live = getSelectedDomElement(previewIframeRef, domSelection, activeCompPath);
-      if (!live) {
+      if (!live && !domSelection.id && !domSelection.hfId) {
         showToast("Unable to copy this element.", "info");
         return null;
       }
       const sourceFile = domSelection.sourceFile || activeCompPath || "index.html";
       return readSaved(sourceFile).then((content) => {
+        const html = clipboardMarkup(parseSavedSource(content), sourceFile, domSelection, live, fileTree);
         showToast("Copied element", "info");
         return {
           kind: "dom-element",
-          html: savedMarkupElseLive(parseSavedSource(content), live, sourceFile),
+          html,
           sourceFile,
           projectId: projectIdRef.current ?? undefined,
           originSelector: domSelection.selector,
@@ -372,7 +204,7 @@ export function useClipboard({
         };
       });
     },
-    [activeCompPath, previewIframeRef, readSaved, showToast],
+    [activeCompPath, fileTree, previewIframeRef, readSaved, showToast],
   );
 
   // The key handler needs its answer now, so the targets are found here and only the file read
@@ -384,11 +216,13 @@ export function useClipboard({
     const selectedDom = domSelection && getSelectedDomElement(previewIframeRef, domSelection, activeCompPath);
     // Selecting a nested or untimed canvas element can leave its owning clip
     // selected in the timeline. Copy the actual canvas target in that case.
-    const isClipTarget = selectedClips.some((element) =>
-      findTimelineElementInIframe(previewIframeRef.current, element, activeCompPath) === selectedDom,
-    );
+    const isClipTarget = domSelection && selectedClips.some((element) => {
+      if (selectedDom) return findTimelineElementInIframe(previewIframeRef.current, element, activeCompPath) === selectedDom;
+      return (element.sourceFile || activeCompPath || "index.html") === domSelection.sourceFile &&
+        ((element.hfId && element.hfId === domSelection.hfId) || (element.domId && element.domId === domSelection.id));
+    });
     if (domSelection && !isClipTarget) pending = copyDomSelection(domSelection);
-    else if (selectedClips.length > 0) pending = copyTimelineSelection();
+    else if (selectedClips.length > 0) pending = copyTimelineSelection(selectedClips);
     else if (domSelection) pending = copyDomSelection(domSelection);
     else {
       showToast("Nothing selected to copy.", "info");
@@ -432,22 +266,15 @@ export function useClipboard({
         let pastedIds: string[] = [];
         let pastedHfId: string | null = null;
         const fromThisFile = payload.sourceFile === targetPath && payload.projectId === pid;
+        const playhead = usePlayerStore.getState().currentTime;
+        const command: PasteCommand = payload.kind === "timeline-clip"
+          ? { kind: "pasteClips", compositionPath: targetPath, start: pasteStart(payload, targetPath, playhead, options), clips: payload.clips, copyLook: fromThisFile }
+          : { kind: "pasteElement", compositionPath: targetPath, start: playhead, html: payload.html, originSelector: payload.originSelector, originSelectorIndex: payload.originSelectorIndex, copyLook: fromThisFile };
         const paste = (originalContent: string) => {
-          if (payload.kind !== "timeline-clip")
-            return pasteElementHtml(originalContent, payload, fromThisFile, (hfId) => { pastedHfId = hfId; }, usePlayerStore.getState().currentTime, usePlayerStore.getState().elements);
-          const { currentTime, elements } = usePlayerStore.getState();
-          const pasted = pasteTimelineClips(
-            originalContent,
-            payload.clips,
-            pasteStart(payload, targetPath, currentTime, options),
-            elements,
-            fromThisFile,
-          );
-          pastedIds = pasted.ids;
-          // A clip pasted past the current composition end would exist in the
-          // file but never appear on the timeline or in playback/export (the
-          // root's data-duration is what actually bounds the render).
-          return extendRootDurationInSource(pasted.content, pasted.requiredEnd);
+          const result = applyPasteCommand(originalContent, command);
+          pastedIds = result.ids;
+          pastedHfId = result.hfId ?? null;
+          return result.content;
         };
 
         const { label, toast } = pasteWords(payload);
@@ -458,6 +285,7 @@ export function useClipboard({
           files: { [targetPath]: paste },
           readFile: (path) => readFileContent(pid, path),
           writeFile: writeProjectFile,
+          commandForWrite: () => getCachedCloudDisklessMode() ? command : undefined,
           recordEdit,
         });
 
@@ -485,12 +313,11 @@ export function useClipboard({
   // selection's end or start here, the playhead or the copy's own time there).
   const handleDuplicate = useCallback(
     async (options?: InPlace): Promise<boolean> => {
-      const targets = findSelectedClips();
-      if (!targets) return false;
+      const elements = getSelectedElements();
+      if (!elements.length) return false;
       const pid = projectIdRef.current;
       if (!pid) return false;
 
-      const { elements } = targets;
       const pathOf = (el: TimelineElement) => el.sourceFile || activeCompPath || "index.html";
       const targetPath = pathOf(elements[0]!);
       // The copy lands in targetPath's own clock, so anchor and lane check are local to it.
@@ -502,16 +329,13 @@ export function useClipboard({
       );
 
       try {
-        const clips = await readClips(targets);
+        const clips = await readClips(elements);
         let ids: string[] = [];
+        const command: PasteCommand = { kind: "pasteClips", compositionPath: targetPath, start: anchorTime, clips, copyLook: true };
         const duplicate = (originalContent: string) => {
-          const liveElements = usePlayerStore
-            .getState()
-            .elements.filter((el) => pathOf(el) === targetPath)
-            .map((el) => ({ ...el, start: toAuthoredStart(el, el.start) }));
-          const pasted = pasteTimelineClips(originalContent, clips, anchorTime, liveElements, true);
-          ids = pasted.ids;
-          return extendRootDurationInSource(pasted.content, pasted.requiredEnd);
+          const result = applyPasteCommand(originalContent, command);
+          ids = result.ids;
+          return result.content;
         };
 
         await saveProjectFilesWithHistory({
@@ -520,6 +344,7 @@ export function useClipboard({
           files: { [targetPath]: duplicate },
           readFile: (path) => readFileContent(pid, path),
           writeFile: writeProjectFile,
+          commandForWrite: () => getCachedCloudDisklessMode() ? command : undefined,
           recordEdit,
         });
 
@@ -541,7 +366,6 @@ export function useClipboard({
     },
     [
       activeCompPath,
-      findSelectedClips,
       readClips,
       recordEdit,
       reloadPreview,

@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: openmotion
+
+# NOTE: `secret.example.yaml` is intentionally excluded from `resources` so placeholder
+# credentials are never applied to a live cluster. Provision `openmotion-secrets`
+# (and optional `openmotion-keda-redis-auth`) via External Secrets, Sealed Secrets, or SOPS.
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - migrate-job.yaml
+  - catalog-sync-job.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - api-hpa.yaml
+  - ingress.yaml
+  - worker-media-deployment.yaml
+  - worker-render-deployment.yaml
+  - worker-render-keda.yaml
+  - networkpolicy.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: openmotion
+    includeSelectors: false
+
+images:
+  - name: ghcr.io/nexu-io/openmotion-api
+    newTag: latest
+  - name: ghcr.io/nexu-io/openmotion-worker-media
+    newTag: latest
+  - name: ghcr.io/nexu-io/openmotion-worker-render
+    newTag: latest
+  - name: ghcr.io/nexu-io/openmotion-catalog-sync
+    newTag: latest

@@ -2,6 +2,8 @@
 
 import React, { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { applyContentCommand } from "../../../packages/edit-core/content-commands";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { useTimelineAssetDropOps } from "./useTimelineAssetDropOps";
 import { mountReactHarness } from "./domSelectionTestHarness";
 import { usePlayerStore } from "../player/store/playerStore";
@@ -13,6 +15,7 @@ import { translate } from "../i18n/messages";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => {
+  setCachedCloudDisklessMode(null);
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -130,6 +133,7 @@ describe("useTimelineAssetDropOps handleTimelineAssetDrop", () => {
   });
 
   it("measures the insert row against every manifest timeline row", async () => {
+    setCachedCloudDisklessMode(true);
     const clip = (id: string, track: number): TimelineElement => ({
       id,
       key: id,
@@ -161,6 +165,9 @@ describe("useTimelineAssetDropOps handleTimelineAssetDrop", () => {
     });
 
     const [, written] = writeProjectFile.mock.calls[0] as [string, string];
+    const command = writeProjectFile.mock.calls[0]![3];
+    expect(command).toMatchObject({kind:"placeAsset",assetPath:"clip.mp4"});
+    expect(applyContentCommand(source, command)).toBe(written);
     expect(written).toContain('id="b" data-start="0" data-track-index="3"');
     expect(written).toContain('id="hidden" data-start="0" data-track-index="2"');
     expect(written).toMatch(/<video id="clip"[^>]*data-track-index="1"/);

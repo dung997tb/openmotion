@@ -6,8 +6,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StudioFileConflictError } from "../utils/studioSaveDiagnostics";
-import { markStudioWriteToken, resetStudioWriteTokens } from "../utils/studioFileVersion";
+import { acceptFileEditReceipt } from "../utils/rebasedFileEdit";
+import { markStudioWriteToken, resetStudioWriteTokens, studioFileContentVersion } from "../utils/studioFileVersion";
 import { markSelfWrite, resetSelfWriteRegistry } from "./sdkSelfWriteRegistry";
+import { subscribeProjectActivity } from "../motion/workspaceRefresh";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import {
   useExternalFileChangeCoordinator,
   type ExternalFileChangeCoordinatorHandle,
@@ -16,7 +19,18 @@ import {
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type HotHandler = (payload?: unknown) => void;
-type CoordinatorOptions = Parameters<typeof useExternalFileChangeCoordinator>[0];
+type CoordinatorOptions = Omit<Parameters<typeof useExternalFileChangeCoordinator>[0], "refreshFileViews"> & {
+  refreshFileViews: (payload: unknown) => Promise<boolean> | "unaffected" | void;
+};
+function acceptingFileViews(options: CoordinatorOptions) {
+  return {
+    ...options,
+    refreshFileViews(payload: unknown, acceptChange: () => void) {
+      acceptChange();
+      return options.refreshFileViews(payload);
+    },
+  };
+}
 const roots: Array<ReturnType<typeof createRoot>> = [];
 let handler: HotHandler | null;
 
@@ -28,7 +42,7 @@ async function mountCoordinator(overrides: Partial<CoordinatorOptions> = {}) {
     pendingTimelineEditPathRef: { current: new Set() },
     drainPendingChanges: vi.fn(async () => ({ status: "clean" as const })),
     reloadPreview: vi.fn(),
-    reloadSdkSession: vi.fn(),
+    refreshFileViews: vi.fn(),
     persistConflictSnapshot: vi.fn(async () => undefined),
     discardPendingChanges: vi.fn(),
     overwriteConflict: vi.fn(async () => undefined),
@@ -39,7 +53,7 @@ async function mountCoordinator(overrides: Partial<CoordinatorOptions> = {}) {
   const root = createRoot(document.createElement("div"));
   roots.push(root);
   function Probe() {
-    captured.handle = useExternalFileChangeCoordinator(options);
+    captured.handle = useExternalFileChangeCoordinator(acceptingFileViews(options));
     return null;
   }
   await act(async () => root.render(<Probe />));
@@ -67,7 +81,67 @@ describe("external file change coordinator", () => {
 
   afterEach(async () => {
     while (roots.length > 0) await act(async () => roots.pop()?.unmount());
+    setCachedCloudDisklessMode(null);
     vi.unstubAllGlobals();
+  });
+
+  it("refreshes a rebased no-op even if its own SSE echo was already suppressed", async () => {
+    const refreshFileViews = vi.fn();
+    const refreshFileTree = vi.fn();
+    const { options } = await mountCoordinator({ refreshFileViews, refreshFileTree });
+    const path = "intro.html";
+    const version = await studioFileContentVersion("Agent and human");
+    markStudioWriteToken("origin");
+    await act(async () => { handler?.({ projectId: "project-a", path, version, writeToken: "origin" }); });
+    expect(options.reloadPreview).not.toHaveBeenCalled();
+    await act(async () => {
+      await acceptFileEditReceipt("project-a", path, "V1", "old projection", version, { rebased: true, changedPaths: [] });
+    });
+    expect(options.reloadPreview).toHaveBeenCalledExactlyOnceWith(path);
+    expect(refreshFileViews).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: path }));
+    expect(refreshFileTree).not.toHaveBeenCalled();
+    await act(async () => {
+      await acceptFileEditReceipt("project-a", path, "V1", "Agent and human", version, { rebased: true });
+    });
+    expect(options.reloadPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers consecutive multi-file removals and suppresses a duplicate of the same commit", async () => {
+    const { options } = await mountCoordinator();
+    const first = { paths: ["a.html", "b.html"], version: '"deleted"', revision: "r1" };
+    const next = { paths: ["c.html", "d.html"], version: '"deleted"', revision: "r2" };
+    for (const payload of [first, next, next]) await act(async () => handler?.(payload));
+    expect(options.refreshFileViews).toHaveBeenCalledTimes(2);
+    expect(options.refreshFileViews).toHaveBeenLastCalledWith(next);
+  });
+
+  it("refreshes the preview only when the current file change needs a fallback", async () => {
+    let refuseFirst!: (value: boolean) => void;
+    const refreshFileViews = vi.fn()
+      .mockReturnValueOnce(new Promise<boolean>(resolve => { refuseFirst = resolve; }))
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const { options } = await mountCoordinator({ refreshFileViews });
+    const send = (version: string) => act(async () => handler?.({ path: "index.html", version }));
+    await send("one");
+    await send("two");
+    await act(async () => refuseFirst(false));
+    expect(options.reloadPreview).not.toHaveBeenCalled();
+    await send("three");
+    expect(options.reloadPreview).toHaveBeenCalledExactlyOnceWith("index.html");
+  });
+
+  it("keeps an owed preview fallback when a later file only changes another composition", async () => {
+    let decline!: (applied: boolean) => void;
+    const refreshFileViews = vi.fn()
+      .mockReturnValueOnce(new Promise<boolean>(resolve => { decline = resolve; }))
+      .mockReturnValue("unaffected");
+    const { options } = await mountCoordinator({ refreshFileViews });
+    await act(async () => handler?.({ path: "index.html" }));
+    await act(async () => handler?.({ path: "unrelated.html" }));
+    expect(options.reloadPreview).not.toHaveBeenCalled();
+    await act(async () => decline(false));
+    expect(options.reloadPreview).toHaveBeenCalledExactlyOnceWith("index.html");
   });
 
   describe("SSE reconnect recovery", () => {
@@ -95,6 +169,76 @@ describe("external file change coordinator", () => {
       act(async () => {
         source.dispatchEvent(new MessageEvent("file-change", { data: JSON.stringify(payload) }));
       });
+
+    it("switches a Vite development session from hot events to one cloud project stream", async () => {
+      const hot = { on: vi.fn(), off: vi.fn() };
+      vi.stubGlobal("__HF_STUDIO_HOT_TEST_ADAPTER__", hot);
+      const connect = vi.fn(() => ({ addEventListener: source.addEventListener.bind(source), close }));
+      vi.stubGlobal("EventSource", class { constructor() { return connect(); } });
+      const onHistoryChanged = vi.fn();
+      const { rerender } = await mountCoordinator({ onHistoryChanged });
+      expect(hot.on).toHaveBeenCalledOnce();
+      expect(connect).not.toHaveBeenCalled();
+      await act(async () => setCachedCloudDisklessMode(true));
+      expect(hot.off).toHaveBeenCalledOnce();
+      expect(connect).toHaveBeenCalledOnce();
+      await rerender({ activeCompPath: "intro.html" });
+      await act(async () => {
+        source.dispatchEvent(new MessageEvent("history-changed", { data: JSON.stringify({ projectId: "project-a" }) }));
+      });
+      expect(connect).toHaveBeenCalledOnce();
+      expect(onHistoryChanged).toHaveBeenCalledOnce();
+    });
+
+    it("forwards this project's history events, including our own writes, to the history panel", async () => {
+      const onHistoryChanged = vi.fn();
+      const activity = vi.fn();
+      const unsubscribe = subscribeProjectActivity(activity);
+      const writeToken = "this-editor";
+      markStudioWriteToken(writeToken);
+      await mountCoordinator({ onHistoryChanged });
+      try {
+        await act(async () => {
+          source.dispatchEvent(new MessageEvent("history-changed", {
+            data: JSON.stringify({ projectId: "project-a", revision: "rev-2", historySeq: 2, writeToken }),
+          }));
+        });
+        expect(onHistoryChanged).toHaveBeenCalledExactlyOnceWith(writeToken);
+        expect(activity).toHaveBeenCalledExactlyOnceWith("project-a", "history-changed");
+      } finally { unsubscribe(); }
+    });
+
+    it("ignores history-changed events for another project", async () => {
+      const onHistoryChanged = vi.fn();
+      await mountCoordinator({ onHistoryChanged });
+      await act(async () => {
+        source.dispatchEvent(
+          new MessageEvent("history-changed", {
+            data: JSON.stringify({ projectId: "project-b", revision: "rev-2", historySeq: 2 }),
+          }),
+        );
+      });
+      expect(onHistoryChanged).not.toHaveBeenCalled();
+    });
+
+    it("signals the history panel when the server confirms each subscription", async () => {
+      const activity = vi.fn();
+      const unsubscribe = subscribeProjectActivity(activity);
+      try {
+        await mountCoordinator();
+        const ready = () => act(async () => {
+          source.dispatchEvent(new MessageEvent("connected", { data: JSON.stringify({ projectId: "project-a" }) }));
+        });
+        await open();
+        expect(activity).not.toHaveBeenCalled();
+        await ready();
+        await open();
+        await ready();
+        expect(activity.mock.calls).toEqual([
+          ["project-a", "connected"], ["project-a", "reconnected"], ["project-a", "connected"],
+        ]);
+      } finally { unsubscribe(); }
+    });
 
     it("delivers the held reconnect scope when a queued clean drain precedes React's commit", async () => {
       let finishAcceptance = () => {};
@@ -134,7 +278,7 @@ describe("external file change coordinator", () => {
       expect(blockedAtSecondDrain).toEqual([null]);
       expect(drainPendingChanges).toHaveBeenCalledTimes(2);
       expect(options.reloadPreview).toHaveBeenCalledOnce();
-      expect(options.reloadSdkSession).toHaveBeenCalledExactlyOnceWith(".");
+      expect(options.refreshFileViews).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "." }));
       expect(onAcceptedPersistedFileChange).toHaveBeenCalledExactlyOnceWith(".", null);
       expect(options.refreshFileTree).toHaveBeenCalledOnce();
       expect(captured.handle?.blocked).toBeNull();
@@ -157,15 +301,15 @@ describe("external file change coordinator", () => {
       await open();
       expect(options.drainPendingChanges).toHaveBeenCalledOnce();
       expect(options.reloadPreview).not.toHaveBeenCalled();
-      expect(options.reloadSdkSession).not.toHaveBeenCalled();
+      expect(options.refreshFileViews).not.toHaveBeenCalled();
       await act(async () => finishDrain());
       expect(options.reloadPreview).toHaveBeenCalledOnce();
-      expect(options.reloadSdkSession).toHaveBeenCalledWith(".");
+      expect(options.refreshFileViews).toHaveBeenCalledWith(expect.objectContaining({ path: "." }));
       expect(options.onAcceptedPersistedFileChange).toHaveBeenCalledWith(".", null);
       expect(options.refreshFileTree).toHaveBeenCalledOnce();
       await open();
       expect(options.reloadPreview).toHaveBeenCalledTimes(2);
-      expect(options.reloadSdkSession).toHaveBeenCalledTimes(2);
+      expect(options.refreshFileViews).toHaveBeenCalledTimes(2);
       expect(options.onAcceptedPersistedFileChange).toHaveBeenCalledTimes(2);
       expect(options.refreshFileTree).toHaveBeenCalledTimes(2);
     });
@@ -196,10 +340,10 @@ describe("external file change coordinator", () => {
       });
       expect(options.drainPendingChanges).toHaveBeenCalledOnce();
       expect(options.reloadPreview).not.toHaveBeenCalled();
-      expect(options.reloadSdkSession).not.toHaveBeenCalled();
+      expect(options.refreshFileViews).not.toHaveBeenCalled();
       await act(async () => finishDrain());
       expect(options.reloadPreview).toHaveBeenCalledOnce();
-      expect(options.reloadSdkSession).toHaveBeenCalledExactlyOnceWith(".");
+      expect(options.refreshFileViews).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "." }));
       expect(options.onAcceptedPersistedFileChange).toHaveBeenCalledExactlyOnceWith(".", null);
     });
 
@@ -218,12 +362,12 @@ describe("external file change coordinator", () => {
       expect(options.persistConflictSnapshot).toHaveBeenCalledWith("project-a", conflict);
       expect(captured.handle?.blocked).toMatchObject({ status: "conflict", error: conflict });
       expect(options.reloadPreview).not.toHaveBeenCalled();
-      expect(options.reloadSdkSession).not.toHaveBeenCalled();
+      expect(options.refreshFileViews).not.toHaveBeenCalled();
       expect(options.onAcceptedPersistedFileChange).not.toHaveBeenCalled();
       await act(async () => captured.handle?.useExternalFile());
       expect(options.discardPendingChanges).toHaveBeenCalledOnce();
       expect(options.reloadPreview).toHaveBeenCalledOnce();
-      expect(options.reloadSdkSession).toHaveBeenCalledWith(".");
+      expect(options.refreshFileViews).toHaveBeenCalledWith(expect.objectContaining({ path: "." }));
     });
 
     it("reloads every session after navigation and when no composition is selected", async () => {
@@ -231,11 +375,11 @@ describe("external file change coordinator", () => {
       await open();
       await rerender({ activeCompPath: "scenes/next.html" });
       await open();
-      expect(options.reloadSdkSession).toHaveBeenLastCalledWith(".");
+      expect(options.refreshFileViews).toHaveBeenLastCalledWith(expect.objectContaining({ path: "." }));
       await rerender({ activeCompPath: null });
       await open();
-      expect(options.reloadSdkSession).toHaveBeenCalledTimes(2);
-      expect(options.reloadSdkSession).toHaveBeenLastCalledWith(".");
+      expect(options.refreshFileViews).toHaveBeenCalledTimes(2);
+      expect(options.refreshFileViews).toHaveBeenLastCalledWith(expect.objectContaining({ path: "." }));
       expect(close).not.toHaveBeenCalled();
     });
 
@@ -244,9 +388,9 @@ describe("external file change coordinator", () => {
       const pendingEdit = new Promise<void>((resolve) => {
         finishDrain = resolve;
       });
-      const reloadSdkSession = vi.fn();
+      const refreshFileViews = vi.fn();
       await mountCoordinator({
-        reloadSdkSession,
+        refreshFileViews,
         drainPendingChanges: vi
           .fn()
           .mockImplementationOnce(async () => {
@@ -260,7 +404,7 @@ describe("external file change coordinator", () => {
       await open();
       await send({ path: "index.html", version: "v2" });
       await act(async () => finishDrain());
-      expect(reloadSdkSession.mock.calls.map(([path]) => path)).toEqual(["notes.md", "."]);
+      expect(refreshFileViews.mock.calls.map(([payload]) => payload.path)).toEqual(["notes.md", "."]);
     });
 
     it("delivers a held reconnect's project-wide reload when a later change saves cleanly", async () => {
@@ -274,9 +418,9 @@ describe("external file change coordinator", () => {
       });
       await open();
       await open();
-      expect(options.reloadSdkSession).not.toHaveBeenCalled();
+      expect(options.refreshFileViews).not.toHaveBeenCalled();
       await send({ path: "scenes/nested.html", version: "n1", affectsPreview: false });
-      expect(options.reloadSdkSession).toHaveBeenCalledExactlyOnceWith(".");
+      expect(options.refreshFileViews).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "." }));
       expect(options.reloadPreview).toHaveBeenCalledOnce();
       expect(options.onAcceptedPersistedFileChange).toHaveBeenCalledExactlyOnceWith(".", null);
     });
@@ -311,7 +455,7 @@ describe("external file change coordinator", () => {
       await act(async () => captured.handle?.useExternalFile());
       expect(readProjectFile).toHaveBeenCalledWith("script.js");
       expect(onUseExternalFile).toHaveBeenCalledWith("script.js", "disk script");
-      expect(options.reloadSdkSession).toHaveBeenCalledExactlyOnceWith(".");
+      expect(options.refreshFileViews).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "." }));
     });
 
     it("keeps the drafted file's recovery off another file's external version", async () => {
@@ -363,7 +507,7 @@ describe("external file change coordinator", () => {
           return { status: "clean" as const };
         }),
         reloadPreview: vi.fn(),
-        reloadSdkSession: vi.fn(),
+        refreshFileViews: vi.fn(),
         onAcceptedPersistedFileChange: vi.fn(),
       };
       const { rerender } = await mountCoordinator(first);
@@ -374,7 +518,7 @@ describe("external file change coordinator", () => {
         activeCompPath: "scenes/next.html",
         drainPendingChanges: vi.fn(async () => ({ status: "clean" as const })),
         reloadPreview: vi.fn(),
-        reloadSdkSession: vi.fn(),
+        refreshFileViews: vi.fn(),
         onAcceptedPersistedFileChange: vi.fn(),
       };
       await rerender(next);
@@ -383,11 +527,11 @@ describe("external file change coordinator", () => {
       await act(async () => finishDrain());
       expect(first.drainPendingChanges).toHaveBeenCalledOnce();
       expect(first.reloadPreview).not.toHaveBeenCalled();
-      expect(first.reloadSdkSession).not.toHaveBeenCalled();
+      expect(first.refreshFileViews).not.toHaveBeenCalled();
       expect(first.onAcceptedPersistedFileChange).not.toHaveBeenCalled();
       expect(next.drainPendingChanges).toHaveBeenCalledOnce();
       expect(next.reloadPreview).toHaveBeenCalledOnce();
-      expect(next.reloadSdkSession).toHaveBeenCalledExactlyOnceWith(".");
+      expect(next.refreshFileViews).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "." }));
       expect(next.onAcceptedPersistedFileChange).toHaveBeenCalledExactlyOnceWith(".", null);
     });
 
@@ -403,7 +547,7 @@ describe("external file change coordinator", () => {
         }),
         persistConflictSnapshot: vi.fn(async () => undefined),
         reloadPreview: vi.fn(),
-        reloadSdkSession: vi.fn(),
+        refreshFileViews: vi.fn(),
       };
       const { captured, rerender } = await mountCoordinator(first);
       await open();
@@ -420,7 +564,7 @@ describe("external file change coordinator", () => {
         drainPendingChanges: vi.fn(async () => ({ status: "conflict" as const, error: conflict })),
         persistConflictSnapshot: vi.fn(async () => undefined),
         reloadPreview: vi.fn(),
-        reloadSdkSession: vi.fn(),
+        refreshFileViews: vi.fn(),
       };
       await rerender(next);
       await open();
@@ -429,9 +573,9 @@ describe("external file change coordinator", () => {
       expect(next.persistConflictSnapshot).toHaveBeenCalledExactlyOnceWith("project-b", conflict);
       expect(first.persistConflictSnapshot).not.toHaveBeenCalled();
       expect(first.reloadPreview).not.toHaveBeenCalled();
-      expect(first.reloadSdkSession).not.toHaveBeenCalled();
+      expect(first.refreshFileViews).not.toHaveBeenCalled();
       expect(next.reloadPreview).not.toHaveBeenCalled();
-      expect(next.reloadSdkSession).not.toHaveBeenCalled();
+      expect(next.refreshFileViews).not.toHaveBeenCalled();
       expect(captured.handle?.blocked).toMatchObject({ status: "conflict", error: conflict });
     });
 
@@ -449,7 +593,7 @@ describe("external file change coordinator", () => {
           return { status: "clean" as const };
         }),
         reloadPreview: vi.fn(),
-        reloadSdkSession: vi.fn(),
+        refreshFileViews: vi.fn(),
       };
       const { rerender } = await mountCoordinator(first);
       await open();
@@ -460,16 +604,16 @@ describe("external file change coordinator", () => {
         activeCompPath,
         drainPendingChanges: vi.fn(async () => ({ status: "clean" as const })),
         reloadPreview: vi.fn(),
-        reloadSdkSession: vi.fn(),
+        refreshFileViews: vi.fn(),
       };
       await rerender(next);
       await act(async () => finishDrain());
       expect(first.drainPendingChanges).toHaveBeenCalledOnce();
       expect(next.drainPendingChanges).not.toHaveBeenCalled();
       expect(first.reloadPreview).not.toHaveBeenCalled();
-      expect(first.reloadSdkSession).not.toHaveBeenCalled();
+      expect(first.refreshFileViews).not.toHaveBeenCalled();
       expect(next.reloadPreview).not.toHaveBeenCalled();
-      expect(next.reloadSdkSession).not.toHaveBeenCalled();
+      expect(next.refreshFileViews).not.toHaveBeenCalled();
     });
 
     it("still refreshes the tree for a queued outside change after switching compositions", async () => {
@@ -516,13 +660,13 @@ describe("external file change coordinator", () => {
       },
       onAcceptedPersistedFileChange: () => order.push("thumbnail"),
       reloadPreview: () => order.push("preview"),
-      reloadSdkSession: () => order.push("sdk"),
+      refreshFileViews: () => { order.push("sdk"); },
       refreshFileTree: () => {
         order.push("tree");
       },
     });
     await act(async () => handler?.({ path: "index.html", content: "external", version: "v2" }));
-    expect(order).toEqual(["drain", "thumbnail", "preview", "sdk", "tree"]);
+    expect(order).toEqual(["drain", "thumbnail", "sdk", "preview", "tree"]);
     expect(captured.handle?.blocked).toBeNull();
   });
 
@@ -534,7 +678,7 @@ describe("external file change coordinator", () => {
     const root = createRoot(document.createElement("div"));
     roots.push(root);
     function Probe({ onAccepted }: { onAccepted: () => void }) {
-      useExternalFileChangeCoordinator({ ...options, onAcceptedPersistedFileChange: onAccepted });
+      useExternalFileChangeCoordinator(acceptingFileViews({ ...options, onAcceptedPersistedFileChange: onAccepted }));
       return null;
     }
     const latest = vi.fn();
@@ -560,7 +704,7 @@ describe("external file change coordinator", () => {
     const order: string[] = [];
     await mountCoordinator({
       reloadPreview: () => order.push("preview"),
-      reloadSdkSession: () => order.push("sdk"),
+      refreshFileViews: () => { order.push("sdk"); },
       refreshFileTree: () => {
         order.push("tree");
       },
@@ -575,12 +719,12 @@ describe("external file change coordinator", () => {
     let release = () => {};
     const inFlight = new Promise<void>((resolve) => (release = resolve));
     const reloadPreview = vi.fn();
-    const reloadSdkSession = vi.fn();
+    const refreshFileViews = vi.fn();
     const onAcceptedPersistedFileChange = vi.fn();
     let drains = 0;
     await mountCoordinator({
       reloadPreview,
-      reloadSdkSession,
+      refreshFileViews,
       onAcceptedPersistedFileChange,
       drainPendingChanges: async () => {
         if (drains++ === 0) await inFlight;
@@ -601,7 +745,7 @@ describe("external file change coordinator", () => {
     );
     await act(async () => release());
     expect(reloadPreview).toHaveBeenCalledTimes(2);
-    expect(reloadSdkSession).toHaveBeenLastCalledWith("scene.html");
+    expect(refreshFileViews).toHaveBeenLastCalledWith(expect.objectContaining({ path: "scene.html", paths: ["scene.html", "notes.md"] }));
     expect(onAcceptedPersistedFileChange).toHaveBeenLastCalledWith("scene.html", ["scene.html"]);
   });
 
@@ -708,12 +852,12 @@ describe("external file change coordinator", () => {
   it("refreshes thumbnails once but suppresses Preview reload for an exact Studio write", async () => {
     const drainPendingChanges = vi.fn(async () => ({ status: "clean" as const }));
     const reloadPreview = vi.fn();
-    const reloadSdkSession = vi.fn();
+    const refreshFileViews = vi.fn();
     const onAcceptedPersistedFileChange = vi.fn();
     await mountCoordinator({
       drainPendingChanges,
       reloadPreview,
-      reloadSdkSession,
+      refreshFileViews,
       onAcceptedPersistedFileChange,
     });
     markStudioWriteToken("studio-write-1");
@@ -727,20 +871,20 @@ describe("external file change coordinator", () => {
     await act(async () => handler?.(payload));
     expect(drainPendingChanges).not.toHaveBeenCalled();
     expect(reloadPreview).not.toHaveBeenCalled();
-    expect(reloadSdkSession).not.toHaveBeenCalled();
+    expect(refreshFileViews).not.toHaveBeenCalled();
     expect(onAcceptedPersistedFileChange).toHaveBeenCalledOnce();
-    expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null);
+    expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null, undefined);
   });
 
   it("accepts a matching content echo without a write token and suppresses every reload", async () => {
     const drainPendingChanges = vi.fn(async () => ({ status: "clean" as const }));
     const reloadPreview = vi.fn();
-    const reloadSdkSession = vi.fn();
+    const refreshFileViews = vi.fn();
     const onAcceptedPersistedFileChange = vi.fn();
     await mountCoordinator({
       drainPendingChanges,
       reloadPreview,
-      reloadSdkSession,
+      refreshFileViews,
       onAcceptedPersistedFileChange,
     });
     markSelfWrite("index.html", "studio content");
@@ -750,28 +894,28 @@ describe("external file change coordinator", () => {
     );
 
     expect(onAcceptedPersistedFileChange).toHaveBeenCalledOnce();
-    expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null);
+    expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null, undefined);
     expect(drainPendingChanges).not.toHaveBeenCalled();
     expect(reloadPreview).not.toHaveBeenCalled();
-    expect(reloadSdkSession).not.toHaveBeenCalled();
+    expect(refreshFileViews).not.toHaveBeenCalled();
   });
 
   it("does not suppress a racing external write by path alone", async () => {
     const pendingTimelineEditPathRef = { current: new Set(["index.html"]) };
     const drainPendingChanges = vi.fn(async () => ({ status: "clean" as const }));
     const reloadPreview = vi.fn();
-    const reloadSdkSession = vi.fn();
+    const refreshFileViews = vi.fn();
     await mountCoordinator({
       pendingTimelineEditPathRef,
       drainPendingChanges,
       reloadPreview,
-      reloadSdkSession,
+      refreshFileViews,
     });
     await act(async () => handler?.({ path: "index.html", content: "agent edit", version: "v2" }));
     expect(pendingTimelineEditPathRef.current).not.toContain("index.html");
     expect(drainPendingChanges).toHaveBeenCalledOnce();
     expect(reloadPreview).toHaveBeenCalledOnce();
-    expect(reloadSdkSession).toHaveBeenCalledOnce();
+    expect(refreshFileViews).toHaveBeenCalledOnce();
   });
 
   it("blocks both reloads and retains a complete conflict", async () => {
@@ -792,13 +936,13 @@ describe("external file change coordinator", () => {
     expect(persistConflictSnapshot).toHaveBeenCalledWith("project-a", conflict);
     expect(captured.handle?.blocked).toMatchObject({ status: "conflict", error: conflict });
     expect(options.reloadPreview).not.toHaveBeenCalled();
-    expect(options.reloadSdkSession).not.toHaveBeenCalled();
+    expect(options.refreshFileViews).not.toHaveBeenCalled();
     expect(onAcceptedPersistedFileChange).not.toHaveBeenCalled();
 
     await act(async () => captured.handle?.useExternalFile());
     expect(onAcceptedPersistedFileChange).toHaveBeenCalledOnce();
     expect(options.reloadPreview).toHaveBeenCalledOnce();
-    expect(options.reloadSdkSession).toHaveBeenCalledOnce();
+    expect(options.refreshFileViews).toHaveBeenCalledOnce();
   });
 
   it("serializes drains and processes stashed events", async () => {
@@ -817,7 +961,7 @@ describe("external file change coordinator", () => {
     expect(drains).toHaveLength(2);
     await act(async () => drains[1]?.({ status: "clean" }));
     expect(options.reloadPreview).toHaveBeenCalledTimes(2);
-    expect(options.reloadSdkSession).toHaveBeenCalledTimes(2);
+    expect(options.refreshFileViews).toHaveBeenCalledTimes(2);
   });
 
   it("restores a durable unresolved conflict after remount", async () => {
@@ -938,7 +1082,7 @@ describe("external file change coordinator", () => {
     await vi.waitFor(() => expect(captured.handle?.blocked?.status).toBe("failed"));
     await act(async () => handler?.({ path: "index.html", version: "v2" }));
     expect(deleteConflictSnapshot).not.toHaveBeenCalled();
-    expect(options.reloadSdkSession).toHaveBeenCalledExactlyOnceWith("index.html");
+    expect(options.refreshFileViews).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "index.html" }));
   });
 
   it("reloads the held change's scope too when Keep Studio settles a held conflict", async () => {
@@ -961,7 +1105,7 @@ describe("external file change coordinator", () => {
     );
     await act(async () => captured.handle?.keepStudioFile());
     expect(options.overwriteConflict).toHaveBeenCalledWith(conflict);
-    expect(options.reloadSdkSession).toHaveBeenCalledExactlyOnceWith(".");
+    expect(options.refreshFileViews).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: "." }));
     expect(options.onAcceptedPersistedFileChange).toHaveBeenCalledExactlyOnceWith(".", null);
   });
 
@@ -1080,12 +1224,12 @@ describe("external file change coordinator", () => {
       markStudioWriteToken("studio-write-1");
 
       await act(async () =>
-        handler?.(sseDelivery({ path: "index.html", version: "v2", writeToken: "studio-write-1" })),
+        handler?.(sseDelivery({ path: "index.html", fileVersions: { "index.html": "v2" }, writeToken: "studio-write-1" })),
       );
 
       expect(drainPendingChanges).not.toHaveBeenCalled();
       expect(reloadPreview).not.toHaveBeenCalled();
-      expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null);
+      expect(onAcceptedPersistedFileChange).toHaveBeenCalledWith("index.html", null, { token: "studio-write-1", version: "v2" });
     });
 
     it("hands the server's affected compositions to the thumbnail refresh", async () => {
@@ -1113,6 +1257,15 @@ describe("external file change coordinator", () => {
         ["index.html", "compositions/scene-a.html"],
       );
       expect(onAcceptedPersistedFileChange).toHaveBeenNthCalledWith(2, "assets/logo.svg", null);
+    });
+
+    it("does not treat a delayed self echo as the latest source after a peer event", async () => {
+      const onAcceptedPersistedFileChange = vi.fn();
+      await mountCoordinator({ onAcceptedPersistedFileChange });
+      markStudioWriteToken("delayed-self");
+      await act(async () => handler?.(sseDelivery({ path: "index.html", fileVersions: { "index.html": "v3" }, writeToken: "another-tab" })));
+      await act(async () => handler?.(sseDelivery({ path: "index.html", fileVersions: { "index.html": "v2" }, writeToken: "delayed-self" })));
+      expect(onAcceptedPersistedFileChange).toHaveBeenLastCalledWith("index.html", null, undefined);
     });
 
     it("reloads once when one watcher event reaches two subscribers", async () => {
@@ -1155,8 +1308,8 @@ describe("external file change coordinator", () => {
     it("ignores a delivery whose projectId does not match this tab's", async () => {
       const drainPendingChanges = vi.fn(async () => ({ status: "clean" as const }));
       const reloadPreview = vi.fn();
-      const reloadSdkSession = vi.fn();
-      await mountCoordinator({ drainPendingChanges, reloadPreview, reloadSdkSession });
+      const refreshFileViews = vi.fn();
+      await mountCoordinator({ drainPendingChanges, reloadPreview, refreshFileViews });
 
       await act(async () =>
         handler?.({
@@ -1169,7 +1322,7 @@ describe("external file change coordinator", () => {
 
       expect(drainPendingChanges).not.toHaveBeenCalled();
       expect(reloadPreview).not.toHaveBeenCalled();
-      expect(reloadSdkSession).not.toHaveBeenCalled();
+      expect(refreshFileViews).not.toHaveBeenCalled();
     });
 
     it("still reloads for a delivery whose projectId matches this tab's", async () => {

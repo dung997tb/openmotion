@@ -1,3 +1,4 @@
+import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import { getTimelineElementIndexes } from "../lib/timelineElementIndexes";
 import { clampToHostStart } from "../store/timelineElement";
@@ -5,7 +6,7 @@ import type { DraggedClipState } from "./useTimelineClipDrag";
 // Type-only: erased at runtime, so the timelineZMirror → timelineClipDragCommit
 // value-import edge stays acyclic.
 import type { ZMirrorLaneMove } from "./timelineZMirror";
-import { classifyZone } from "./timelineZones";
+import { classifyZone, displayAuthoredTimelineLanes } from "./timelineZones";
 import { findBlockedTrackInsert, layoutAfterTrackInsert } from "./timelineDragLanding";
 import type { TimelineTrackInsertLayout } from "./timelineTrackInsertLayout";
 import { computeStackingPatches, type StackingPatch } from "./timelineStackingSync";
@@ -137,6 +138,11 @@ export function persistMoveEdits(
         : `[Timeline] persistMoveEdits: no move persist handler wired, so ${edits.length} edit(s) applied to the store only, not saved`,
     );
   }
+  const laneChanged = edits.some(e => e.updates.track !== e.element.track ||
+    (e.persistTrack != null && e.persistTrack !== (e.element.authoredTrack ?? e.element.track)));
+  // Persist only the affected source clips. Recompute every display row in the
+  // same store notification so audio and neighboring compositions shift together.
+  const layout = laneChanged ? displayAuthoredTimelineLanes : undefined;
   const prev = edits.map((e) => ({
     key: keyOf(e.element),
     updates: {
@@ -184,7 +190,7 @@ export function persistMoveEdits(
     if (Object.keys(updates).length) updateElement(key, updates);
   };
   const applyEdits = (reassert = false) =>
-    batchElementUpdates(() => edits.forEach((e) => applyEdit(e, reassert)));
+    batchElementUpdates(() => edits.forEach((e) => applyEdit(e, reassert)), layout);
   applyEdits();
   // The store above gets DISPLAY lanes; the file below gets the authored-space
   // track when one was resolved (see TimelineMoveEdit.persistTrack).
@@ -207,7 +213,7 @@ export function persistMoveEdits(
           updates.audioGroup = audioGroup;
         if (Object.keys(updates).length) updateElement(p.key, updates);
       }
-    });
+    }, layout);
   // Cmd+Z while the save is in flight shows the old lanes at once; the returned fn re-applies the move.
   const saving = onMoveElements
     ? beginStudioPendingEdit(() => {
@@ -369,6 +375,11 @@ export function commitDraggedClipMove(drag: DraggedClipState, deps: DragCommitDe
     if (multi?.keys.has(keyOf(e))) return { ...e, start: multi.movedStart(e) };
     return e;
   });
+  if (isVertical && getCachedCloudDisklessMode() && deps.onMoveElements) {
+    void refreshAfterDurableLaneMove(persistMoveEdits(preserveLanes(edits), deps, coalesceKey,
+      cloudLaneOperation(candidate, drag.element, drag.previewTrack, deps)), deps);
+    return;
+  }
   if (!isVertical || !deps.readZIndex || !deps.onStackingPatches) {
     void refreshAfterDurableLaneMove(
       persistMoveEdits(preserveLanes(edits), deps, coalesceKey, "lane-reorder"),
@@ -444,6 +455,7 @@ function buildTrackInsertEdits(
     else if (multi?.keys.has(normKey)) start = multi.movedStart(src);
     edits.push({
       element: src,
+      ...(src.authoredTrack != null && src.authoredTrack !== norm.track ? { persistTrack: norm.track } : {}),
       updates: {
         start,
         track: norm.track,
@@ -475,6 +487,11 @@ function commitTrackInsert(
   if (edits.length === 0) return;
 
   const coalesceKey = `clip-lane-move:${laneChangeGestureSeq++}`;
+  if (getCachedCloudDisklessMode() && deps.onMoveElements) {
+    void refreshAfterDurableLaneMove(persistMoveEdits(edits, deps, coalesceKey,
+      cloudLaneOperation(candidate, drag.element, drag.insertRow!, deps)), deps);
+    return;
+  }
   if (!deps.readZIndex || !deps.onStackingPatches) {
     void refreshAfterDurableLaneMove(
       persistMoveEdits(edits, deps, coalesceKey, "track-insert"),
@@ -564,14 +581,25 @@ function syncStackingForEdit(
   deps: DragCommitDeps,
   coalesceKey?: string,
 ): Promise<void> {
-  const { readZIndex, onStackingPatches } = deps;
-  if (!readZIndex || !onStackingPatches) return Promise.resolve();
+  if (!deps.readZIndex || !deps.onStackingPatches || aimedLane === currentLane) return Promise.resolve();
+  const patches = stackingForMove(candidate, dragKey, currentLane, aimedLane, deps.readZIndex);
+  return patches.length ? Promise.resolve(deps.onStackingPatches(patches, coalesceKey)).then(() => undefined) : Promise.resolve();
+}
 
-  // Aiming at the clip's OWN current display lane is not a relocation — never
-  // touch z (guards the pure-time-move invariant even if a spurious topology call
-  // slips through). Every real lane-realization drop aims at a DIFFERENT lane.
-  if (aimedLane === currentLane) return Promise.resolve();
+function cloudLaneOperation(candidate: TimelineElement[], dragged: TimelineElement, lane: number, deps: DragCommitDeps): TimelineMoveOperation {
+  const direction = lane < dragged.track ? "up" : "down";
+  // A mounted preview can supply the true CSS cascade and display-row projection.
+  // With a headless/isolated preview the shared core uses authored tracks and ranks.
+  if (!deps.readZIndex || !Number.isFinite(deps.readZIndex(dragged, true))) {
+    return { kind: "laneWithPaint", paint: { element: dragged, direction } };
+  }
+  const ranks = stackingForMove(candidate, keyOf(dragged), dragged.track, lane, deps.readZIndex);
+  const byKey = new Map(candidate.map(el => [keyOf(el), el]));
+  return { kind: "laneWithPaint", paint: { ranks: ranks.map(rank => ({ element: byKey.get(rank.key)!, zIndex: rank.zIndex })) } };
+}
 
+function stackingForMove(candidate: TimelineElement[], dragKey: string, currentLane: number, aimedLane: number,
+  readZIndex: NonNullable<DragCommitDeps["readZIndex"]>): StackingPatch[] {
   // Discovery order is DOM order, which breaks equal-z ties.
   const stackingEls = candidate.map((el, domIndex) => ({
     key: keyOf(el),
@@ -585,11 +613,5 @@ function syncStackingForEdit(
     stackingContextId: el.stackingContextId ?? null,
   }));
 
-  const patches = computeStackingPatches(
-    stackingEls,
-    [dragKey],
-    aimedLane < currentLane ? "up" : "down",
-  );
-  if (patches.length === 0) return Promise.resolve();
-  return Promise.resolve(onStackingPatches(patches, coalesceKey)).then(() => undefined);
+  return computeStackingPatches(stackingEls, [dragKey], aimedLane < currentLane ? "up" : "down");
 }

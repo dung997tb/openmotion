@@ -1,8 +1,12 @@
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import type { ImportedFontAsset } from "../components/editor/fontAssets";
 import type { PatchOperation, PatchTarget } from "../utils/sourcePatcher";
 
 export interface DomEditPatchBatch {
+  position?: import("../../../packages/edit-core/canvas-box").MeasuredCanvasPosition;
+  box?: import("../../../packages/edit-core/canvas-box").CanvasBox;
+  ifMatch?: string;
   sourceFile: string;
   patches: Array<{ target: PatchTarget; operations: PatchOperation[] }>;
 }
@@ -19,6 +23,7 @@ export type CommitDomEditPatchBatches = (
   options: {
     label: string;
     coalesceKey: string;
+    continuous?: boolean;
     /** Per-entry undo coalesce window override (ms) — see EditHistoryEntry.coalesceMs. */
     coalesceMs?: number;
     /**
@@ -44,14 +49,19 @@ export interface DomEditPatchBatchesResult {
   durable: boolean;
   allMatched: boolean;
   changed: boolean;
+  /** The exact receipt the isolated canvas verified in its mounted document. */
+  confirmedCanvasVersion?: string;
 }
 
 export type PersistDomEditOperations = (
   selection: DomEditSelection,
   operations: PatchOperation[],
   options?: {
+    projectEdit?: ProjectEditCommand;
+    canvasPosition?: { x: number; y: number };
     label?: string;
     coalesceKey?: string;
+    continuous?: boolean;
     coalesceMs?: number;
     skipRefresh?: boolean;
     /** Rebind a timing-only source change in the existing preview; reload only if it cannot converge. */
@@ -69,5 +79,5 @@ export type PersistDomEditOperations = (
 export type CommitDomAttributeBatch = (
   selection: DomEditSelection,
   operations: PatchOperation[],
-  options: { label: string; onError?: (error: unknown) => void; prepareContent?: (html: string) => string; validateContent?: (html: string) => void; syncTimingInPlace?: boolean; shouldSave?: () => boolean },
+  options: { label: string; projectEdit?: ProjectEditCommand; onError?: (error: unknown) => void; prepareContent?: (html: string) => string; validateContent?: (html: string) => void; syncTimingInPlace?: boolean; shouldSave?: () => boolean },
 ) => Promise<boolean>;

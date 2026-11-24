@@ -4,8 +4,13 @@ import { access, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { defaultInstallationHome, nativeCacheDirectory } from './npm-runtime.mjs';
 import { executable, extractArchive, obtainAsset, readJSON, relativePath, runFile, withCacheLock, writeJSON } from './runtime-assets.mjs';
+
+function defaultInstallationHome(environment = 'prod') {
+  const base = process.platform === 'win32' ? process.env.LOCALAPPDATA || os.homedir() : path.join(os.homedir(), '.local/share');
+  return path.join(base, environment === 'dev' ? 'openmotion-dev' : 'openmotion');
+}
+const nativeCacheDirectory = home => path.join(home, 'cache/native');
 
 const versionProbe = `
 import sys

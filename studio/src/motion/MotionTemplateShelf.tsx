@@ -20,7 +20,7 @@ const batchSize = 16;
 export function MotionTemplateShelf({ root, active }: { root: RefObject<HTMLElement | null>; active: boolean }) {
   const { locale, t } = useI18n();
   const { openLibrary, workspace, switchingDisabled } = useWorkspaceChrome();
-  const { catalog, firstPage, failed, retry } = useCoveredTemplates(locale, true, { showFirstPage: true });
+  const { catalog, firstPage, failed, retry } = useCoveredTemplates(locale, true, { showFirstPage: true, covered: false });
   const [collection, setCollection] = useState<TemplateCollection | null>(null);
   const [limit, setLimit] = useState(batchSize);
   const [priority, setPriority] = useState<string | null>(null);

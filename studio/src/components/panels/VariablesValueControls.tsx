@@ -60,7 +60,7 @@ function DraftTextInput({
         if (draft !== null && draft !== value) onCommit(draft);
         setDraft(null);
       }}
-      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229 && e.currentTarget.blur()}
       className={className}
     />
   );

@@ -2,7 +2,9 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { observeStudioSavedAt } from '../utils/studioSaveState';
 import { useWorkspace } from './useWorkspace';
+import { notifyProjectActivity } from './workspaceRefresh';
 import { I18nProvider, useI18n } from '../i18n/I18n';
 import { languages, translate } from '../i18n/messages';
 
@@ -185,7 +187,7 @@ it('an existing project page polls its own project without following another cli
   await mount(async () => {}, first, first);
   expect(workspace.status?.projectId).toBe(first);
   expect(replace).not.toHaveBeenCalled();
-  expect(fetcher.mock.calls.some(([url]) => url === `/motion-api/project/status?projectId=${first}`)).toBe(true);
+  expect(fetcher.mock.calls.some(([url]) => url === `/motion-api/project/status?view=summary&projectId=${first}`)).toBe(true);
 });
 it('an empty conversation opens its own first artifact even when another project is globally active', async () => {
   history.replaceState(null, '', '/editor?session=conversation');
@@ -216,12 +218,12 @@ it('creates the conversation before generating an artifact and retains it when g
   localStorage.setItem('motion.home.draft.v1', 'New film');
   const original = fetcher.getMockImplementation()!;
   fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
-    if (url === '/design-api/sessions' && init?.method === 'POST') return new Response(JSON.stringify({ sessionId: 'new-session' }));
+    if (url === '/motion-api/sessions' && init?.method === 'POST') return new Response(JSON.stringify({ sessionId: 'new-session' }));
     if (url.endsWith('/artifacts')) return new Response(JSON.stringify({ error: 'Generation failed' }), { status: 503 });
     return original(url, init);
   });
   await act(() => workspace.startSession('New film', 'product-promo'));
-  expect(writes().map(call => call[0])).toEqual(['/design-api/sessions', '/design-api/sessions/new-session/artifacts']);
+  expect(writes().map(call => call[0])).toEqual(['/motion-api/sessions', '/motion-api/sessions/new-session/artifacts']);
   expect(navigate).toHaveBeenCalledWith('/editor?session=new-session');
   expect(localStorage.getItem('motion.home.draft.v1')).toBeNull();
   expect(sessionStorage.getItem('opendesign.session-error:new-session')).toBe('Generation failed');
@@ -305,4 +307,176 @@ it.each([false, true])('guards browser history navigation before replacing the p
     expect(location.href).toBe(new URL(originalUrl, location.origin).href);
     expect(workspace.navigationError?.message).toBe('Unsaved edit');
   } else expect(onNavigate).toHaveBeenCalledWith(new URL(targetUrl, location.origin).href, true);
+});
+
+const countReads = () => ({
+  status: fetcher.mock.calls.filter(([url]) => url.includes('/project/status?')).length,
+  catalog: fetcher.mock.calls.filter(([url]) => url.endsWith('/projects')).length,
+});
+const advance = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms));
+
+it('discovers external projects within one minute without polling idle editor status', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    const original = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => url.endsWith('/projects')
+      ? Response.json({ projects: [{ id: first, title: 'First' }, { id: second, title: 'Created via MCP' }] })
+      : original(url, init));
+    await advance(60_000);
+    expect(workspace.projects.map(project => project.id)).toEqual([first, second]);
+    await advance(5000);
+    expect(countReads()).toEqual({ status: 1, catalog: 2 });
+    act(() => {
+      observeStudioSavedAt(second, Date.now());
+      observeStudioSavedAt(first, Date.now());
+      observeStudioSavedAt(first, Date.now() + 1);
+    });
+    await advance(1800);
+    expect(countReads()).toEqual({ status: 2, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('pauses while hidden and coalesces foreground and online checks', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await advance(500);
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await advance(0);
+    expect(countReads()).toEqual({ status: 1, catalog: 1 });
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    await advance(120_000);
+    expect(countReads()).toEqual({ status: 1, catalog: 1 });
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('online'));
+    await advance(0);
+    expect(countReads()).toEqual({ status: 2, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('refreshes only status for an active export and only the catalog for an empty session', async () => {
+  vi.useFakeTimers();
+  try {
+    const original = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => url.includes('/project/status?')
+      ? Response.json({ ...status, exportJob: { id: 'render', state: 'running' } }) : original(url, init));
+    await mount(async () => {}, first);
+    await advance(5400);
+    expect(countReads()).toEqual({ status: 4, catalog: 1 });
+    fetcher.mockImplementation(original);
+    fetcher.mockClear();
+    history.replaceState(null, '', '/editor?session=waiting-session');
+    await mount(async () => {}, undefined, 'waiting-session');
+    await advance(5400);
+    expect(countReads()).toEqual({ status: 1, catalog: 4 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('waits for in-flight reads before reconciling a foreground event', async () => {
+  vi.useFakeTimers();
+  try {
+    const original = fetcher.getMockImplementation()!;
+    let finish!: () => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => {
+      finish = () => resolve(Response.json(status));
+    }));
+    await mount(async () => {}, first);
+    window.dispatchEvent(new Event('online'));
+    await advance(1000);
+    expect(countReads()).toEqual({ status: 1, catalog: 2 });
+    fetcher.mockImplementation(original);
+    await act(async () => finish());
+    await advance(0);
+    expect(countReads()).toEqual({ status: 2, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('backs off only the failing endpoint and restores its idle cadence after recovery', async () => {
+  vi.useFakeTimers();
+  try {
+    const original = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/project/status?')) throw new TypeError('Disconnected');
+      return original(url, init);
+    });
+    await mount(async () => {}, first);
+    await advance(1800);
+    await advance(3599);
+    expect(countReads()).toEqual({ status: 2, catalog: 1 });
+    expect(workspace.connectionError).toBe('Disconnected');
+    fetcher.mockImplementation(original);
+    await advance(1);
+    expect(workspace.connectionError).toBe('');
+    await advance(7200);
+    expect(countReads()).toEqual({ status: 3, catalog: 1 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('reconciles matching render events and catches up both reads after project stream reconnection', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    notifyProjectActivity(second, 'render-updated');
+    await advance(1800);
+    expect(countReads()).toEqual({ status: 1, catalog: 1 });
+    notifyProjectActivity(first, 'render-updated');
+    notifyProjectActivity(first, 'render-updated');
+    await advance(1800);
+    expect(countReads()).toEqual({ status: 2, catalog: 1 });
+    notifyProjectActivity(first, 'reconnected');
+    await advance(0);
+    expect(countReads()).toEqual({ status: 3, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('refreshes only the catalog when the server reports a workspace change', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    notifyProjectActivity(first, 'catalog-changed');
+    notifyProjectActivity(first, 'catalog-changed');
+    await advance(0);
+    expect(countReads()).toEqual({ status: 1, catalog: 2 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('reconciles idle status even without a project stream and pauses reads while offline', async () => {
+  vi.useFakeTimers();
+  try {
+    await mount(async () => {}, first);
+    await advance(120_000);
+    expect(countReads()).toEqual({ status: 2, catalog: 3 });
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    await advance(120_000);
+    expect(countReads()).toEqual({ status: 2, catalog: 3 });
+    online.mockReturnValue(true);
+    window.dispatchEvent(new Event('online'));
+    await advance(0);
+    expect(countReads()).toEqual({ status: 3, catalog: 4 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('keeps finding artifacts for a long-idle empty conversation at a bounded slower cadence', async () => {
+  vi.useFakeTimers();
+  try {
+    history.replaceState(null, '', '/editor?session=conversation');
+    let artifacts: { id: string; projectId: string }[] = [];
+    fetcher.mockImplementation(async (url: string) => Response.json(url.endsWith('/projects')
+      ? { projects: [], sessions: [{ id: 'conversation', artifacts }] } : status));
+    const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+    await mount(async () => {}, undefined, 'conversation');
+    await advance(31_000);
+    const reads = countReads().catalog;
+    await advance(14_000);
+    expect(countReads().catalog).toBe(reads);
+    artifacts = [{ id: 'artifact', projectId: first }];
+    await advance(1000);
+    expect(replace).toHaveBeenCalledWith(`/editor/${first}?session=conversation&openArtifact=1#project/${first}`);
+  } finally { vi.useRealTimers(); }
 });

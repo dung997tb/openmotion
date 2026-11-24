@@ -736,6 +736,7 @@
   "Code": "コード",
   "Catalog": "コンポーネントライブラリ",
   "Preview": "プレビュー",
+  "Preview builders are busy. Try again shortly.": "プレビューの生成が混み合っています。少し待ってからもう一度お試しください。",
   "Timeline": "タイムライン",
   "Design": "デザイン",
   "Layers": "レイヤー",

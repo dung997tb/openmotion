@@ -1,0 +1,33 @@
+{
+  "name": "@openmotion/observability",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloud web observability (Sentry error, performance tracing, and sourcemap build tooling) decoupled from @openmotion/tracking.",
+  "files": ["dist", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./sanitize": {
+      "types": "./dist/sanitize.d.ts",
+      "default": "./dist/sanitize.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
+    }
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

@@ -1,13 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { deviceIdentity, unknownDevice } from '../tracking/device.ts';
 import { createPosthogSender, createNodeTracking, loadIdentity } from '../tracking/node.ts';
 import { deviceContext } from '../tracking/core.ts';
 import { omEvents } from '../tracking/events.ts';
-import { fixture } from './fixtures.ts';
 import type { PendingEvent } from '../tracking/core.ts';
+
+async function withTempDir(run: (directory: string) => Promise<void>) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'openmotion-tracking-device-'));
+  try {
+    await run(directory);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
 
 test('device identity normalizes valid OS identifiers and rejects missing or placeholder values', () => {
   const raw = '12345678-1234-5678-90AB-1234567890AB';
@@ -25,9 +34,9 @@ test('device identity normalizes valid OS identifiers and rejects missing or pla
   }
 });
 
-test('device IDs deduplicate directories while PostHog identities remain installation-scoped', () => fixture(async store => {
+test('device IDs deduplicate directories while PostHog identities remain installation-scoped', () => withTempDir(async directory => {
   const raw = '123456781234567890ab1234567890ab', device = deviceIdentity('darwin', raw);
-  const first = await loadIdentity(path.join(store.directory, 'first')), second = await loadIdentity(path.join(store.directory, 'second'));
+  const first = await loadIdentity(path.join(directory, 'first')), second = await loadIdentity(path.join(directory, 'second'));
   assert.notEqual(first.installation_id, second.installation_id);
   const event: PendingEvent = { event: 'page_view', event_id: crypto.randomUUID(), occurred_at: new Date().toISOString(), entrypoint: 'studio',
     ...deviceContext(), properties: { page_name: 'studio', view_id: crypto.randomUUID(), embedded: true, has_project: true } };
@@ -47,10 +56,10 @@ test('device IDs deduplicate directories while PostHog identities remain install
   const unknown = bodies[2].batch[0].properties;
   assert.equal(unknown.device_id, 'unknown'); assert.equal(unknown.device_id_source, 'unavailable');
   assert.equal(unknown.distinct_id, first.installation_id);
-}, false));
+}));
 
-test('an existing installation retains its historical analytics identity across upgrade and device availability', () => fixture(async store => {
-  const directory = path.join(store.directory, 'tracking');
+test('an existing installation retains its historical analytics identity across upgrade and device availability', () => withTempDir(async baseDir => {
+  const directory = path.join(baseDir, 'tracking');
   const saved = JSON.stringify({ installation_id: '11111111-1111-4111-8111-111111111111', utm_source: null, created_at: '2026-11-01T00:00:00.000Z' });
   await mkdir(directory); await writeFile(path.join(directory, 'identity.json'), saved);
   const identity = await loadIdentity(directory), before = { distinct_id: identity.installation_id };
@@ -67,7 +76,7 @@ test('an existing installation retains its historical analytics identity across 
   assert(properties.every(value => value.distinct_id === identity.installation_id));
   assert.deepEqual(properties.map(value => value.device_id_source), ['platform', 'unavailable']);
   assert.equal(await readFile(path.join(directory, 'identity.json'), 'utf8'), saved);
-}, false));
+}));
 
 test('disabled or opted-out tracking does not read platform identity', async () => {
   let reads = 0;

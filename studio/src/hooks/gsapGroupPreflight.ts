@@ -9,16 +9,17 @@ export function firstPreflightFailure(
   updates: DomEditGroupPathOffsetCommit[],
   savedOnElement: Map<DomEditSelection, boolean>,
   activeCompPath: string | null | undefined,
+  allowMultipleFiles = false,
 ): { error: unknown; selection: DomEditSelection } | null {
   for (const [index, result] of results.entries()) {
     if (result.status !== "rejected") continue;
     const selection = updates[index]?.selection;
     if (selection) return { error: result.reason, selection };
   }
-  return secondFile(updates, savedOnElement, activeCompPath);
+  return allowMultipleFiles ? null : secondFile(updates, savedOnElement, activeCompPath);
 }
 
-/** The group's script writes go out as one batch to one file, so members from two files refuse. */
+/** The desktop animation writer commits a single file per group. */
 function secondFile(
   updates: DomEditGroupPathOffsetCommit[],
   savedOnElement: Map<DomEditSelection, boolean>,

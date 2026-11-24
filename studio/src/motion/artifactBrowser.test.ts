@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { browserGeometry, browserReducer as reduce, browserUrl, initialBrowser } from './artifactBrowser';
+import { browserGeometry, browserReducer as reduce, initialBrowser } from './artifactBrowser';
 import type { SessionArtifact } from '../../../shared/session';
 
 const artifacts: SessionArtifact[] = [1, 2].map(i => ({ id: `artifact-${i}`, projectId: `project-${i}`, kind: 'motion-project', title: `Motion ${i}` }));
@@ -32,9 +32,8 @@ it('opens a second artifact in a new tab without duplicating existing artifacts'
   state = reduce(state, { type: 'close', id: 'artifact-1' });
   expect(state.activeId).toBe('new');
 });
-it('refresh restores hidden surfaces, web tabs and width for the same conversation', () => {
-  let state = reduce(initial(), { type: 'new', id: 'web' });
-  state = reduce(state, { type: 'navigate', url: 'https://example.org/' });
+it('refresh restores hidden surfaces, artifact tabs and width while stripping retired web tabs', () => {
+  let state = reduce(initial(), { type: 'new', id: 'picker' });
   state = reduce(state, { type: 'width', value: 400 });
   state = reduce(state, { type: 'browser', open: false });
   expect(initialBrowser(artifacts, 'project-1', JSON.stringify(state))).toEqual(state);
@@ -42,19 +41,15 @@ it('refresh restores hidden surfaces, web tabs and width for the same conversati
   expect(reopened.browserOpen).toBe(true);
   expect(reopened.tabs.find(tab => tab.id === reopened.activeId)).toMatchObject({ artifactId: 'artifact-2' });
 });
-it('navigating from a Motion artifact preserves its tab and stores redirects on the correct web tab', () => {
-  let state = reduce(initial(), { type: 'navigate', url: 'baidu.com', id: 'web' });
-  expect(state.tabs).toHaveLength(2);
-  expect(state.tabs[0]).toMatchObject({ kind: 'artifact', artifactId: 'artifact-1' });
-  state = reduce(state, { type: 'activate', id: 'artifact-1' });
-  state = reduce(state, { type: 'page', id: 'web', url: 'https://www.baidu.com/', title: '百度' });
-  expect(state.activeId).toBe('artifact-1');
-  expect(state.tabs[1]).toMatchObject({ url: 'https://www.baidu.com/', title: '百度' });
-});
-it('rejects unsafe addresses and strips corrupt or foreign persisted tabs', () => {
-  for (const address of ['javascript:alert(1)', 'data:text/html,hello', 'file:///etc/passwd', 'https://user:secret@example.org']) expect(() => browserUrl(address)).toThrow();
-  expect(browserUrl('example.org/docs')).toBe('https://example.org/docs');
-  const state = initialBrowser(artifacts, 'project-1', JSON.stringify({ tabs: [{ id: 'a', kind: 'artifact', artifactId: 'foreign' }, { id: 'x', kind: 'web', url: 'javascript:1' }], conversationOpen: false, browserOpen: false }));
+it('strips corrupt, foreign, or legacy web persisted tabs safely', () => {
+  const state = initialBrowser(artifacts, 'project-1', JSON.stringify({
+    tabs: [
+      { id: 'a', kind: 'artifact', artifactId: 'foreign' },
+      { id: 'x', kind: 'web', url: 'https://example.org/' },
+    ],
+    conversationOpen: false,
+    browserOpen: false,
+  }));
   expect(state.tabs).toHaveLength(0);
   expect(state.conversationOpen).toBe(true);
 });

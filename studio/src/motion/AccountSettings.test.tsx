@@ -2,84 +2,153 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { AccountSummary } from '../../../shared/provider-directory';
 import { I18nProvider, type Locale } from '../i18n/I18n';
-import { AccountSettings } from './AccountSettings';
-import { GITHUB_REPOSITORY } from './githubRepository';
-import { notifyProvidersChanged } from './useProviderDirectory';
+import { AccountSettings, type CloudAccountSummary, type PersonalAccessTokenRecord } from './AccountSettings';
 
-const hooks = vi.hoisted(() => ({ account: undefined as unknown, request: vi.fn() }));
+const hooks = vi.hoisted(() => ({
+  summary: undefined as unknown,
+  tokens: [] as PersonalAccessTokenRecord[],
+  request: vi.fn(),
+}));
 vi.mock('./gatewayClient', () => ({ gatewayRequest: hooks.request }));
 vi.mock('./useProviderDirectory', () => ({ notifyProvidersChanged: vi.fn() }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
-afterEach(() => { act(() => root?.unmount()); root = undefined; document.body.innerHTML = ''; vi.clearAllMocks(); });
+afterEach(() => {
+  act(() => root?.unmount());
+  root = undefined;
+  document.body.innerHTML = '';
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
-const activation = 'https://open-design.ai/activate?code=TEST-123';
-async function open(account: Partial<AccountSummary>, locale: Locale = 'en', section: 'account' | 'subscription' = 'account') {
-  hooks.account = { consoleUrl: 'https://open-design.ai/cloud', ...account };
-  hooks.request.mockImplementation(async () => hooks.account);
-  const container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+async function open(
+  account: Partial<CloudAccountSummary> & Record<string, unknown>,
+  locale: Locale = 'en',
+  section: 'account' | 'subscription' = 'account',
+  tokens: PersonalAccessTokenRecord[] = [],
+) {
+  hooks.summary = { consoleUrl: 'https://open-design.ai/cloud', ...account };
+  hooks.tokens = tokens;
+  hooks.request.mockImplementation(async (path: string, method = 'GET', body?: Record<string, unknown>) => {
+    if (path.startsWith('account/summary')) return hooks.summary;
+    if (path === 'connections' && method === 'GET') return { connections: [] };
+    if (path === 'tokens' && method === 'GET') return { tokens: hooks.tokens };
+    if (path === 'tokens' && method === 'POST') {
+      const created: PersonalAccessTokenRecord = {
+        id: 'pat-new',
+        name: String(body?.name ?? 'CI'),
+        tokenPrefix: 'om_pat_abcd',
+        scopes: ['projects:read', 'projects:write', 'assets:read', 'assets:write', 'exports:write', 'media:generate', 'mcp:tools'],
+        expiresAt: null,
+        lastUsedAt: null,
+        revokedAt: null,
+        createdAt: '2026-11-20T00:00:00.000Z',
+      };
+      hooks.tokens = [created, ...hooks.tokens];
+      // Matches flat CreatedPatResult returned by POST /motion-api/tokens (src/auth/pat.ts)
+      return {
+        id: created.id,
+        name: created.name,
+        tokenPrefix: created.tokenPrefix,
+        token: 'om_pat_abcd_secret_once',
+        scopes: created.scopes,
+        expiresAt: created.expiresAt,
+        createdAt: created.createdAt,
+      };
+    }
+    if (path.startsWith('tokens/') && method === 'DELETE') {
+      const id = path.slice('tokens/'.length);
+      hooks.tokens = hooks.tokens.filter(item => item.id !== id);
+      return { ok: true, id };
+    }
+    if (path === 'account/workspaces/switch' && method === 'POST') {
+      return { ok: true };
+    }
+    return hooks.summary;
+  });
+  const container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
   await act(async () => root!.render(<I18nProvider initialLocale={locale}><AccountSettings subscription={section === 'subscription'} openProviders={() => {}} /></I18nProvider>));
   return container;
 }
-const button = (container: HTMLElement, label: string) => [...container.querySelectorAll<HTMLElement>('.om-settings-actions .om-button')].find(item => item.textContent === label);
-const actions = (container: HTMLElement) => [...container.querySelectorAll('.om-settings-actions .om-button')].map(item => item.textContent);
 
-it('leaves the activation page to the browser and leads with the link only when the browser did not open', async () => {
-  let page = await open({ state: 'authorizing', authorizationUrl: activation, userCode: 'TEST-123', browserOpened: true });
-  expect(page.querySelector('[role=status]')?.textContent).toBe('Waiting for browser authorization…TEST-123');
-  const fallback = button(page, "Didn't open? Click here") as HTMLAnchorElement;
-  expect(fallback.href).toBe(activation); expect(fallback.hasAttribute('data-primary')).toBe(false);
-  expect(actions(page)).toEqual(["Didn't open? Click here", 'Cancel']);
-  act(() => root!.unmount()); document.body.innerHTML = '';
-  page = await open({ state: 'authorizing', authorizationUrl: activation, userCode: 'TEST-123', browserOpened: false });
-  expect(button(page, 'Continue in browser')?.hasAttribute('data-primary')).toBe(true);
-  expect(page.querySelectorAll(`a[href="${activation}"]`)).toHaveLength(1);
+const findButton = (container: HTMLElement, label: string) =>
+  [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === label);
+
+it('shows Local Dev Mode banner when AUTH_MODE=dev and hides OIDC sign-out', async () => {
+  const page = await open({
+    authenticated: true,
+    authMode: 'dev',
+    authMethod: 'dev_bypass',
+    user: { id: 'u1', email: 'dev@localhost', displayName: 'Local Developer' },
+    activeWorkspace: { id: 'ws-dev', slug: 'default', name: 'Local Workspace', role: 'owner' },
+    workspaces: [{ id: 'ws-dev', slug: 'default', name: 'Local Workspace', role: 'owner' }],
+  });
+  expect(page.querySelector('[data-dev-mode="true"]')?.textContent).toContain('AUTH_MODE=dev');
+  expect(page.textContent).toContain('Local Dev Mode');
+  expect(findButton(page, 'Sign out')).toBeUndefined();
 });
 
-it('says it is connecting until the link exists, then syncing with nothing left to click', async () => {
-  let page = await open({ state: 'authorizing' }, 'zh-CN');
-  expect(page.querySelector('[role=status]')?.textContent).toBe('正在连接 OpenDesign，请稍候…');
-  expect(page.textContent).not.toMatch(/组件|下载/);
-  expect(actions(page)).toEqual(['取消']);
-  act(() => root!.unmount()); document.body.innerHTML = '';
-  page = await open({ state: 'authorizing', syncing: true, browserOpened: true }, 'zh-CN');
-  expect(page.querySelector('[role=status]')?.textContent).toBe('已授权，正在同步账户信息…');
-  expect(page.querySelector('.om-account-summary h2')?.textContent).toBe('正在完成登录');
-  expect(actions(page)).toEqual(['取消']); expect((button(page, '取消') as HTMLButtonElement).disabled).toBe(true);
+it('switches workspaces and signs out cleanly in OIDC mode', async () => {
+  const fetchSpy = vi.fn(async () => {
+    hooks.summary = { authenticated: false, authMode: 'oidc', consoleUrl: 'https://open-design.ai/cloud' };
+    return Response.json({ ok: true });
+  });
+  vi.stubGlobal('fetch', fetchSpy);
+  const page = await open({
+    authenticated: true,
+    authMode: 'oidc',
+    authMethod: 'session_cookie',
+    user: { id: 'u1', email: 'ada@example.test', displayName: 'Ada' },
+    activeWorkspace: { id: 'ws-1', slug: 'studio-a', name: 'Studio A', role: 'owner' },
+    workspaces: [
+      { id: 'ws-1', slug: 'studio-a', name: 'Studio A', role: 'owner' },
+      { id: 'ws-2', slug: 'studio-b', name: 'Studio B', role: 'editor' },
+    ],
+    billing: { plan: 'pro', mediaEntitlement: 'included', balanceUsd: 12 },
+  });
+  expect(page.textContent).toContain('Studio A');
+  expect(page.textContent).toContain('Studio B');
+  await act(async () => findButton(page, 'Switch workspace')!.click());
+  expect(hooks.request).toHaveBeenCalledWith('account/workspaces/switch', 'POST', { workspaceId: 'ws-2' });
+  await act(async () => findButton(page, 'Sign out')!.click());
+  expect(fetchSpy).toHaveBeenCalledWith('/auth/logout', expect.objectContaining({ method: 'POST' }));
+  expect(page.querySelector('.om-plan-guide')).not.toBeNull();
 });
 
-it('explains a missing sign-in component, offers Retry and a copyable command that installs it where the service looks', async () => {
-  const command = "npm install --prefix '/opt/openmotion/data/account/runtime' --ignore-scripts @powerformer/vela-cli@0.1.10";
-  const writeText = vi.fn(async () => {}); Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-  const page = await open({ state: 'signed-out', errorCode: 'connector_unavailable', connectorInstall: { command },
-    error: "OpenMotion couldn't find npm to set up the OpenDesign sign-in component. Run this command in a terminal, then select Retry:" }, 'zh-CN');
-  expect(page.querySelector('[role=alert]')?.textContent).toBe('OpenMotion 找不到 npm，无法安装 OpenDesign 登录组件。请在终端运行下面的命令，然后点「重试」：');
-  expect(page.querySelector('.om-account-summary .om-code-block')?.textContent).toBe(command);
-  expect(actions(page)).toEqual(['重试', '复制口令']);
-  await act(async () => button(page, '复制口令')!.click());
-  expect(writeText).toHaveBeenCalledWith(command);
-  await act(async () => button(page, '重试')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', {});
-});
-
-it('offers a retry after a connection failure, and sign-in again with a feedback link after rejected credentials', async () => {
-  let page = await open({ state: 'signed-out', errorCode: 'setup_failed', error: "Can't connect to OpenDesign right now. Check your network and try again." });
-  expect(actions(page)).toEqual(['Retry']); expect(page.querySelector('[role=alert]')?.textContent).toContain("Can't connect to OpenDesign");
-  await act(async () => button(page, 'Retry')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', {});
-  act(() => root!.unmount()); document.body.innerHTML = '';
-  page = await open({ state: 'signed-out', errorCode: 'credentials_rejected', error: 'Account credentials could not be verified. Sign in again, and contact us if this keeps happening.' });
-  expect(actions(page)).toEqual(['Sign in again', 'Report an issue']);
-  expect((button(page, 'Report an issue') as HTMLAnchorElement).href).toBe(`${GITHUB_REPOSITORY}/issues/new/choose`);
-  act(() => root!.unmount()); document.body.innerHTML = '';
-  page = await open({ state: 'signed-out', errorCode: 'authorization_expired', error: 'Browser authorization expired or was cancelled. Sign in again.' });
-  expect(actions(page)).toEqual(['Sign in again']);
+it('creates, copies once, and revokes Personal Access Tokens (PAT)', async () => {
+  const copy = vi.fn(async () => {});
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
+  const page = await open({
+    authenticated: true,
+    authMode: 'oidc',
+    authMethod: 'session_cookie',
+    user: { id: 'u1', email: 'ada@example.test', displayName: 'Ada' },
+  });
+  const input = page.querySelector<HTMLInputElement>('input[aria-label="Token name"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Cursor Laptop');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => page.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const createCall = hooks.request.mock.calls.find(([p, m]) => p === 'tokens' && m === 'POST');
+  expect(createCall?.[2]).toEqual({ name: 'Cursor Laptop', expiresInDays: 90 });
+  expect(page.textContent).toContain('media:generate');
+  expect(page.textContent).toContain('mcp:tools');
+  expect(page.textContent).not.toContain('mcp:read');
+  expect(page.querySelector('[data-pat-created="true"]')?.textContent).toContain('om_pat_abcd_secret_once');
+  expect(page.querySelector('[data-pat-created="true"]')?.textContent).toContain('Cursor Laptop');
+  await act(async () => findButton(page, 'Copy token')!.click());
+  expect(copy).toHaveBeenCalledWith('om_pat_abcd_secret_once');
+  await act(async () => findButton(page, 'Revoke')!.click());
+  expect(hooks.request).toHaveBeenCalledWith('tokens/pat-new', 'DELETE');
 });
 
 it('shows the account email once, under the name only when the account has a different one', async () => {
-  const identity = async (user: AccountSummary['user']) => {
+  const identity = async (user: CloudAccountSummary['user']) => {
     const page = await open({ state: 'signed-in', user, plan: 'pro', balance: '1.00' });
     const result = [page.querySelector('.om-account-identity h1')?.textContent, page.querySelector('.om-account-identity p')?.textContent];
     act(() => root!.unmount()); document.body.innerHTML = '';
@@ -90,86 +159,54 @@ it('shows the account email once, under the name only when the account has a dif
   expect(await identity({ name: 'Ada', email: 'ada@example.test' })).toEqual(['Ada', 'ada@example.test']);
 });
 
-it('refreshes Go on checkout return and updates providers only after the plan changes', async () => {
-  const page = await open({ state: 'signed-in', plan: 'go', balance: '0.00' }, 'en', 'subscription');
-  const original = hooks.account;
-  hooks.request.mockImplementation(async (route: string) => route === 'settings/account/subscription' ? { opened: true } : hooks.account);
-  hooks.request.mockClear();
-  await act(async () => window.dispatchEvent(new Event('focus')));
-  expect(hooks.request).not.toHaveBeenCalled();
-  await act(async () => button(page, 'Upgrade to Plus')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', {});
-  hooks.account = { ...original as AccountSummary, plan: 'plus', balance: '4.00' };
-  await act(async () => {
-    window.dispatchEvent(new Event('focus'));
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
-  const billingReads = () => hooks.request.mock.calls.filter(([route]) => route === 'settings/account?refresh=true').length;
-  expect(billingReads()).toBe(1);
-  expect(page.querySelector('[data-guide="upgrade"]')).toBeNull();
-  expect(page.querySelector('.om-account-metrics')?.textContent).toContain('plus');
-  expect(notifyProvidersChanged).toHaveBeenCalledTimes(1);
-  await act(async () => window.dispatchEvent(new Event('focus')));
-  expect(billingReads()).toBe(1);
-});
-
 it('explains that account models still work when the plan and balance cannot be read', async () => {
   const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, billingUnavailable: true }, 'zh-CN', 'subscription');
   expect(page.textContent).toContain('暂时无法读取订阅和余额。账户模型不受影响，可以照常使用。');
 });
 
-it('asks the local service to open the subscription page in the system browser, and opens it itself only as a fallback', async () => {
-  const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan: 'plus', balance: '12.00' }, 'en', 'subscription');
-  const manage = page.querySelector<HTMLButtonElement>('.om-settings-section button.om-button')!;
-  expect(manage.textContent).toBe('Manage subscription');
-  expect(page.querySelector('.om-settings-section a')).toBeNull();
-  const popup = vi.spyOn(window, 'open').mockReturnValue(null);
-  const handoff = 'https://open-design.ai/cloud/login?intentId=intent-1';
-  hooks.request.mockImplementation(async (route: string) => route === 'settings/account/subscription' ? { url: handoff, opened: true } : hooks.account);
-  await act(async () => manage.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', {});
-  expect(popup).not.toHaveBeenCalled();
-  const fallback = { opener: window as Window | null };
-  popup.mockReturnValue(fallback as unknown as Window);
-  hooks.request.mockImplementation(async (route: string) => route === 'settings/account/subscription' ? { url: handoff, opened: false } : hooks.account);
-  await act(async () => manage.click());
-  expect(popup).toHaveBeenCalledWith(handoff, '_blank'); expect(fallback.opener).toBeNull();
-  expect(page.querySelector('.om-settings-section a')).toBeNull();
-  popup.mockReturnValue(null);
-  await act(async () => manage.click());
-  const link = page.querySelector<HTMLAnchorElement>('.om-settings-section > a.om-button')!;
-  expect(link.textContent).toBe('Continue in browser'); expect(link.href).toBe(handoff); expect(link.target).toBe('_blank');
-  await act(async () => link.click());
-  expect(page.querySelector('.om-settings-section a')).toBeNull();
-  hooks.request.mockImplementation(async (route: string) => { if (route === 'settings/account/subscription') throw new Error('offline'); return hooks.account; });
-  await act(async () => manage.click());
-  expect(document.body.textContent).toContain("Couldn't open your browser. Try again.");
-  popup.mockRestore();
+it('passes a fresh subscription entry on ordinary and middle clicks without account credentials', async () => {
+  const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan: 'plus', balance: '12.00' });
+  const link = [...page.querySelectorAll<HTMLAnchorElement>('a')].find(a => a.textContent?.includes('Manage subscription'))!;
+  link.addEventListener('click', event => event.preventDefault());
+  link.addEventListener('auxclick', event => event.preventDefault());
+  const ids = new Set<string>();
+  for (const [type, mouseButton] of [['click', 0], ['click', 0], ['auxclick', 1]] as const) {
+    const before = Date.now();
+    await act(async () => { link.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: mouseButton })); });
+    const prepared = link.href;
+    await act(async () => { link.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: mouseButton, detail: 1 })); });
+    expect(link.href).toBe(prepared);
+    const url = new URL(link.href), params = url.searchParams;
+    expect(url.origin + url.pathname).toBe('https://open-design.ai/cloud/dashboard');
+    expect([...params.keys()].sort()).toEqual(['billing', 'od_entry_at', 'od_entry_id', 'od_entry_source', 'od_origin']);
+    expect(params.get('billing')).toBe('plan');
+    expect(params.get('od_origin')).toBe('openmotion');
+    expect(params.get('od_entry_source')).toBe('openmotion_manage_subscription');
+    expect(params.get('od_entry_id')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    const at = params.get('od_entry_at')!;
+    expect(new Date(at).toISOString()).toBe(at);
+    expect(Date.parse(at)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(at)).toBeLessThanOrEqual(Date.now());
+    ids.add(params.get('od_entry_id')!);
+  }
+  expect(ids.size).toBe(3);
+  await act(async () => { link.click(); });
+  expect(ids.has(new URL(link.href).searchParams.get('od_entry_id')!)).toBe(false);
+  expect(link.target).toBe('_blank'); expect(link.rel).toBe('noreferrer');
 });
 
 it('replaces missing billing metrics with a dashboard link on 403 and restores them on retry', async () => {
   const page = await open({ state: 'signed-in', billingUnavailable: true, billingError: { status: 403 } }, 'zh-CN', 'subscription');
   expect(page.textContent).toContain('账单服务拒绝了本次查询');
   expect(page.querySelector('.om-account-metrics')).toBeNull();
-  expect([...page.querySelectorAll('.om-settings-section button.om-button')].some(item => item.textContent === '管理订阅')).toBe(true);
-  hooks.account = { state: 'signed-in', plan: 'pro', balance: '0.00', consoleUrl: 'https://open-design.ai/cloud' };
+  const url = new URL(page.querySelector('a')!.href);
+  expect(url.origin + url.pathname).toBe('https://open-design.ai/cloud/dashboard');
+  expect(url.searchParams.get('billing')).toBe('plan');
+  expect(url.searchParams.get('od_origin')).toBe('openmotion');
+  hooks.summary = { state: 'signed-in', plan: 'pro', balance: '0.00', consoleUrl: 'https://open-design.ai/cloud' };
   await act(async () => page.querySelector<HTMLButtonElement>('button[aria-busy]')!.click());
   expect(page.querySelector('.om-account-metrics')?.textContent).toContain('$0.00');
   expect(page.textContent).not.toContain('账单服务拒绝了本次查询');
-});
-
-it('keeps the account page focused on sign-in and account management', async () => {
-  const page = await open({ state: 'signed-out' });
-  expect(actions(page)).toEqual(['Sign in with OpenDesign']);
-  expect(page.querySelector('.om-account-metrics, [data-guide="upgrade"]')).toBeNull();
-  await act(async () => button(page, 'Sign in with OpenDesign')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', {});
-
-  hooks.account = { state: 'signed-in', plan: 'go', balance: '12.00' };
-  await act(async () => window.dispatchEvent(new Event('motion:account-changed')));
-  expect(actions(page)).toEqual(['Sign out']);
-  expect(page.querySelector('.om-account-metrics, .om-plan-guide')).toBeNull();
-  expect(page.textContent).toContain('Model providers');
 });
 
 it.each(['account', 'subscription'] as const)('shows the same sign-in benefits on the %s page', async section => {
@@ -178,21 +215,18 @@ it.each(['account', 'subscription'] as const)('shows the same sign-in benefits o
   expect(page.querySelector('.om-plan-guide .om-badge')?.textContent).toBe('Plus 及以上');
   expect(page.querySelector('.om-plan-guide .om-button')?.textContent).toBe('使用 OpenDesign 登录');
   expect([...page.querySelectorAll('.om-account-capabilities li')].map(item => item.textContent)).toEqual(['图片', '视频', '配音', '音乐']);
-  expect(page.querySelector('.om-plan-guide p')?.textContent).toBe('登录后升级到 Plus，即可在 OpenMotion 里直接生成图片、视频、配音和音乐，不用配置 API 密钥。');
-  expect(page.querySelector('.om-account-offer')?.textContent).toBe('多模态 $14/月起');
-  expect(page.querySelectorAll('.om-account-metrics .om-card')).toHaveLength(section === 'subscription' ? 2 : 0);
   expect(page.querySelector('[data-guide="upgrade"]')).toBeNull();
 });
 
 it('offers Free and Go accounts an upgrade through the registered entry source, and nothing to paid plans', async () => {
   for (const plan of ['free', 'go']) {
     const page = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan, balance: '0.00' }, 'en', 'subscription');
-    const [upgrade, manage] = page.querySelectorAll<HTMLButtonElement>('[data-guide="upgrade"] button');
+    const [upgrade, manage] = page.querySelectorAll<HTMLAnchorElement>('[data-guide="upgrade"] a');
     expect(page.querySelector('.om-plan-name')?.textContent).toBe(plan === 'free' ? 'Free plan' : 'Go');
-    expect(upgrade.textContent).toContain('Upgrade to Plus'); expect(upgrade.hasAttribute('data-primary')).toBe(true);
-    expect(manage.textContent).toContain('Manage subscription');
-    expect(page.querySelector('.om-settings-section .om-button')).toBeNull();
-    expect(page.querySelector('.om-account-summary')).toBeNull();
+    expect(new URL(upgrade.href).searchParams.get('od_entry_source')).toBe('openmotion_manage_subscription');
+    expect(upgrade.textContent).toContain('Upgrade to Plus');
+    expect(new URL(manage.href).searchParams.get('od_entry_source')).toBe('openmotion_manage_subscription');
+    expect(page.querySelector('.om-account-summary h2')?.textContent).toBe('Connected to OpenDesign');
   }
   const paid = await open({ state: 'signed-in', user: { email: 'ada@example.test' }, plan: 'plus', balance: '12.00' }, 'en', 'subscription');
   expect(paid.querySelector('[data-guide="upgrade"]')).toBeNull();

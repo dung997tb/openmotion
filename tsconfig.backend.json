@@ -14,11 +14,15 @@
   },
   "include": [
     "*.ts",
+    "src/**/*.ts",
     "shared/**/*.ts",
     "gateway/**/*.ts",
     "tracking/**/*.ts",
     "scripts/**/*.ts",
     "packages/design-system/*.js",
-    "packages/motion-package/*.mjs"
+    "packages/motion-package/*.mjs",
+    "packages/observability/config.ts",
+    "packages/observability/sanitize.ts",
+    "packages/observability/index.ts"
   ]
 }

@@ -1,3 +1,4 @@
+import { useCloudGroupMove } from "./cloudGroupMove";
 import { useCallback } from "react";
 import { trackStudioEvent } from "../utils/studioTelemetry";
 import { isAudioDomElement } from "../utils/timelineInspector";
@@ -52,7 +53,7 @@ export interface UseDomEditSessionParams extends DomEditTimelineParams {
     (iframe: HTMLIFrameElement) => Promise<void>
   >;
   syncPreviewHotkeys: (iframe: HTMLIFrameElement | null) => void;
-  reloadPreview: () => void;
+  reloadPreview: (changedPaths?: string | readonly string[]) => void;
   setRefreshKey: React.Dispatch<React.SetStateAction<number>>;
   openSourceForSelection?: (sourceFile: string, target: PatchTarget) => void;
   sdkSession?: Composition | null;
@@ -172,7 +173,7 @@ export function useDomEditSession({
     refreshDomEditSelectionFromPreview,
   });
   // ── GSAP cache (hoisted so both useGsapScriptCommits and useDomEditWiring share the same instance) ──
-  const { version: gsapCacheVersion, bump: bumpGsapCache } = useGsapCacheVersion();
+  const { version: gsapCacheVersion, changedPath: gsapChangedPath, bump: bumpGsapCache } = useGsapCacheVersion();
 
   const {
     commitMutation: gsapCommitMutation,
@@ -195,6 +196,7 @@ export function useDomEditSession({
   });
 
   const {
+    commitDomEditPatchBatches,
     resolveImportedFontAsset,
     handleDomStyleCommit,
     handleDomStyleCommitForSelection,
@@ -400,9 +402,8 @@ export function useDomEditSession({
     previewIframeRef,
     previewIframe,
     captionEditMode: previewCaptionEditMode,
-    refreshKey,
     gsapCacheVersion,
-    bumpGsapCache,
+    gsapChangedPath,
     showToast,
     refreshPreviewDocumentVersion,
     syncPreviewHotkeys,
@@ -429,6 +430,7 @@ export function useDomEditSession({
     setActiveGroupElement,
     onClickToSource,
   });
+  const commitCanvasGroup = useCloudGroupMove(projectIdRef, writeProjectFile, bumpGsapCache, reloadPreview);
   const {
     getGsapAnimationsForSelection,
     handleGsapAwarePathOffsetCommit,
@@ -442,6 +444,7 @@ export function useDomEditSession({
     handleUnroll,
     commitMutation,
   } = useGsapAwareEditing({
+    commitCanvasGroup,
     domEditSelection,
     selectedGsapAnimations,
     gsapCommitMutation,
@@ -488,6 +491,7 @@ export function useDomEditSession({
     agentPromptSelectionContext,
     domEditSelectionRef,
     // Callbacks
+    commitDomEditPatchBatches,
     handleTimelineElementSelect,
     handlePreviewCanvasMouseDown,
     handlePreviewCanvasPointerMove,

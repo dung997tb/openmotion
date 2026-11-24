@@ -2,9 +2,12 @@
 
 import React, { act, useRef } from "react";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { usePlayerStore } from "../player/store/playerStore";
+import { useCaptionStore } from "../captions/store";
+import { registerCaptionIframe } from "../captions/components/CaptionOverlayUtils";
+import { buildCaptionModel } from "../captions/parser";
 import { useAppHotkeys } from "./useAppHotkeys";
 import { mountReactHarness } from "./domSelectionTestHarness";
 import { trackStudioEvent } from "../utils/studioTelemetry";
@@ -35,12 +38,14 @@ function selection(): DomEditSelection {
 function Harness() {
   const selectionRef = useRef<DomEditSelection | null>(selection());
   const hotkeys = useAppHotkeys({
+    projectId: "current",
     handleTimelineElementsDelete: vi.fn(async () => undefined),
     handleTimelineElementSplit: vi.fn(async () => undefined),
     handleDomEditElementDelete: domDelete,
     domEditSelectionRef: selectionRef,
     clearDomSelectionRef: useRef<() => void>(() => undefined),
     editHistory: {
+      projectWide: true,
       canUndo: true,
       canRedo: true,
       undo: historyUndo,
@@ -63,6 +68,11 @@ function Harness() {
   sync = hotkeys.syncPreviewHotkeys;
   return null;
 }
+
+beforeEach(() => {
+  usePlayerStore.getState().beginTimelineSession("current");
+  usePlayerStore.getState().setTimelineReady(true);
+});
 
 afterEach(() => {
   if (root) act(() => root?.unmount());
@@ -101,6 +111,17 @@ describe("preview iframe hotkey forwarding", () => {
     expect(domDelete).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks editing shortcuts from the visible canvas until its timeline is ready", () => {
+    const inner = mountWithPreview();
+    usePlayerStore.getState().setTimelineReady(false);
+    const pressDelete = () => inner.document.body.dispatchEvent(new inner.KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    pressDelete();
+    expect(domDelete).not.toHaveBeenCalled();
+    usePlayerStore.getState().setTimelineReady(true);
+    pressDelete();
+    expect(domDelete).toHaveBeenCalledTimes(1);
+  });
+
   function mountWithPreview(): Window & typeof globalThis {
     root = mountReactHarness(<Harness />);
     const iframe = document.createElement("iframe");
@@ -119,19 +140,36 @@ describe("preview iframe hotkey forwarding", () => {
     });
   }
 
-  it('ignores editing shortcuts only while the project is initializing', async () => {
+  it("blocks a previous project's ready timeline even when the timeline dock is hidden", async () => {
     const inner = mountWithPreview();
-    const loading = document.body.appendChild(document.createElement('div'));
-    loading.setAttribute('data-editor-initializing', 'true');
-    await press(inner, { key: 'z', ctrlKey: true });
-    await press(inner, { key: 'Delete' });
+    usePlayerStore.getState().beginTimelineSession("previous");
+    usePlayerStore.getState().setTimelineReady(true);
+    await press(inner, { key: "z", ctrlKey: true });
+    await press(inner, { key: "Delete" });
     expect(historyUndo).not.toHaveBeenCalled();
     expect(domDelete).not.toHaveBeenCalled();
-    loading.setAttribute('data-editor-initializing', 'false');
-    await press(inner, { key: 'z', ctrlKey: true });
-    await press(inner, { key: 'Delete' });
-    expect(historyUndo).toHaveBeenCalledTimes(1);
-    expect(domDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("undoes a visible caption draft before stepping cloud project history", async () => {
+    const inner = mountWithPreview();
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    Object.defineProperty(iframe, "offsetParent", {value: document.body});
+    const unregister = registerCaptionIframe({current: iframe});
+    const prior = useCaptionStore.getState();
+    const model = buildCaptionModel([], { width: 640, height: 360, duration: 5 });
+    const changed = { ...model };
+    try {
+      useCaptionStore.setState({ isEditMode: true, model: changed, past: [model], future: [] });
+      await press(inner, {key: "z", ctrlKey: true});
+      expect(useCaptionStore.getState().model).toBe(model);
+      expect(historyUndo).not.toHaveBeenCalled();
+      await press(inner, {key: "z", ctrlKey: true});
+      expect(historyUndo).toHaveBeenCalledOnce();
+    } finally {
+      unregister();
+      useCaptionStore.setState(prior);
+    }
   });
 
   it("takes one tracked undo step per Cmd+Z pressed inside the preview", async () => {

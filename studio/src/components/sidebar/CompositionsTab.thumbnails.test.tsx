@@ -86,7 +86,7 @@ beforeEach(() => {
   [autoIntersect, observed.length] = [true, 0];
   URL.createObjectURL = vi.fn(() => `blob:frame-${++frames}`);
   URL.revokeObjectURL = vi.fn();
-  usePlayerStore.setState({ previewBooted: true });
+  usePlayerStore.setState({ previewBooted: false });
 });
 
 afterEach(() => {
@@ -111,13 +111,11 @@ async function nextRevisionShows(host: HTMLElement, revision: string, frame: str
 }
 
 describe("composition card thumbnails", () => {
-  it("render through the thumbnail scheduler once the preview boots, and never point an image at the route", async () => {
+  it("render through the shared scheduler when the preview is closed, and never point an image at the route", async () => {
     usePlayerStore.getState().reset();
     const host = mount();
-    expect(renders).toHaveLength(0);
-    expect(host.querySelector('[data-testid="composition-cover-placeholder"]')).toBeTruthy();
-
-    act(() => usePlayerStore.getState().markPreviewBooted());
+    expect(usePlayerStore.getState().previewBooted).toBe(false);
+    expect(fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ priority: "low" }));
     expect(renders.map((r) => [r.url.pathname, r.url.searchParams.get("t")])).toEqual([
       ["/api/projects/demo/thumbnail/compositions/headline.html", "3.00"],
     ]);
@@ -152,6 +150,23 @@ describe("composition card thumbnails", () => {
       "/api/projects/demo/thumbnail/compositions/seen.html",
     ]);
     expect(seen.root).toBe(document.querySelector("[data-composition-list]"));
+    act(() => seen.callback([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver));
+    expect(renders[0]!.signal.aborted).toBe(true);
+  });
+
+  it("releases an offscreen card and reuses its cached frame on return", async () => {
+    const host = mount();
+    renders[0]!.answer();
+    await settle();
+    const entry = observed[0]!;
+    const intersect = (isIntersecting: boolean) => act(() => entry.callback(
+      [{ isIntersecting } as IntersectionObserverEntry], {} as IntersectionObserver,
+    ));
+    intersect(false);
+    expect(thumbnailScheduler.getDiagnostics().leases).toBe(0);
+    intersect(true);
+    expect(shown(host)).toBe("blob:frame-1");
+    expect(renders).toHaveLength(1);
   });
 
   it("keep showing the last frame, leased, until the next revision's frame is ready", async () => {

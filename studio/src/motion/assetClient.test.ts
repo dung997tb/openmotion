@@ -5,6 +5,7 @@ import { MAX_ASSET_BYTES } from '../../../shared/asset-limits';
 
 afterEach(() => vi.unstubAllGlobals());
 const file = () => new File(['media'], 'network error ENOENT.png', { type: 'image/png' });
+
 it('rejects empty and oversized files before sending a request', async () => {
   const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
   await expect(uploadLibraryAsset(new File([], 'empty.png'))).rejects.toMatchObject({ outcome: 'rejected', reason: 'unreadable' });
@@ -30,6 +31,7 @@ it.each([
   await expect(uploadLibraryAsset(file())).rejects.toMatchObject({ outcome: 'rejected', reason, message: 'File was not uploaded.' });
   expect(fetcher).toHaveBeenCalledOnce();
 });
+
 it.each([
   [200, ''], [200, '{}'], [200, '{"asset":{"id":"a"}}'], [200, '{"asset":{"id":"a","currentVersionId":"v","versions":[]}}'],
   [502, '<html>proxy error</html>'], [400, '{"error":"Failed cleanup after saving /private/path"}'],
@@ -38,18 +40,53 @@ it.each([
   await expect(uploadLibraryAsset(file())).rejects.toMatchObject({ outcome: 'unknown', reason: undefined });
   expect(fetcher).toHaveBeenCalledOnce();
 });
+
 it.each([new TypeError('Failed to fetch'), new DOMException('Timed out', 'AbortError')])('does not retry a transport error', async error => {
   const fetcher = vi.fn().mockRejectedValue(error); vi.stubGlobal('fetch', fetcher);
   await expect(uploadLibraryAsset(file())).rejects.toMatchObject({ outcome: 'unknown' });
   expect(fetcher).toHaveBeenCalledOnce();
 });
-it('returns confirmed assets and preserves the version destination and request identity', async () => {
+
+it('completes the 3-step presigned upload flow (ticket -> PUT -> confirm) and returns the confirmed asset', async () => {
   const asset = { id: 'asset', currentVersionId: 'version', versions: [{ id: 'version' }] };
-  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ asset })); vi.stubGlobal('fetch', fetcher);
+  const fetcher = vi.fn(async (input: string, init?: RequestInit) => {
+    if (input === '/motion-api/assets/uploads/tickets' && init?.method === 'POST') {
+      const payload = JSON.parse(String(init.body));
+      expect(payload).toMatchObject({ filename: 'network error ENOENT.png', mimeType: 'image/png', targetAssetId: 'asset', purpose: 'library_asset' });
+      expect(payload.requestId).toMatch(/^[\w-]+$/);
+      return Response.json({
+        uploadId: 'upl-1',
+        uploadUrl: 'https://s3.example.test/staging/upl-1?sig=abc',
+        method: 'PUT',
+        headers: { 'Content-Type': 'image/png', 'Content-Length': '5' },
+      }, { status: 201 });
+    }
+    if (input === 'https://s3.example.test/staging/upl-1?sig=abc' && init?.method === 'PUT') {
+      const headers = (init.headers ?? {}) as Record<string, string>;
+      expect(headers['Content-Type']).toBe('image/png');
+      expect(headers['Content-Length']).toBeUndefined();
+      return new Response('', { status: 200 });
+    }
+    if (input === '/motion-api/assets/uploads/upl-1/confirm' && init?.method === 'POST') {
+      return Response.json({ state: 'committed', asset });
+    }
+    throw new Error(`Unexpected fetch ${input}`);
+  });
+  vi.stubGlobal('fetch', fetcher);
   await expect(uploadLibraryAsset(file(), { assetId: 'asset', parentVersionId: 'parent' })).resolves.toEqual(asset);
-  const url = new URL(String(fetcher.mock.calls[0][0]), 'http://localhost');
-  expect(url.searchParams.get('assetId')).toBe('asset');
-  expect(url.searchParams.get('parentVersionId')).toBe('parent');
-  expect(url.searchParams.get('requestId')).toMatch(/^[\w-]+$/);
-  expect(fetcher).toHaveBeenCalledOnce();
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+it('falls back to legacy direct upload when presigned ticket endpoints return 404', async () => {
+  const asset = { id: 'asset', currentVersionId: 'version', versions: [{ id: 'version' }] };
+  const fetcher = vi.fn(async (input: string) => {
+    if (input.includes('/assets/uploads')) return new Response('', { status: 404 });
+    return Response.json({ asset });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  await expect(uploadLibraryAsset(file(), { assetId: 'asset', parentVersionId: 'parent' })).resolves.toEqual(asset);
+  const legacyUrl = new URL(String(fetcher.mock.calls.at(-1)?.[0]), 'http://localhost');
+  expect(legacyUrl.pathname).toBe('/motion-api/assets/upload');
+  expect(legacyUrl.searchParams.get('assetId')).toBe('asset');
+  expect(legacyUrl.searchParams.get('parentVersionId')).toBe('parent');
 });

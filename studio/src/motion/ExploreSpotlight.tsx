@@ -3,9 +3,10 @@ import { ExploreCoverImage } from './ExploreCoverImage';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
-import { mediaEditorDestination, motionStudio, type StudioDestination, type StudioScene } from './creativeStudios';
+import { mediaEditorDestination, mediaLabels, motionStudio, type StudioDestination, type StudioScene } from './creativeStudios';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 import { sceneExamples } from './sceneShowcase';
-import { findModelHub } from './modelHubs';
+import { gemini4Spotlight as geminiHub } from './gemini4Spotlight';
 import { motionSkills, motionStudioCover } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
@@ -29,7 +30,6 @@ interface FeaturedSlide {
   /** Launches the matching end-to-end scenario workflow. */
   scenario?: ScenarioId;
 }
-const geminiHub = findModelHub('gemini-4')!;
 const slides: FeaturedSlide[] = [{
   id: motionStudio.id, title: motionStudio.title, subtitle: 'Motion design', icon: motionStudio.icon,
   hint: 'Animate type and shapes, then edit their timing on the timeline.', poster: motionStudioCover?.poster ?? '', clip: motionStudioCover?.video,
@@ -80,8 +80,13 @@ export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motio
   onStartScenario?: (id: ScenarioId) => void;
 }) {
   const { t } = useI18n();
+  const designStudioEnabled = useCloudFeatureEnabled('designStudio');
+  const visibleSlides = onStartScenario
+    ? slides
+    : slides.filter(slide => Boolean(slide.hub || slide.scene || slide.id === 'black-friday' || slide.id === motionStudio.id));
   const root = useRef<HTMLElement>(null);
   const [index, setIndex] = useState(0);
+  const activeIndex = index % visibleSlides.length;
   const [paused, setPaused] = useState(() => matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [visible, setVisible] = useState(false);
   const [readingSlide, setReadingSlide] = useState(false);
@@ -110,26 +115,29 @@ export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motio
   }, []);
 
   useEffect(() => {
-    if (clock.current.index !== index) clock.current = { index, remaining: slideDuration };
+    if (clock.current.index !== activeIndex) clock.current = { index: activeIndex, remaining: slideDuration };
     if (!playing) return;
     const started = performance.now();
-    const timer = window.setTimeout(() => setIndex((index + 1) % slides.length), clock.current.remaining);
+    const timer = window.setTimeout(() => setIndex((activeIndex + 1) % visibleSlides.length), clock.current.remaining);
     return () => {
       window.clearTimeout(timer);
       clock.current.remaining = Math.max(0, clock.current.remaining - (performance.now() - started));
     };
-  }, [index, playing]);
+  }, [activeIndex, playing, visibleSlides.length]);
 
 
-  return <section ref={root} className="om-discovery-hero om-feature-carousel" data-scene={slides[index].id} aria-label={t('Featured')}
+  return <section ref={root} className="om-discovery-hero om-feature-carousel" data-scene={visibleSlides[activeIndex].id} aria-label={t('Featured')}
     onFocus={() => setReadingSlide(true)} onBlur={event => setReadingSlide(event.currentTarget.contains(event.relatedTarget))}
     style={{ '--slide-duration': slideDuration + 'ms', '--slide-play-state': playing ? 'running' : 'paused' } as CSSProperties}>
-    {slides.map((slide, i) => {
-      const current = i === index;
+    {visibleSlides.map((slide, i) => {
+      const current = i === activeIndex;
       const scene = slide.scene;
       const blackFriday = slide.id === 'black-friday';
       const motionSlide = slide.id === motionStudio.id;
       const showWorkflowPrimary = Boolean(slide.scenario && onStartScenario);
+      const subtitleLabel = !designStudioEnabled && scene?.target.studio.id === 'design'
+        ? mediaLabels[scene.target.scene.modality]
+        : slide.subtitle;
       // A hub slide is clickable as a whole; its button stays the keyboard entry.
       return <div key={slide.id} className="om-feature-slide" data-scene={slide.id} data-clickable={slide.hub ? 'true' : undefined} aria-hidden={!current} inert={!current}
         onClick={slide.hub ? event => { if ((event.target as Element).closest('button')) return; track('slide_action', { slide: slide.id, position: i }); onModelHub(slide.hub!); } : undefined}>
@@ -139,7 +147,7 @@ export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motio
         </div></div>
         {slide.credit && <small className="om-scene-credit">{slide.credit}</small>}
         <div className="om-discovery-hero-copy">
-          <span><RemixIcon name={slide.icon} size={16} />{t(slide.subtitle)}</span>
+          <span><RemixIcon name={slide.icon} size={16} />{t(subtitleLabel)}</span>
           <h2>{t(slide.title)}</h2><p>{t(slide.hint)}</p>
           <div className="om-hero-actions">
             {showWorkflowPrimary && <Button variant="ghost" type="button" className="om-button h-auto" data-slide-action="workflow" data-primary="media" onClick={() => {
@@ -168,7 +176,7 @@ export function ExploreSpotlight({ active, onNavigate, onOpenMotionEditor, motio
       </div>;
     })}
     <div className="om-feature-controls om-media-pagination om-media-segments" role="group" aria-label={t('Featured')}>
-      {slides.map((slide, i) => <Button variant="plain" type="button" key={slide.id} aria-label={t('Featured') + ' · ' + t(slide.title)} aria-current={i === index ? 'true' : undefined} onClick={() => { track('slide_select', { slide: slide.id, position: i }); setIndex(i); }}>
+      {visibleSlides.map((slide, i) => <Button variant="plain" type="button" key={slide.id} aria-label={t('Featured') + ' · ' + t(slide.title)} aria-current={i === activeIndex ? 'true' : undefined} onClick={() => { track('slide_select', { slide: slide.id, position: i }); setIndex(i); }}>
         <span className="om-media-track" />
       </Button>)}
     </div>

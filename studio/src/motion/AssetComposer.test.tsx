@@ -10,8 +10,7 @@ const { generate, loadGateway, gatewayRequest, chrome } = vi.hoisted(() => ({
   chrome: { openModelSettings: vi.fn(), openProviderSettings: vi.fn(), openAccountSettings: vi.fn(), openSubscriptionSettings: vi.fn() },
 }));
 vi.mock('./assetClient', () => ({ assetRequest: generate }));
-vi.mock('./gatewayClient', () => ({ loadGateway, gatewayRequest }));
-vi.mock('./AssetConversation', () => ({ AssetConversation: () => null }));
+vi.mock('./gatewayClient', () => ({ loadGateway, gatewayRequest, invalidateGatewayCache: vi.fn() }));
 vi.mock('../i18n/I18n', () => ({ useI18n: () => ({ t: (text: string) => text }) }));
 vi.mock('./WorkspaceFrame', () => ({ useWorkspaceChrome: () => chrome }));
 const model: Model = { id: 'codex:image', provider: 'codex', modelId: 'image', label: 'Codex Image', modality: 'image', source: 'builtin', mode: 'text-to-image' };
@@ -19,20 +18,18 @@ let root: Root, container: HTMLDivElement;
 const created = vi.fn();
 const props: ComponentProps<typeof AssetComposer> = {
   active: true, draft: { modality: 'image', model: model.id, prompt: 'Continue the original', parameters: { size: '1536x1024', custom: { value: 7 } }, references: [] },
-  setDraft: vi.fn(), agentReferences: [], setAgentReferences: vi.fn(), jobs: [], mode: 'direct', onMode: vi.fn(), taskIds: {},
+  setDraft: vi.fn(), jobs: [],
   history: { tasks: [], loading: false, onRetry: vi.fn(), onSelect: vi.fn() }, selectingTask: false,
-  onNew: vi.fn(), onChatChanged: vi.fn(), onChatStarted: vi.fn(), onCancel: vi.fn(), onView: vi.fn(), onReference: vi.fn(), onCreated: created, onError: vi.fn(), onClose: vi.fn(),
+  onNew: vi.fn(), onCancel: vi.fn(), onView: vi.fn(), onReference: vi.fn(), onCreated: created, onError: vi.fn(), onClose: vi.fn(),
 };
 beforeEach(() => { vi.clearAllMocks(); loadGateway.mockResolvedValue({ models: [model], status: { providers: [{ id: 'codex', available: true }], routes: {} } }); container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
-it('temporarily hides the Agent tab and keeps direct generation available when viewing a conversation', async () => {
-  await act(async () => root.render(<AssetComposer {...props} mode="agent" />));
+it('exposes direct generation without a retired local Agent conversation tab', async () => {
+  await act(async () => root.render(<AssetComposer {...props} />));
   expect(container.querySelector('button[aria-label="Agent conversation"]')).toBeNull();
   const direct = container.querySelector<HTMLButtonElement>('button[aria-label="Direct generation"]')!;
   expect(direct.textContent).toBe('Generate');
-  expect(direct.getAttribute('aria-pressed')).toBe('false');
-  await act(async () => direct.click());
-  expect(props.onMode).toHaveBeenCalledExactlyOnceWith('direct');
+  expect(direct.getAttribute('aria-pressed')).toBe('true');
 });
 it('restores native and custom parameters without submitting until explicitly requested', async () => {
   generate.mockResolvedValue({ job: { id: 'new-job' } });
@@ -113,7 +110,7 @@ it('syncs unknown Cloud capability without remounting or losing the draft and re
   expect(container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.disabled).toBe(true);
   loadGateway.mockResolvedValue(cloudState([{ ...cloudImage, supportsImageReference: true, maxInputImages: 3 }]));
   await act(async () => Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Sync models')!.click());
-  expect(gatewayRequest).toHaveBeenCalledExactlyOnceWith('settings/providers/opendesign/sync', 'POST', {});
+  expect(gatewayRequest).toHaveBeenCalledExactlyOnceWith('models/catalog?refresh=true', 'GET');
   expect(container.querySelector<HTMLButtonElement>('.om-creation-reference')!.disabled).toBe(false);
   expect(container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe(draft.prompt);
   expect(container.textContent).toContain('Cup'); expect(props.setDraft).not.toHaveBeenCalled(); expect(generate).not.toHaveBeenCalled();
@@ -129,7 +126,7 @@ it('discards an earlier model response after settings change and keeps a removed
   expect(props.setDraft).not.toHaveBeenCalled();
   gatewayRequest.mockResolvedValue({}); loadGateway.mockResolvedValue(cloudState([{ ...cloudImage, supportsImageReference: true }]));
   await act(async () => Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Sync models')!.click());
-  expect(gatewayRequest).toHaveBeenCalledExactlyOnceWith('settings/providers/opendesign/sync', 'POST', {});
+  expect(gatewayRequest).toHaveBeenCalledExactlyOnceWith('models/catalog?refresh=true', 'GET');
   expect(container.textContent).not.toContain('This task’s model is unavailable');
 });
 it('distinguishes explicit unsupported capability from unknown and reports failed sync', async () => {
@@ -319,7 +316,7 @@ it('resumes an old account task while preserving a newer prompt draft', async ()
   const job = { id: 'old-job', model: account, prompt: 'old prompt', parameters: {}, modality: 'image' as const, state: 'failed' as const, phase: 'failed', remoteId: 'original-remote', assets: [], requestHash: 'snapshot', createdAt: 1, updatedAt: 2 };
   const resume = vi.fn(async () => {}), setDraft = vi.fn();
   const draft = { ...props.draft, model: account.id, prompt: 'new prompt for next generation', parameters: {} };
-  await act(async () => root.render(<AssetComposer {...props} draft={draft} setDraft={setDraft} jobs={[job]} taskIds={{ direct: job.id }} onResume={resume} />));
+  await act(async () => root.render(<AssetComposer {...props} draft={draft} setDraft={setDraft} jobs={[job]} taskId={job.id} onResume={resume} />));
   const button = [...container.querySelectorAll('button')].find(node => node.textContent === 'Continue download')!;
   await act(async () => button.click());
   expect(resume).toHaveBeenCalledExactlyOnceWith(job);
@@ -1250,4 +1247,86 @@ it('shows reference quota counter, compact thumbnail grid, drag/paste upload, st
     studio={studio}
   />));
   expect(onInfo).not.toHaveBeenCalled();
+});
+
+it('focuses and pulses the prompt field when promptAppliedToken increments in video and image workspaces', async () => {
+  vi.useFakeTimers();
+  try {
+    const { mediaEditorDestination } = await import('./creativeStudios');
+    const videoStudio = {
+      catalog: { catalog: undefined, failed: false, retry: vi.fn() },
+      chooseModel: vi.fn(),
+      remember: vi.fn(),
+      destination: mediaEditorDestination('text-to-video'),
+    };
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'video', prompt: '', references: [] }} promptAppliedToken={0} studio={videoStudio} />,
+    ));
+    const videoPromptBox = container.querySelector<HTMLElement>('.om-creation-prompt')!;
+    const videoTextarea = container.querySelector<HTMLTextAreaElement>('.om-creation-prompt textarea')!;
+    expect(document.activeElement).not.toBe(videoTextarea);
+    expect(videoPromptBox.getAttribute('data-prompt-applied')).toBeNull();
+
+    const appliedPrompt = 'Film a slow-motion close-up of an orange soda bottle.';
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'video', prompt: appliedPrompt, references: [] }} promptAppliedToken={1} studio={videoStudio} />,
+    ));
+    expect(document.activeElement).toBe(videoTextarea);
+    expect(videoTextarea.selectionStart).toBe(appliedPrompt.length);
+    expect(videoPromptBox.getAttribute('data-prompt-applied')).toBe('a');
+
+    // Repeat click toggles pulse key and re-focuses even when prompt text is unchanged.
+    videoTextarea.blur();
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'video', prompt: appliedPrompt, references: [] }} promptAppliedToken={2} studio={videoStudio} />,
+    ));
+    expect(document.activeElement).toBe(videoTextarea);
+    expect(videoPromptBox.getAttribute('data-prompt-applied')).toBe('b');
+
+    await act(async () => { vi.advanceTimersByTime(950); });
+    expect(videoPromptBox.getAttribute('data-prompt-applied')).toBeNull();
+
+    // Image workspace highlights the intrinsic field shell and focuses the embedded textarea.
+    const imageStudio = {
+      catalog: { catalog: undefined, failed: false, retry: vi.fn() },
+      chooseModel: vi.fn(),
+      remember: vi.fn(),
+      destination: mediaEditorDestination('text-to-image'),
+    };
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'image', prompt: 'Amber glass bottle', references: [] }} promptAppliedToken={3} studio={imageStudio} />,
+    ));
+    const imageField = container.querySelector<HTMLElement>('.om-field[data-form-field="intrinsic"]')!;
+    const imageTextarea = container.querySelector<HTMLTextAreaElement>('.om-image-prompt')!;
+    expect(document.activeElement).toBe(imageTextarea);
+    expect(imageField.getAttribute('data-prompt-applied')).toBe('a');
+
+    // Freshly mounting a closed standalone library composer with a pending token consumes it immediately.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    const reusedPrompt = 'Neon alley rain scene';
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'image', prompt: reusedPrompt, references: [] }} promptAppliedToken={1} />,
+    ));
+    const libraryPromptBox = container.querySelector<HTMLElement>('.om-creation-prompt')!;
+    const libraryTextarea = container.querySelector<HTMLTextAreaElement>('.om-creation-prompt textarea')!;
+    expect(document.activeElement).toBe(libraryTextarea);
+    expect(libraryTextarea.selectionStart).toBe(reusedPrompt.length);
+    expect(libraryPromptBox.getAttribute('data-prompt-applied')).toBe('a');
+    await act(async () => { vi.advanceTimersByTime(950); });
+    expect(libraryPromptBox.getAttribute('data-prompt-applied')).toBeNull();
+
+    // A later task remount with token reset to 0 does not replay focus or highlight.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(
+      <AssetComposer {...props} draft={{ modality: 'image', prompt: reusedPrompt, references: [] }} promptAppliedToken={0} />,
+    ));
+    const remountedBox = container.querySelector<HTMLElement>('.om-creation-prompt')!;
+    const remountedTextarea = container.querySelector<HTMLTextAreaElement>('.om-creation-prompt textarea')!;
+    expect(document.activeElement).not.toBe(remountedTextarea);
+    expect(remountedBox.getAttribute('data-prompt-applied')).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });

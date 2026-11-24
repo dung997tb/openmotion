@@ -10,7 +10,7 @@ export function exportCaptionSource(html: string, format: 'srt' | 'vtt', parse: 
   const duration = Number(root.getAttribute('data-duration'));
   if (!Number.isFinite(duration) || duration <= 0) throw new Error('Composition requires an explicit duration');
   const identity = (node: Element) => node.getAttribute('data-caption-track') || node.id.match(/^(?:transcript|text)-([a-f0-9-]{36})-/)?.[1];
-  const selected = [...root.querySelectorAll('[data-caption-track], [id^=transcript-], [id^=text-]')].filter(node => identity(node) && (trackId
+  const selected = [...root.querySelectorAll('[data-caption-track], [id^=transcript-], [id^=text-]')].filter(node => node.closest('[data-composition-id]') === root && identity(node) && (trackId
     ? identity(node) === trackId
     : node.getAttribute('data-timeline-role') !== 'text' && !node.id.startsWith('text-')));
   if (trackId && !selected.length) throw new Error('Caption track no longer exists');

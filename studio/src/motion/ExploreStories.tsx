@@ -12,6 +12,7 @@ import { floatingCity, seedanceStory, gptImageStory, storyModels, type ModelStor
 import { animeOpeningScenario, mcpCapabilities } from './mcpCapabilities';
 import { supportsScene, type StudioDestination } from './creativeStudios';
 import { archivedSkillPoster } from './skillCatalog';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 const sale = archivedSkillPoster('sale-countdown');
 const shorts = archivedSkillPoster('multi-clips-to-reels');
@@ -30,6 +31,7 @@ type StoryActions = {
 
 export function ExploreHighlights({ onChooseStudio, onOpenBlackFriday }: Pick<StoryActions, 'onChooseStudio' | 'onOpenBlackFriday'>) {
   const { t } = useI18n();
+  const designStudioEnabled = useCloudFeatureEnabled('designStudio');
   const jump = (id: string) => {
     const heading = document.getElementById('explore-' + id);
     heading?.focus({ preventScroll: true });
@@ -41,7 +43,7 @@ export function ExploreHighlights({ onChooseStudio, onOpenBlackFriday }: Pick<St
       <StoryCard title={seedanceStory.title} poster={paintedFilm} label={t('Cinema Studio') + ' · ' + t('Video')} description={seedanceStory.description} onClick={() => jump('seedance')} />
       <StoryCard title="Black Friday collection" poster={sale} label={t('Template library')} description="Browse Black Friday video references and Skills for your sale." onClick={event => onOpenBlackFriday(event.currentTarget)} />
       <StoryCard title="Claude Fable 5.2" poster={blueprint} label="Claude Code · OpenMotion MCP" description="From a keyframe to an anime opening" onClick={() => jump('claude')} />
-      <StoryCard title={gptImageStory.title} poster={printCover} label={t('Design Studio') + ' · ' + t('Image')} description={gptImageStory.description} onClick={() => jump('gpt-image')} />
+      <StoryCard title={gptImageStory.title} poster={printCover} label={designStudioEnabled ? t('Design Studio') + ' · ' + t('Image') : t('Image')} description={gptImageStory.description} onClick={() => jump('gpt-image')} />
       <StoryCard title="Shorts Studio" poster={shorts} label={t('Short-form video')} description="Cut a recording into vertical shorts or assemble several clips into one reel." onClick={() => onChooseStudio(findTechniqueStudio('shorts')!)} />
     </HorizontalRail>
   </section>;

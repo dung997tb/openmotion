@@ -1,3 +1,4 @@
+import type { WorkspaceRoute } from './workspaceRouting';
 import { IconButton } from 'open-design-ui/icon-button';
 import { Button } from 'open-design-ui/button';
 import type { SkillCategory } from './skillCategories';
@@ -24,6 +25,7 @@ import { StudioConnectionToast } from '../components/StudioConnectionToast';
 import { ErrorNotice } from '../components/ui/ErrorNotice';
 import { isConnectionFailure } from '../components/ui/errorNoticeMessage';
 import { preservePresentation, workspacePresentation } from '../../../shared/workspace-url';
+import { setObservabilityContext } from '@openmotion/observability/browser';
 import { trackMotion } from './tracking';
 import { ApplicationHeader, WorkspaceUtilityActions } from './ApplicationChrome';
 import { BlackFridayTopBanner } from './BlackFridayTopBanner';
@@ -31,6 +33,7 @@ import { dismissBannerToday, shouldShowBlackFridayBanner, useMinuteCondition } f
 import type { McpEntry } from './pageTracking';
 import { WorkspaceProjectsButton } from './WorkspaceProjectsButton';
 import { Skeleton } from '../components/ui/Skeleton';
+import { AuthRecoveryNotice } from './authRecovery';
 import { changesWorkspaceDestination, defaultDesignScene, isLegacyWorkspaceHref, readWorkspacePage, workspacePageHref, type SettingsSection, type WorkspacePage } from './workspacePageRouting';
 import type { SoundTabId } from './soundTabs';
 import { WORKSPACE_LOCATION_CHANGED, initializeWorkspaceHistory, navigateWorkspaceHistory, readLocationWorkspaceSource, restoreWorkspaceSource, workspaceHistoryIndex, workspaceHistorySource, workspaceSettingsSource, writeWorkspaceHistory } from '../utils/workspaceHistory';
@@ -44,12 +47,13 @@ import { RouteViewport } from '../router/RouteViewport';
 import { OverlayLayer } from '../router/OverlayLayer';
 import { StudioRouterProvider } from '../router/createAppRouter';
 import { useWorkspaceBlocker } from '../router/useWorkspaceBlocker';
+import { isCloudFeatureEnabled, useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 import { WorkspaceChromeContext, useWorkspaceChrome, type WorkspaceChrome, type EditorGuard } from './WorkspaceChromeContext';
 export { useWorkspaceChrome, useOptionalWorkspaceChrome, type EditorGuard } from './WorkspaceChromeContext';
 
 type WorkspaceFrameProps = {
-  children: ReactNode; waitForSaves: () => Promise<void>; projectId?: string; sessionId?: string; blocked?: boolean; message?: string; saveState?: string; onLibraryClose?: () => void; onNavigate?: (targetHref?: string) => void;
+  children: ReactNode; waitForSaves: () => Promise<void>; projectId?: string; sessionId?: string; blocked?: boolean; message?: string; saveState?: string; onLibraryClose?: () => void; onNavigate?: (targetHref?: string, opened?: WorkspaceRoute) => void;
 };
 
 export function WorkspaceFrame(props: WorkspaceFrameProps) {
@@ -66,6 +70,11 @@ export function WorkspaceFrame(props: WorkspaceFrameProps) {
 
 function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blocked = false, message = '', saveState = '', onLibraryClose, onNavigate }: WorkspaceFrameProps) {
   const { t, locale } = useI18n();
+  const localAgentsEnabled = useCloudFeatureEnabled('localAgents');
+  const gameStudioEnabled = useCloudFeatureEnabled('gameStudio');
+  const workflowsEnabled = useCloudFeatureEnabled('workflows');
+  const designStudioEnabled = useCloudFeatureEnabled('designStudio');
+  const brandKitEnabled = useCloudFeatureEnabled('brandKit');
   const routerLocation = useLocation();
   const [page, setPage] = useState(() => readWorkspacePage(routerLocation.search, routerLocation.hash, routerLocation.pathname));
   const [source, setSource] = useState(() => readLocationWorkspaceSource(routerLocation.state));
@@ -132,6 +141,20 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     }
     writeWorkspaceHistory(target, replace, { page: nextSource, settings: settingsSource });
   }, []);
+  useEffect(() => {
+    if (page.settings === 'local' && !localAgentsEnabled) {
+      navigatePage({ settings: 'providers', mcpInSettings: false, assets: false, skills: false, templates: false }, true);
+      return;
+    }
+    if (
+      (page.settings === 'brand-kit' && !brandKitEnabled)
+      || (page.designScene && !designStudioEnabled)
+      || ((page.scenarioHub || page.scenario) && !workflowsEnabled)
+      || (page.specialty?.id === 'game' && !gameStudioEnabled)
+    ) {
+      navigatePage({ explore: true, templates: false, ...lastExplore.current }, true);
+    }
+  }, [page.settings, page.designScene, page.scenarioHub, page.scenario, page.specialty, localAgentsEnabled, brandKitEnabled, designStudioEnabled, workflowsEnabled, gameStudioEnabled, navigatePage]);
   const presentation = workspacePresentation(location.search);
   const guard = useRef<EditorGuard | null>(null);
   const [editorState, setEditorState] = useState<Pick<EditorGuard, 'blocked' | 'saveState' | 'message'> | null>(null);
@@ -143,11 +166,11 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     if (guard.current?.blocked) throw new Error(guard.current.message || t('Working…'));
     await (guard.current?.waitForSaves ?? waitForSaves)();
   }, [waitForSaves, t]);
-  const navigate = useCallback((url: string, replace = false) => {
+  const navigate = useCallback((url: string, replace = false, opened?: WorkspaceRoute) => {
     if (!onNavigate) { navigateWorkspace(url, replace); return; }
     const target = preservePresentation(url, location.search);
     void navigateWorkspaceHistory(target, replace).then(() => {
-      onNavigate(target);
+      onNavigate(target, opened);
     });
   }, [onNavigate]);
   const workspace = useWorkspace(beforeViewChange, projectId, sessionId, navigate, { externalHistoryGuard: Boolean(onNavigate) });
@@ -206,6 +229,34 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const expireBfBanner = useCallback(() => setBfBannerShown(false), [setBfBannerShown]);
   const [projectQuery, setProjectQuery] = useState('');
   const editorRoute = !settings && !pageOpen;
+  useEffect(() => {
+    const activePage = settings
+      ? `settings:${settings}`
+      : assetsOpen
+        ? 'assets'
+        : skillsOpen
+          ? 'skills'
+          : templatesPage
+            ? 'templates'
+            : page.motion
+              ? 'motion'
+              : page.explore
+                ? 'explore'
+                : page.modelOverview
+                  ? 'model_overview'
+                  : page.modelHub
+                    ? 'model_hub'
+                    : page.designScene
+                      ? 'design_scene'
+                      : page.studio
+                        ? 'creative_studio'
+                        : 'editor';
+    setObservabilityContext({
+      projectId: projectId ?? null,
+      sessionId: sessionId ?? null,
+      page: activePage,
+    });
+  }, [projectId, sessionId, settings, assetsOpen, skillsOpen, templatesPage, page.motion, page.explore, page.modelOverview, page.modelHub, page.designScene, page.studio]);
   const editorActive = editorRoute && !connectionsOpen;
   const motionTemplatesOpen = page.motion && !templatesPage && !settings;
   const previousOperationError = useRef('');
@@ -241,7 +292,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     if (!settingsSource || !restoreWorkspaceSource(settingsSource)) openHome();
   };
   useEffect(() => {
-    const open = () => openSettings('local');
+    const open = () => openSettings(isCloudFeatureEnabled('localAgents') ? 'local' : 'providers');
     window.addEventListener('motion:agents-open', open);
     return () => window.removeEventListener('motion:agents-open', open);
   }, [openSettings]);
@@ -275,7 +326,13 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
       navigationToast.showToast(t('Could not open project'), 'error', 'feedback');
     }
   };
-  const archives = useProjectArchives(workspace, beforeViewChange, switchingDisabled, () => { if (narrow) setSidebarOpen(false); });
+  const archives = useProjectArchives(
+    workspace,
+    beforeViewChange,
+    switchingDisabled,
+    () => { if (narrow) setSidebarOpen(false); },
+    () => openSettings('mcp'),
+  );
   const reconnecting = Boolean(workspace.connectionError && isConnectionFailure(workspace.connectionError));
   const workspaceNotice = workspace.errorSource === 'connection' && reconnecting ? '' : workspace.error;
   const notice = workspaceNotice || message || editorState?.message || "";
@@ -337,7 +394,10 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
   const chooseStudio = (entry: CreativeStudio, kind?: Modality, fromPage = false) => {
     if (entry.surface === 'techniques') navigatePage({ specialty: entry, skill: null, templates: false, ...lastExplore.current });
     else if (entry.surface === 'editor') navigatePage({ motion: true, templates: false, ...lastExplore.current }, false, fromPage ? 'from-page' : undefined);
-    else if (entry.id === 'design' && !kind) navigatePage({ designScene: defaultDesignScene, templates: false, ...lastExplore.current }, false, fromPage ? 'from-page' : undefined);
+    else if (entry.id === 'design' && !kind) {
+      if (designStudioEnabled) navigatePage({ designScene: defaultDesignScene, templates: false, ...lastExplore.current }, false, fromPage ? 'from-page' : undefined);
+      else openStudio(studioDestination(entry, 'text-to-image'), undefined, fromPage);
+    }
     else if (entry.id === 'cinema' && !kind) navigatePage({ cinemaLanding: true, templates: false, ...lastExplore.current }, false, fromPage ? 'from-page' : undefined);
     else if (!kind && hasStudioHome(entry)) openStudio({ ...studioDestination(entry, page.studio?.studio.id === entry.id ? page.studio.scene.id : null), home: true }, undefined, fromPage);
     else if (kind === 'audio') {
@@ -421,7 +481,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     closeStandalonePreview,
     returnToExplore,
     openSkill,
-    openScenario,
+    openScenario: workflowsEnabled ? openScenario : undefined,
     openProject: (id: string) => workspace.open('projects', id),
     openTemplate: openTemplateFromOverlay,
   };
@@ -436,11 +496,25 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
         specialty={page.specialty} onChooseStudio={chooseStudio} openSettings={openSettings}
         openAsset={(assetId, assetVersion) => navigatePage({ assets: true, assetId, assetVersion, templates: false })}
         onCommunity={feed => navigatePage({ explore: true, community: feed.id, medium: null, templates: false })} onSkill={openSkill} currentPage={currentPage} trackingPage={navTrackingPage} onOpenPage={openPage} settings={visibleSettings} destination={templatesPage ? null : page.studio} soundTab={templatesPage ? null : page.soundTab ?? null} motionActive={!templatesPage && (page.motion || editorActive)}
-        designActive={!templatesPage && Boolean(page.designScene)} cinemaActive={!templatesPage && page.cinemaLanding}
-        scenarioActive={!templatesPage && !settings ? (page.scenario ?? (page.scenarioHub ? 'hub' : null)) : null}
-        onOpenScenario={(id, runId) => openScenario(id, runId)}
-        onOpenScenarioHub={() => openScenarioHub()}
+        designActive={designStudioEnabled && !templatesPage && Boolean(page.designScene)} cinemaActive={!templatesPage && page.cinemaLanding}
+        scenarioActive={workflowsEnabled && !templatesPage && !settings ? (page.scenario ?? (page.scenarioHub ? 'hub' : null)) : null}
+        onOpenScenario={workflowsEnabled ? (id, runId) => openScenario(id, runId) : undefined}
+        onOpenScenarioHub={workflowsEnabled ? () => openScenarioHub() : undefined}
         onNavigate={openStudio} onNavigateSound={openAudioNav} />
+      <AuthRecoveryNotice
+        onRetry={workspace.retryConnection}
+        onResumePendingDraft={async (draft) => {
+          if (draft.templateId) {
+            return sessionId
+              ? workspace.createArtifact(sessionId, draft.templateId)
+              : workspace.startSession(draft.instruction, draft.templateId);
+          }
+          if (draft.instruction) {
+            return workspace.startSession(draft.instruction);
+          }
+          return true;
+        }}
+      />
       <div className="motion-workspace">
       {isRoutePending && <div className="motion-route-progress" role="progressbar" aria-hidden="true" />}
       <Dialog.Portal>

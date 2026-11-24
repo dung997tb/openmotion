@@ -1,11 +1,13 @@
+import { isolatedPreviewOrigin, preparePreviewLease, type PreparedPreviewLease } from "../player/lib/previewLease";
+import { InitialPreviewLeaseContext, useStudioHost } from "./StudioHost";
 import { Button } from 'open-design-ui/button';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInRouterContext, useLocation } from 'react-router';
 import { useI18n } from '../i18n/I18n';
 import { WorkspaceFrame, WorkspaceMenuButton, useWorkspaceChrome } from './WorkspaceFrame';
-import { motionApi, type ProjectCatalog } from './useWorkspace';
-import { requestedProject, validWorkspaceProject } from './workspaceRouting';
-import type { SessionDetail, SessionArtifact } from '../../../shared/session';
+import { requestedProject, validWorkspaceProject, type WorkspaceRoute } from './workspaceRouting';
+import { resolveWorkspaceRoute } from './resolveWorkspaceRoute';
+import { preloadMotionProjectEditor } from './MotionProjectEditor';
 import { ArtifactViewer } from './ArtifactViewer';
 import { EditorLoading, readEditorLoadingLayout, type EditorLoadingLayout } from './EditorLoading';
 import { RecoveryScreen } from '../components/RecoveryScreen';
@@ -16,14 +18,6 @@ import { StudioRouterProvider } from '../router/createAppRouter';
 import { readWorkspacePage } from './workspacePageRouting';
 
 const noPendingSaves = async () => {};
-
-export async function resolveWorkspaceProject(id: string, signal: AbortSignal) {
-  if (!validWorkspaceProject(id)) throw new Error('项目链接无效');
-  const catalog = await motionApi<ProjectCatalog>('/projects', { signal });
-  if (!catalog.projects.some(project => project.id === id)) throw new Error('项目不存在，请从左侧列表选择一个项目。');
-  signal.throwIfAborted();
-  await motionApi('/preview/open', { method: 'POST', signal }, id);
-}
 
 /** Resolve the native service before mounting any editor that could read or save files. */
 export function MotionApp() {
@@ -40,6 +34,7 @@ export function MotionApp() {
 
 function MotionAppContent() {
   const { t } = useI18n();
+  const host = useStudioHost();
   const routerLocation = useLocation();
   const [route, setRoute] = useState(() => ({
     projectId: editorProjectIdFromPath(routerLocation.pathname) ?? requestedProject(routerLocation.search, routerLocation.hash),
@@ -53,17 +48,23 @@ function MotionAppContent() {
       projectId === null &&
       !sessionId,
   );
-  const [ready, setReady] = useState<{ sessionId: string; artifact?: SessionArtifact } | null>(null);
+  const [ready, setReady] = useState<(WorkspaceRoute & { previewLease?: PreparedPreviewLease }) | null>(null);
+  const previewScope = useMemo(() => {
+    if (ready?.previewLease) return ready.previewLease;
+    const id = ready?.artifact?.projectId;
+    const origin = isolatedPreviewOrigin();
+    return id && origin ? preparePreviewLease(id, origin) : undefined;
+  }, [ready]);
   const [error, setError] = useState('');
   const [attempt, retry] = useState(0);
   const surface = useRef<HTMLDivElement>(null);
   const [loadingLayout, setLoadingLayout] = useState<EditorLoadingLayout | null>(null);
-  const onNavigate = useCallback((targetHref?: string) => {
+  const onNavigate = useCallback((targetHref?: string, opened?: WorkspaceRoute) => {
     const layout = readEditorLoadingLayout(surface.current);
     if (layout) setLoadingLayout(layout);
     const target = targetHref ? new URL(targetHref, location.origin) : new URL(location.href);
     const nextPage = readWorkspacePage(target.search, target.hash, target.pathname);
-    setReady(null);
+    setReady(opened ?? null);
     setError('');
     setLibraryOnly(nextPage.templates);
     setRoute({
@@ -83,36 +84,37 @@ function MotionAppContent() {
   useEffect(() => {
     if (ready || settingsPage) return;
     const controller = new AbortController();
+    let previewLease: PreparedPreviewLease | undefined;
+    if (projectId && validWorkspaceProject(projectId) && (sessionId === null || validWorkspaceProject(sessionId))
+      && new URLSearchParams(location.search).get('templates') !== '1') {
+      preloadMotionProjectEditor();
+      host?.preloadEditorHost?.();
+      const origin = isolatedPreviewOrigin();
+      if (origin) previewLease = preparePreviewLease(projectId, origin, controller.signal);
+    }
     setError('');
     async function resolve() {
-      const catalog = await motionApi<ProjectCatalog>('/projects', { signal: controller.signal });
-      controller.signal.throwIfAborted();
-      const targetProject = projectId ?? (sessionId ? null : catalog.activeId);
-      // The first-run placeholder has no native source yet. Browsing must not create it.
-      // Existing projects can prepare behind the modal without changing the active project.
-      if (libraryOnly && targetProject === 'project') return;
-      const id = sessionId ?? catalog.sessions?.find(item => item.artifacts.some(artifact => artifact.projectId === targetProject))?.id;
-      if (!id || !validWorkspaceProject(id)) throw new Error('会话不存在');
-      const session = await motionApi<SessionDetail>(`/sessions/${id}`, { signal: controller.signal });
-      controller.signal.throwIfAborted();
-      if (!session.artifacts.length && projectId === null) { setReady({ sessionId: id }); return; }
-      const artifact = session.artifacts.find(item => item.projectId === targetProject) ?? (targetProject === null ? session.artifacts.find(item => item.id === session.activeArtifactId) ?? session.artifacts[0] : undefined);
-      if (!artifact) throw new Error('该产物不属于此会话');
-      await resolveWorkspaceProject(artifact.projectId, controller.signal);
-      if (controller.signal.aborted) return;
-      const url = new URL(location.href);
-      const encodedProject = encodeURIComponent(artifact.projectId);
-      url.pathname = `/editor/${encodedProject}`;
-      url.searchParams.delete('page');
-      url.searchParams.delete('project');
-      url.searchParams.set('session', id);
-      if (!url.hash.startsWith(`#project/${encodedProject}`)) url.hash = `project/${encodedProject}`;
-      writeWorkspaceHistory(url, true);
-      setReady({ sessionId: id, artifact });
+      const resolved = await resolveWorkspaceRoute(projectId, sessionId, libraryOnly, controller.signal);
+      if (!resolved || controller.signal.aborted) return;
+      if (resolved.artifact) {
+        const url = new URL(location.href);
+        const encodedProject = encodeURIComponent(resolved.artifact.projectId);
+        url.pathname = `/editor/${encodedProject}`;
+        url.searchParams.delete('page');
+        url.searchParams.delete('project');
+        url.searchParams.set('session', resolved.sessionId);
+        if (!url.hash.startsWith(`#project/${encodedProject}`)) url.hash = `project/${encodedProject}`;
+        writeWorkspaceHistory(url, true);
+      }
+      setReady({ ...resolved, previewLease });
     }
-    void resolve().catch(err => { if (!controller.signal.aborted) setError((err as Error).message); });
+    void resolve().catch(err => {
+      if (controller.signal.aborted) return;
+      controller.abort();
+      setError((err as Error).message);
+    });
     return () => controller.abort();
-  }, [route, attempt, libraryOnly, settingsPage]);
+  }, [route, attempt, libraryOnly, settingsPage, host]);
   const closeLibrary = () => {
     setLibraryOnly(false);
   };
@@ -121,7 +123,11 @@ function MotionAppContent() {
     blocked={!ready && !error && !libraryOnly && !settingsPage} onLibraryClose={libraryOnly ? closeLibrary : undefined}>
     <div ref={surface} className="motion-project-surface">
     {error ? <><div className="motion-home-navigation"><WorkspaceMenuButton /></div><RecoveryScreen title={t('Could not open project')} message={error}><Button variant="ghost" className="om-button h-auto" data-primary onClick={() => retry(value => value + 1)}>{t('Retry')}</Button><a className="om-button" href="/editor">{t('Open active project')}</a></RecoveryScreen></>
-      : ready ? ready.artifact ? <ArtifactViewer key={ready.artifact.projectId} artifact={ready.artifact} loadingLayout={loadingLayout} /> : <div className="motion-route-state"><WorkspaceMenuButton />{t('Create a project with your Agent to start editing.')}</div>
+      : ready ? ready.artifact ? (
+        <InitialPreviewLeaseContext.Provider value={previewScope}>
+          <ArtifactViewer key={ready.artifact.projectId} artifact={ready.artifact} loadingLayout={loadingLayout} />
+        </InitialPreviewLeaseContext.Provider>
+      ) : <div className="motion-route-state"><WorkspaceMenuButton />{t('Create a project with your Agent to start editing.')}</div>
       : libraryOnly ? <TemplateLibraryLanding /> : <EditorLoading layout={loadingLayout} />}
     </div>
   </WorkspaceFrame>;

@@ -1,4 +1,4 @@
-import geminiPoster from './model-hubs/gemini-4.svg?url';
+import { gemini4Spotlight } from './gemini4Spotlight';
 import { gemini4Videos, type HubVideo } from './gemini4Videos';
 
 /** Local posters for posts whose X cover is a blank first frame; captured mid-video. */
@@ -27,9 +27,7 @@ export interface ModelHub {
 }
 
 export const modelHubs: ModelHub[] = [{
-  id: 'gemini-4', title: 'Gemini 4', modelName: 'Gemini 4 Argon', latestModel: 'Gemini 4 Neon', vendor: 'Google DeepMind', eyebrow: 'New model',
-  summary: 'Google’s newest frontier model writes whole animations in code. The hottest Gemini 4 videos on X are all here.',
-  poster: geminiPoster, provider: 'gemini',
+  ...gemini4Spotlight,
   modelPattern: /gemini-4/i, companionPattern: /google\/|nano-banana|veo|imagen/i,
   videos: gemini4Videos.map(withPoster),
 }];

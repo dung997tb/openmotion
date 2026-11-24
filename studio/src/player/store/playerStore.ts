@@ -19,6 +19,7 @@ import { createEditingModeSlice, type EditingModeSlice } from "./editingModeSlic
 import { createPreviewQualitySlice, type PreviewQualitySlice } from "./previewQualitySlice";
 import { createTimelineFocusRequest, type TimelineFocusRequest } from "./timelineFocusState";
 import { createThumbnailSlice, type ThumbnailSlice } from "./thumbnailSlice";
+import { invalidateLatestSourceWrite } from "../../utils/studioFileVersion";
 import { createPlaybackReadinessSlice } from "./readinessSlice";
 import { createRangeSelectionSlice, type RangeSelectionSlice } from "./rangeSelectionSlice";
 import { createTimelineResetState } from "./timelineResetState";
@@ -72,6 +73,7 @@ interface PlayerState extends PlayerStoreSlices {
   timelineSessionEpoch: number;
   /** Project owning the current timeline session; null outside a project-scoped reset. */
   timelineProjectId: string | null;
+  timelineSourceProjected: boolean;
   /** True while a beat dot is being dragged — hides the playhead guideline. */
   beatDragging: boolean;
   elements: TimelineElement[];
@@ -273,6 +275,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   duration: 0,
   timelineSessionEpoch: 0,
   timelineProjectId: null,
+  timelineSourceProjected: false,
   beatDragging: false,
   elements: [],
   pendingAssetDrops: [],
@@ -566,6 +569,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   beginTimelineSession: (projectId) =>
     set((state) => {
       if (state.timelineProjectId === projectId) return state;
+      invalidateLatestSourceWrite();
       return {
         ...createTimelineResetState(),
         timelineSnapEnabled: readStudioUiPreferences(undefined, projectId).timelineSnapEnabled ?? true,

@@ -1,7 +1,9 @@
+import { computePreviewImpact } from "../../../shared/preview-impact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryListItem, HistoryResult } from "@hyperframes/studio-server";
 import { studioFileContentVersion, studioWriteHeaders } from "../utils/studioFileVersion";
 import type { RestoreFiles } from "../utils/gsapUndoRestore";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { studioApiFetch } from "../utils/studioApiFetch";
 import { setStudioPendingEditClaimClock } from "../utils/studioPendingEdits";
 import type { RecordEditInput } from "../utils/studioFileHistory";
@@ -39,7 +41,9 @@ interface NextStep {
 }
 
 interface HistoryView {
-  entries: HistoryListItem[];
+  lastSavedAt?: number;
+  currentSeq?: number; // Present on the cloud snapshot-based timeline.
+  entries: Array<Pick<HistoryListItem, "id" | "undoes"> & { endedAt: number | string }>;
   back: NextStep | null;
   forward: NextStep | null;
 }
@@ -197,14 +201,22 @@ async function restoredFiles(
   );
 }
 
-function redoneAt(view: HistoryView): number | null {
-  const undo = view.entries.find((entry) => entry.id === view.forward?.id);
-  return view.entries.find((entry) => entry.id === undo?.undoes)?.endedAt ?? null;
+function timestamp(value: number | string): number {
+  return typeof value === "number" ? value : Date.parse(value);
 }
 
-/** Studio's undo over the server's project history: an edit claims what it wrote; Cmd+Z steps the person's. */
+function redoneAt(view: HistoryView): number | null {
+  if (view.currentSeq !== undefined) return view.forward?.endedAt ?? null;
+  const undo = view.entries.find((entry) => entry.id === view.forward?.id);
+  const original = view.entries.find((entry) => entry.id === undo?.undoes);
+  return original ? timestamp(original.endedAt) : null;
+}
+
+/** Cloud history steps the project head. Legacy file histories can target a claimed local edit. */
 export function usePersistentEditHistory({ projectId }: UsePersistentEditHistoryOptions) {
   const [view, setView] = useState<HistoryView>(EMPTY);
+  const viewRef = useRef(view);
+  const projectWide = view.currentSeq !== undefined || getCachedCloudDisklessMode();
   const [loaded, setLoaded] = useState(false);
   const [blocked, setBlocked] = useState<BlockedSteps>({});
   // Update synchronously too: a repeated shortcut may arrive before React renders.
@@ -217,21 +229,31 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
   const [pageKeyScope] = useState(generateId);
   const claimKey = useCallback((key: string) => `${pageKeyScope}:${key}`, [pageKeyScope]);
 
+  const historyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const lastStepToken = useRef<string | null>(null);
+  const readSequence = useRef(0);
   const refresh = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || projectIdRef.current !== projectId) return;
+    // This read covers events already received. An event arriving during the read
+    // still schedules its own refresh, so a concurrent remote edit cannot be lost.
+    clearTimeout(historyTimer.current);
+    const sequence = ++readSequence.current;
     const seen = own.changes();
-    const response = await studioApiFetch(historyUrl(projectId)).catch(() => null);
+    const cloud = getCachedCloudDisklessMode() || viewRef.current.currentSeq !== undefined;
+    const response = await studioApiFetch(historyUrl(projectId, cloud ? "?view=navigation" : "")).catch(() => null);
     const next = response?.ok
       ? ((await response.json().catch(() => null)) as HistoryView | null)
       : EMPTY;
-    if (projectIdRef.current !== projectId) return;
+    if (sequence !== readSequence.current || projectIdRef.current !== projectId) return;
     if (!next) return console.error("The history's reply was unreadable.");
-    observeStudioSavedAt(projectId, Math.max(0, ...next.entries.map(entry => entry.endedAt)));
+    observeStudioSavedAt(projectId, next.lastSavedAt ?? Math.max(0, ...next.entries.map(entry => timestamp(entry.endedAt))));
+    viewRef.current = next;
     setView(next);
     own.offered(seen, next);
   }, [projectId, own]);
 
   useEffect(() => {
+    viewRef.current = EMPTY;
     setView(EMPTY);
     setLoaded(false);
     blockedRef.current = {};
@@ -252,6 +274,14 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
     return () => setStudioPendingEditClaimClock(null);
   }, [own]);
 
+  // A single cloud commit can deliver both a file event and a history event.
+  useEffect(() => () => clearTimeout(historyTimer.current), [projectId]);
+  const refreshAfterEvent = useCallback((writeToken?: string) => {
+    if (writeToken && writeToken === lastStepToken.current) return;
+    clearTimeout(historyTimer.current);
+    historyTimer.current = setTimeout(() => void refresh(), 75);
+  }, [refresh]);
+
   const recordEdit = useCallback(
     async ({ label, coalesceKey, coalesceMs, files, targets, created = [] }: RecordEditInput) => {
       if (!projectId) return;
@@ -261,6 +291,11 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
       const agentPhase = studioEditLifecycle.getSnapshot().phase;
       const agent = agentPhase === "dispatching" || agentPhase === "dispatched";
       own.overtake();
+      if (projectWide) {
+        reportManualEdit({ projectId, label, entryId: null, coalesceKey, coalesceMs, agent });
+        refreshAfterEvent();
+        return;
+      }
       const reply = await post(historyUrl(projectId, "/claim"), {
         label,
         paths,
@@ -281,17 +316,17 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
       heldClaimRef.current = claimed && coalesceKey ? { paths, at: Date.now() } : null;
       await refresh();
     },
-    [projectId, refresh, own, claimKey],
+    [projectId, projectWide, refresh, refreshAfterEvent, own, claimKey],
   );
 
   const step = useCallback(
     async (direction: "undo" | "redo", callbacks: ApplyCallbacks): Promise<ApplyResult> => {
       if (!projectId) return { ok: false, reason: "empty" };
       const candidate =
-        direction === "undo" && callbacks.claimedAfter !== undefined
+        !projectWide && direction === "undo" && callbacks.claimedAfter !== undefined
           ? own.claimedAfter(callbacks.claimedAfter)
           : null;
-      const next = direction === "undo" ? view.back : view.forward;
+      const next = direction === "undo" ? viewRef.current.back : viewRef.current.forward;
       if (sameStep(blockedRef.current[direction], next) && (!candidate || candidate === next?.id)) {
         return { ok: false, reason: "empty" };
       }
@@ -300,18 +335,49 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
       const pressedAt = own.claimCount();
       own.overtake();
       const attempt = async (target: string | null): Promise<ApplyResult> => {
-        const previous = await readAll(paths, callbacks.readFile);
+        // Cloud restores nonvisual files in its snapshot transaction. Their bytes
+        // are not needed to patch the preview or restore timeline lanes.
+        const previewPaths = (files: string[]) => projectWide
+          ? files.filter(path => computePreviewImpact([path]).affectsPreview)
+          : files;
+        const previous = await readAll(previewPaths(paths), callbacks.readFile);
+        const headers = studioWriteHeaders();
+        lastStepToken.current = headers["X-Hyperframes-Write-Token"];
+        const beforeStep = readSequence.current;
         const posted = await post(
           historyUrl(projectId, target ? "/undo" : "/step"),
           target ? { entryId: target } : { direction: direction === "undo" ? "back" : "forward" },
-          studioWriteHeaders(),
+          headers,
         );
         heldClaimRef.current = null;
-        void refresh();
+        const navigation = posted.ok
+          ? (posted.body as { navigation?: Pick<HistoryView, "currentSeq" | "back" | "forward"> }).navigation
+          : undefined;
+        if (navigation && projectIdRef.current === projectId) {
+          // An already-started GET may describe the cursor before this step.
+          if (readSequence.current !== beforeStep) refreshAfterEvent();
+          ++readSequence.current;
+          const nextView = { ...navigation, entries: [] };
+          viewRef.current = nextView;
+          setView(nextView);
+        } else if (projectWide) {
+          await refresh();
+        } else {
+          void refresh();
+        }
         // 404: this app keeps no history, so there is nothing to step.
         if (!posted.ok && posted.status === 404) return { ok: false, reason: "empty" };
         if (!posted.ok) return { ok: false, reason: "failed", message: posted.error };
-        const reply = posted.body as HistoryResult;
+        const reply = posted.body as HistoryResult | { ok: true; entry?: { label: string } | null; stepLabel?: string; appliedFiles: string[] };
+        if ("appliedFiles" in reply) {
+          // Snapshot history returns the destination entry. Its own diff can describe a different edit.
+          return {
+            ok: true,
+            label: reply.stepLabel ?? next?.label ?? reply.entry?.label,
+            paths: reply.appliedFiles,
+            files: await restoredFiles(previewPaths(reply.appliedFiles), previous, callbacks.readFile),
+          };
+        }
         if (!reply.ok) {
           if (projectIdRef.current === projectId && next && (!target || target === next.id)) {
             blockedRef.current = { ...blockedRef.current, [direction]: next };
@@ -344,13 +410,13 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
       };
       return callbacks.serialize ? callbacks.serialize(paths, run) : run();
     },
-    [projectId, view, refresh, own],
+    [projectId, projectWide, refresh, refreshAfterEvent, own],
   );
 
   const noteOutsideChange = useCallback(() => {
     own.overtake();
-    void refresh();
-  }, [own, refresh]);
+    refreshAfterEvent();
+  }, [own, refreshAfterEvent]);
 
   const undo = useCallback((callbacks: ApplyCallbacks) => step("undo", callbacks), [step]);
   const redo = useCallback((callbacks: ApplyCallbacks) => step("redo", callbacks), [step]);
@@ -366,6 +432,8 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
 
   return {
     loaded,
+    projectWide,
+    availableNow: (direction: "undo" | "redo") => Boolean(direction === "undo" ? viewRef.current.back : viewRef.current.forward),
     canUndo: Boolean(view.back) && !sameStep(blocked.undo, view.back),
     canRedo: Boolean(view.forward) && !sameStep(blocked.redo, view.forward),
     undoLabel: view.back?.label,
@@ -377,10 +445,14 @@ export function usePersistentEditHistory({ projectId }: UsePersistentEditHistory
     claimKey,
     undo,
     redo,
+    refresh,
     predict: (direction: "undo" | "redo") =>
-      sameStep(blockedRef.current[direction], direction === "undo" ? view.back : view.forward)
+      // Snapshot steps reuse version IDs in both directions. The local inverse-entry cache
+      // is only valid for servers that append a distinct undo entry.
+      projectWide || sameStep(blockedRef.current[direction], direction === "undo" ? view.back : view.forward)
         ? null : own.predict(direction),
     claims: own.claimCount,
     noteOutsideChange,
+    refreshAfterEvent,
   };
 }

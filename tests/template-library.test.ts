@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
-import { zip } from '../scripts/package.ts';
+import { zip } from '../scripts/zip.mjs';
 import { lfsPointer } from '../shared/repository-template-catalog.ts';
 import { checkTemplateLibrary, git, scope } from '../scripts/check-template-library.ts';
 import { catalogRoot, cmsUrl, digest, exportCatalog, importCatalog, refreshManifest, safePath, unzip, validateRecord } from '../scripts/template-library.ts';

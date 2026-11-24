@@ -1,6 +1,20 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { withProcessLock } from '../shared/process-lock.ts';
+const ledgerLocks = new Map<string, Promise<unknown>>();
+async function withLedgerLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = ledgerLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const next = prev.then(() => gate);
+  ledgerLocks.set(key, next);
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (ledgerLocks.get(key) === next) ledgerLocks.delete(key);
+  }
+}
 
 export type LedgerTaskType = 'asset_import' | 'edit' | 'export';
 export type LedgerOutcome = 'success' | 'failure' | 'unknown' | 'cancelled';
@@ -62,7 +76,7 @@ export class TaskLedger {
   }
   async accept(task: LedgerTask) {
     if (!validTask(task)) throw new Error('TASK_LEDGER_INVALID');
-    return withProcessLock(path.join(this.folder, 'tasks.lock'), async () => {
+    return withLedgerLock(path.join(this.folder, 'tasks.lock'), async () => {
       const tasks = await this.read(), existing = tasks[task.task_id];
       if (existing) {
         if (JSON.stringify(existing) !== JSON.stringify(task)) throw new Error('TASK_LEDGER_CONFLICT');
@@ -73,7 +87,7 @@ export class TaskLedger {
   }
   async terminal(taskId: string, outcome: LedgerOutcome, applied: LedgerTask['applied'], errorCode?: string) {
     if (!id.test(taskId)) throw new Error('TASK_LEDGER_INVALID');
-    return withProcessLock(path.join(this.folder, 'tasks.lock'), async () => {
+    return withLedgerLock(path.join(this.folder, 'tasks.lock'), async () => {
       const tasks = await this.read(), task = tasks[taskId]; if (!task) throw new Error('TASK_LEDGER_NOT_FOUND');
       if (task.outcome) {
         if (task.outcome !== outcome || task.applied !== applied) throw new Error('TASK_LEDGER_CONFLICT');
@@ -84,5 +98,5 @@ export class TaskLedger {
       if (errorCode) task.error_code = errorCode; await this.write(tasks); return task;
     });
   }
-  async snapshot() { return withProcessLock(path.join(this.folder, 'tasks.lock'), () => this.read()); }
+  async snapshot() { return withLedgerLock(path.join(this.folder, 'tasks.lock'), () => this.read()); }
 }

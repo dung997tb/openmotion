@@ -1,3 +1,9 @@
+import { isolatedSourceVersion } from "../components/editor/isolatedSourceTarget";
+import { observedSourceVersion } from "../utils/confirmedTextSources";
+import { isolatedEditVersion } from "../utils/isolatedEditVersions";
+import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
+import { submitIsolatedCanvasEdit } from "./submitIsolatedCanvasEdit";
+import type { SdkSessionHandle } from "./useSdkSession";
 import { useCallback, useRef } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
 import { trackStudioEvent } from "../utils/studioTelemetry";
@@ -21,7 +27,8 @@ import { countStudioManualEditSave } from "../components/editor/manualEditsDom";
 import type { CutoverResult } from "../utils/sdkCutover";
 import { reseekPreviewRuntime } from "./timelineTrackVisibility";
 import { serializeStudioFileMutations } from "../utils/studioFileMutationCoordinator";
-import { readProjectFileContent } from "../utils/studioFileHistory";
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { readProjectFileContent, studioHistoryForWrite, type ProjectFileWriter } from "../utils/studioFileHistory";
 import { applyUndoRestoreToPreview } from "../utils/gsapUndoRestore";
 import { syncRestoredTimelineFromPreview } from "../player/lib/timelineRestoreSync";
 import { usePlayerStore } from "../player/store/playerStore";
@@ -34,11 +41,11 @@ export interface UseDomEditPersistParams {
   previewIframeRef: React.MutableRefObject<HTMLIFrameElement | null>;
   showToast: (message: string, tone?: "error" | "info") => void;
   queueDomEditSave: <T>(save: () => Promise<T>) => Promise<T>;
-  writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
+  writeProjectFile: ProjectFileWriter;
   editHistory: { recordEdit: (entry: RecordEditInput) => Promise<void> };
   projectIdRef: React.MutableRefObject<string | null>;
-  reloadPreview: () => void;
-  forceReloadSdkSession?: () => void;
+  reloadPreview: (changedPaths?: string | readonly string[]) => void;
+  forceReloadSdkSession?: SdkSessionHandle["forceReload"];
   onTrySdkPersist?: (
     selection: DomEditSelection,
     operations: PatchOperation[],
@@ -80,7 +87,7 @@ export function useDomEditPersist({
 
       const targetPath = selection.sourceFile || activeCompPath || "index.html";
       const completePersistence = <T>(result: T, changed: boolean): T => {
-        if (options?.skipRefresh && changed && !options.deferRender)
+        if (!selection.isolatedTarget && options?.skipRefresh && changed && !options.deferRender)
           reseekPreviewRuntime(previewIframeRef.current);
         return result;
       };
@@ -115,7 +122,16 @@ export function useDomEditPersist({
 
       // An imported font or prepareContent takes the server patch; the SDK serializes only the patched
       // DOM. The SDK re-reads in the file queue; this read is its fallback.
-      if (onTrySdkPersist && !font && !options?.prepareContent && !options?.validateContent) {
+      let cloudCommand: ProjectEditCommand | undefined;
+      if (getCachedCloudDisklessMode()) {
+        cloudCommand = options?.projectEdit;
+        if (!cloudCommand && !options?.prepareContent) {
+          cloudCommand = options?.canvasPosition
+            ? { kind: "moveCanvasElement", target: patchTarget, time: usePlayerStore.getState().currentTime, ...options.canvasPosition }
+            : { kind: "editElements", patches: [patchBody] };
+        }
+      }
+      if (!cloudCommand && onTrySdkPersist && !selection.isolatedTarget && !font && !options?.prepareContent && !options?.validateContent) {
         const originalContent = await readTarget();
         if (originalContent === null) return;
         const cutover = await onTrySdkPersist(selection, operations, originalContent, targetPath, {
@@ -139,7 +155,28 @@ export function useDomEditPersist({
         coalesceKey: options?.coalesceKey,
         coalesceMs: options?.coalesceMs,
       };
-      const prepare = options?.prepareContent;
+      const writeHistory = getCachedCloudDisklessMode() ? studioHistoryForWrite(writeProjectFile, history.label, history.coalesceKey, history.coalesceMs, options?.continuous) : undefined;
+      if (cloudCommand && selection.isolatedTarget && !options?.prepareContent && !options?.validateContent) {
+        const command = { ...cloudCommand, compositionPath: targetPath };
+        const versions = { [targetPath]: isolatedSourceVersion(selection.isolatedTarget) };
+        const result = await serializeStudioFileMutations(writeProjectFile, [targetPath], async () => {
+          if (projectIdRef.current !== expectedProjectId) throw new Error("Active project changed before the edit could be saved");
+          if (options?.shouldSave && !options.shouldSave()) return null;
+          return submitIsolatedCanvasEdit(pid, [command], versions, writeHistory, previewIframeRef, options?.coalesceKey);
+        });
+        if (!result) return;
+        const changed = result.changedPaths.includes(targetPath);
+        if (changed) await editHistory.recordEdit({ ...history, files: {} });
+        if (changed && !result.divergent.length) {
+          forceReloadSdkSession?.({ projectId: pid, versions: result.versions });
+          if (!result.previewApplied) reloadPreview(targetPath);
+        }
+        return { sourceFile: targetPath, version: result.versions[targetPath], changed };
+      }
+      const writeEdit = writeHistory
+        ? (path: string, content: string, expected?: string, command?: ProjectEditCommand) => writeProjectFile(path, content, expected, command, writeHistory)
+        : writeProjectFile;
+      const prepare = cloudCommand ? undefined : options?.prepareContent;
       let preparedWriteFailed = false;
       // Read, server patch, follow-up write and history hold the file's queue, so no save lands between them.
       const saved = await serializeStudioFileMutations(writeProjectFile, [targetPath], async () => {
@@ -147,7 +184,20 @@ export function useDomEditPersist({
         if (originalContent === null) return null;
         options?.validateContent?.(originalContent);
         let patchData: PatchElementResponse;
-        if (
+        if (cloudCommand) {
+          if (selection.isolatedTarget) {
+            const shown = isolatedEditVersion(pid, targetPath, isolatedSourceVersion(selection.isolatedTarget));
+            if (shown !== await observedSourceVersion(pid, targetPath, originalContent)) throw new Error("The selected frame is out of date.");
+          }
+          const {applyProjectEdit} = await import("../../../packages/edit-core/commands");
+          const {content} = await applyProjectEdit(originalContent, {...cloudCommand,compositionPath:targetPath},new Map());
+          const changed = content !== originalContent;
+          if (changed) {
+            const rebased = await writeEdit(targetPath, content, originalContent, cloudCommand);
+            if (rebased) return { rebased };
+          }
+          patchData = {matched: true, changed, content, path: targetPath, version: await observedSourceVersion(pid, targetPath, content)};
+        } else if (
           selection.element?.namespaceURI === "http://www.w3.org/2000/svg" &&
           selection.hfId && !font &&
           operations.length > 0 &&
@@ -160,10 +210,11 @@ export function useDomEditPersist({
             ? operations.reduce((html, op) => applyPatchByTarget(html, target, op), originalContent)
             : originalContent;
           const changed = content !== originalContent;
-          if (changed) await writeProjectFile(targetPath, content, originalContent);
+          if (changed) await writeEdit(targetPath, content, originalContent);
           patchData = { matched, changed, content, path: targetPath };
         } else {
-          patchData = await postPatchElement(pid, targetPath, patchBody, showToast);
+          patchData = await postPatchElement(pid, targetPath, patchBody, showToast,
+            selection.isolatedTarget && isolatedSourceVersion(selection.isolatedTarget), writeHistory);
         }
         if (!patchData.changed) return { patchData, originalContent, patchedContent: null, finalContent: null };
 
@@ -174,7 +225,7 @@ export function useDomEditPersist({
               targetPath,
               patchedContent,
               prepare,
-              writeProjectFile,
+              async (path, content, expected) => { await writeEdit(path, content, expected); },
               showToast,
             )
           : { content: patchedContent, failed: false };
@@ -199,6 +250,10 @@ export function useDomEditPersist({
         return { patchData, originalContent, patchedContent, finalContent };
       });
       if (saved === null) return;
+      if (saved.rebased) {
+        // The coordinator refreshes the preview and SDK from the merged source.
+        return { sourceFile: targetPath, version: saved.rebased.version, changed: saved.rebased.changed };
+      }
       const { patchData, originalContent, patchedContent, finalContent } = saved;
 
       if (finalContent === null) {
@@ -225,17 +280,19 @@ export function useDomEditPersist({
       }
       forceReloadSdkSession?.();
 
-      if (options?.syncTimingInPlace) {
+      if (selection.isolatedTarget) {
+        reloadPreview(targetPath);
+      } else if (options?.syncTimingInPlace) {
         // Reuse the same attribute-only diff and runtime rebind as soft undo.
         // Keep the iframe, media decoder, thumbnails and ruler alive during a slider drag.
         const strategy = applyUndoRestoreToPreview(
           previewIframeRef.current, activeCompPath,
           { [targetPath]: { previous: originalContent, restored: finalContent } },
-          usePlayerStore.getState().currentTime, reloadPreview,
+          usePlayerStore.getState().currentTime, () => reloadPreview(targetPath),
         );
         if (strategy === "soft") syncRestoredTimelineFromPreview(previewIframeRef.current?.contentDocument);
       } else if (!options?.skipRefresh) {
-        reloadPreview();
+        reloadPreview(targetPath);
       }
       const outcome = completePersistence(
         finalContent === patchedContent &&

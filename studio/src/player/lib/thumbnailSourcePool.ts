@@ -1,4 +1,5 @@
 import type { Input, InputVideoTrack } from "mediabunny";
+import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
 import { mediaUrlSourceOptions } from "./mediaFetch";
 
 export interface SourceInfo {
@@ -69,7 +70,10 @@ async function open(source: string, pooled: () => PooledSource): Promise<OpenedS
     if (entry.disposed) throw abortError();
   };
   live();
-  const options = mediaUrlSourceOptions("thumbnail");
+  const url = new URL(source, window.location.href);
+  const projectMedia = getCachedCloudDisklessMode() && url.origin === window.location.origin &&
+    /^\/api\/projects\/[^/]+\/preview\//.test(url.pathname);
+  const options = mediaUrlSourceOptions("thumbnail", projectMedia);
   const input = new mediabunny.Input({
     source: new mediabunny.UrlSource(source, options),
     formats: mediabunny.ALL_FORMATS,

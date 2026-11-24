@@ -7,7 +7,8 @@ import settingsUi from './settings-ui.json';
 import templateUi from './template-ui.json';
 import mcpUi from './mcp-ui.json';
 import studioNavigationUi from './studio-navigation-ui.json';
-import { mcpFaq } from '../motion/mcpCapabilities';
+import editorLoadingUi from './editor-loading-ui.json';
+import { mcpCapabilities, mcpFaq } from '../motion/mcpCapabilities';
 import { creativeStudios } from '../../../shared/studio-catalog';
 import { errorNoticeMessage } from '../components/ui/errorNoticeMessage';
 import { historyEntryLabel } from './historyMessages';
@@ -67,6 +68,15 @@ describe('editor language resources', () => {
       }
       // Verify prompt-only history action resolves to studio-navigation-ui rather than a dead Sound Studio override.
       expect(translate(locale, 'Reuse prompt'), `${locale}: Reuse prompt`).toBe(entries['Reuse prompt']);
+    }
+  });
+
+  it('localizes the component placement example and preserves the public field names', () => {
+    const prompt = mcpCapabilities.find(item => item.id === 'motion-components')!.prompt;
+    for (const { locale } of languages.filter(language => language.locale !== 'en')) {
+      const translation = translate(locale, prompt);
+      expect(translation, locale).not.toBe(prompt);
+      for (const field of ['hostFile', 'baseVersion', 'compositionFile']) expect(translation, locale).toContain(field);
     }
   });
 
@@ -227,5 +237,37 @@ it('localizes audited controls and history without translating authored names', 
     expect(historyEntryLabel('Undid: Move timeline clips', t)).toContain(t('Move timeline clips'));
     expect(historyEntryLabel('Add block: My Custom Title', t)).toContain('My Custom Title');
     expect(historyEntryLabel('My authored version name', t)).toBe('My authored version name');
+  }
+});
+
+it('keeps editor asset-loading messages complete and placeholder-safe across all locales', () => {
+  const keys = Object.keys(editorLoadingUi['zh-CN']).sort();
+  for (const { locale } of languages) {
+    if (locale === 'en') continue;
+    const entries = editorLoadingUi[locale];
+    expect(Object.keys(entries).sort(), locale).toEqual(keys);
+    for (const [source, translation] of Object.entries(entries)) {
+      expect(translation.trim(), `${locale}: ${source}`).not.toBe('');
+      if (locale === 'zh-CN') expect(translation, source).not.toContain('工程');
+      const placeholders = (text: string) => [...text.matchAll(/\{\w+\}/g)].map(m => m[0]).sort();
+      expect(placeholders(translation), `${locale}: ${source}`).toEqual(placeholders(source));
+    }
+  }
+});
+
+it('localizes Cloud P2 notices for Game Studio and Workflows in all non-English locales', () => {
+  const notices = [
+    'Game Studio is coming in Phase 2.',
+    'Game Studio requires local game runtime tools and is scheduled for Phase 2 in OpenMotion Cloud.',
+    'Workflows are coming in Phase 2.',
+    'Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.',
+  ];
+  for (const { locale } of languages) {
+    if (locale === 'en') continue;
+    for (const key of notices) {
+      const translated = translate(locale, key);
+      expect(translated.trim(), `${locale}: ${key}`).not.toBe('');
+      expect(translated, `${locale}: ${key}`).not.toBe(key);
+    }
   }
 });

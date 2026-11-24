@@ -20,6 +20,8 @@ import { TranscriptEditor } from './TranscriptEditor';
 import { TranscriptWorkflowBrief } from './TranscriptWorkflowBrief';
 import { useCaptionWorkspace } from './captionWorkspace';
 import { useCaptionSurfaceActive } from './useCaptionSurfaceActive';
+import { useTranscriptServiceAvailable } from './useTranscriptServiceAvailable';
+import { isDeferredP2Error } from './p2Deferred';
 
 type Source = { path: string; sha256: string; bytes: number };
 export function TranscriptPanel({ onAddToTimeline }: { onAddToTimeline?: (path: string) => unknown }) {
@@ -32,11 +34,13 @@ function TranscriptContent({ projectId, onAddToTimeline }: { projectId: string; 
   const [sources, setSources] = useState<Source[]>([]), [source, setSource] = useState('');
   const [models, setModels] = useState<DirectoryModel[]>([]), [model, setModel] = useState(''), [language, setLanguage] = useState('auto');
   const [listing, setListing] = useState<TranscriptList>({ documents: [], jobs: [] }), [doc, setDoc] = useState<TranscriptDocument | null>(null);
-  const [loading, setLoading] = useState(true), [failed, setFailed] = useState(false), [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false);
+  const [loading, setLoading] = useState(true), [failed, setFailed] = useState(false), [deferred, setDeferred] = useState(false), [asrDeferred, setAsrDeferred] = useState(false), [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false);
   const [brief, setBrief] = useState(false), [briefVisited, setBriefVisited] = useState(false), [view, setView] = useState<TranscriptView>('segments');
   const [settings, setSettings] = useState(false), [editorBusy, setEditorBusy] = useState(false);
   const selection = useCaptionWorkspace(s => s.selections[projectId]);
-  const visible = useCaptionSurfaceActive('transcript');
+  const transcriptServiceAvailable = useTranscriptServiceAvailable();
+  const visible = useCaptionSurfaceActive('transcript') && transcriptServiceAvailable;
+  const showDeferred = !transcriptServiceAvailable || deferred;
   const epoch = useCaptionWorkspace(s => s.epoch);
   const selectedId = usePlayerStore(s => s.selectedElementId);
   const elements = usePlayerStore(s => s.elements);
@@ -48,15 +52,31 @@ function TranscriptContent({ projectId, onAddToTimeline }: { projectId: string; 
   const submission = useRef<{ signature: string; requestId: string } | null>(null);
   const disabled = busy || editorBusy || Boolean(shell.writeBlockedReason) || shell.renderQueue.isRendering;
   const refresh = useCallback(async () => {
-    const [media, catalog, list] = await Promise.all([
-      transcriptRequest<{ sources: Source[] }>({ command: 'sources', projectId }),
-      transcriptRequest<{ models: DirectoryModel[]; defaultModel: string | null }>({ command: 'models' }),
-      transcriptRequest<TranscriptList>({ command: 'list', projectId }),
-    ]);
-    if (!alive.current) return;
-    setSources(media.sources); setSource(old => media.sources.some(s => s.path === old) ? old : media.sources[0]?.path ?? '');
-    setModels(catalog.models); setModel(old => catalog.models.some(m => m.id === old) ? old : catalog.defaultModel || catalog.models[0]?.id || '');
-    setListing(list); setFailed(false); setLoading(false);
+    try {
+      const [media, catalog, list] = await Promise.all([
+        transcriptRequest<{ sources: Source[] }>({ command: 'sources', projectId }),
+        transcriptRequest<{ models: DirectoryModel[]; defaultModel: string | null }>({ command: 'models' }).catch(err => {
+          if (isDeferredP2Error(err)) return { models: [] as DirectoryModel[], defaultModel: null, deferred: true as const };
+          throw err;
+        }),
+        transcriptRequest<TranscriptList>({ command: 'list', projectId }),
+      ]);
+      if (!alive.current) return;
+      setSources(media.sources); setSource(old => media.sources.some(s => s.path === old) ? old : media.sources[0]?.path ?? '');
+      setModels(catalog.models); setModel(old => catalog.models.some(m => m.id === old) ? old : catalog.defaultModel || catalog.models[0]?.id || '');
+      setAsrDeferred(Boolean('deferred' in catalog && catalog.deferred));
+      setListing(list); setDeferred(false); setFailed(false); setLoading(false);
+    } catch (err) {
+      if (!alive.current) return;
+      if (isDeferredP2Error(err)) {
+        setDeferred(true);
+        setAsrDeferred(true);
+        setFailed(false);
+        setLoading(false);
+        return;
+      }
+      throw err;
+    }
   }, [projectId]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
@@ -117,12 +137,27 @@ function TranscriptContent({ projectId, onAddToTimeline }: { projectId: string; 
   const configured = models.some(m => m.id === model);
   const field = (label: string, control: React.ReactNode) => <div className="flex min-w-0 flex-col gap-1.5"><span className="text-step-11 font-medium text-text-2">{t(label)}</span>{control}</div>;
   async function submit() {
+    if (asrDeferred) {
+      shell.showToast(t('Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.'), 'info');
+      return;
+    }
     if (!configured) { chrome?.openModelSettings(); return; }
     await act(async () => {
       const input = { command: 'submit', projectId, sourcePath: source, model, language };
       const signature = JSON.stringify(input); if (submission.current?.signature !== signature) submission.current = { signature, requestId: crypto.randomUUID() };
-      await transcriptRequest({ ...input, requestId: submission.current.requestId }); submission.current = null; setSettings(false); await refresh();
-      if (alive.current) shell.showToast(t('Transcription queued'), 'info');
+      try {
+        await transcriptRequest({ ...input, requestId: submission.current.requestId }); submission.current = null; setSettings(false); await refresh();
+        if (alive.current) shell.showToast(t('Transcription queued'), 'info');
+      } catch (err) {
+        if (isDeferredP2Error(err)) {
+          submission.current = null;
+          setAsrDeferred(true);
+          setSettings(false);
+          if (alive.current) shell.showToast(t('Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.'), 'info');
+          return;
+        }
+        throw err;
+      }
     });
   }
   const openStyles = () => {
@@ -156,13 +191,19 @@ function TranscriptContent({ projectId, onAddToTimeline }: { projectId: string; 
       const result = await transcriptRequest<{ document: TranscriptDocument }>({ command: 'import', projectId, sourcePath: source, requestId: crypto.randomUUID(), subtitles: await file.text() });
       if (alive.current) { setDoc(result.document); await refresh(); }
     }); }} />
-    {doc ? <TranscriptEditor key={doc.id} document={doc} busy={disabled} setDocument={setDoc} onDirty={setDirty} onWorking={setEditorBusy} refresh={refresh} sourceBar={sourceBar} view={view} onView={setView} onImport={importSubtitles} /> : <>
-      <TranscriptToolbar view={view} onView={setView} onImport={importSubtitles} onStyles={openStyles} busy={disabled || loading} />
-      {sourceBar}
+    {doc && !showDeferred ? <TranscriptEditor key={doc.id} document={doc} busy={disabled} setDocument={setDoc} onDirty={setDirty} onWorking={setEditorBusy} refresh={refresh} sourceBar={sourceBar} view={view} onView={setView} onImport={importSubtitles} /> : <>
+      {!showDeferred && <>
+        <TranscriptToolbar view={view} onView={setView} onImport={importSubtitles} onStyles={openStyles} busy={disabled || loading} />
+        {sourceBar}
+      </>}
       <div className="flex min-h-0 flex-1 overflow-y-auto" data-testid="transcript-reading-area">
-        {loading ? <div className="flex w-full flex-col gap-4 p-4" aria-label={t('Loading transcript')}><Skeleton style={{ width: '65%', height: 16 }} /><Skeleton style={{ width: '100%', height: 64 }} /><Skeleton style={{ width: '85%', height: 64 }} /></div> : <div className="m-auto flex w-full max-w-80 flex-col items-center gap-3 px-5 py-8 text-center">
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-hover text-text-3"><RemixIcon name={failed || latest?.state === 'failed' ? 'error-warning-line' : 'mic-line'} size={22} /></span>
-          {failed ? <><h2 className="text-step-13 font-semibold">{t('Could not load transcripts')}</h2><Button size="sm" onClick={() => void act(refresh)}>{t('Retry')}</Button></> : running ? <>
+        {loading && !showDeferred ? <div className="flex w-full flex-col gap-4 p-4" aria-label={t('Loading transcript')}><Skeleton style={{ width: '65%', height: 16 }} /><Skeleton style={{ width: '100%', height: 64 }} /><Skeleton style={{ width: '85%', height: 64 }} /></div> : <div className="m-auto flex w-full max-w-80 flex-col items-center gap-3 px-5 py-8 text-center">
+          <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-hover text-text-3"><RemixIcon name={showDeferred ? 'time-line' : failed || latest?.state === 'failed' ? 'error-warning-line' : 'mic-line'} size={22} /></span>
+          {showDeferred ? <>
+            <h2 className="text-step-13 font-semibold" role="status" data-deferred-p2="true">{t('Cloud speech recognition is coming in Phase 2')}</h2>
+            <p className="text-step-12 leading-relaxed text-text-3">{t('Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.')}</p>
+            <Button size="sm" variant="secondary" onClick={openStyles}>{t('Open Captions')}</Button>
+          </> : failed ? <><h2 className="text-step-13 font-semibold">{t('Could not load transcripts')}</h2><Button size="sm" onClick={() => void act(refresh)}>{t('Retry')}</Button></> : running ? <>
             <h2 className="text-step-13 font-semibold" role="status">{t('Recognizing speech…')}</h2>
             <p className="text-step-12 leading-relaxed text-text-3">{t('You can keep editing while speech is transcribed.')}</p>
             <div className="om-progress w-full" role="progressbar" aria-label={t('Transcription progress')} aria-valuemin={0} aria-valuemax={Math.max(1, running.totalChunks)} aria-valuenow={running.completedChunks}><span style={{ transform: `scaleX(${running.completedChunks / Math.max(1, running.totalChunks)})` }} /></div>
@@ -171,6 +212,10 @@ function TranscriptContent({ projectId, onAddToTimeline }: { projectId: string; 
             <h2 className="text-step-13 font-semibold">{t('No speech to transcribe yet')}</h2>
             <p className="text-step-12 leading-relaxed text-text-3">{t('Import a video or audio file, or record a voiceover from the timeline.')}</p>
             <Button size="sm" disabled={disabled} onClick={() => fileInput.current?.click()}><RemixIcon name="add-line" size={14} />{t('Import audio / video')}</Button>
+          </> : asrDeferred ? <>
+            <h2 className="text-step-13 font-semibold" role="status" data-deferred-p2="true">{t('Cloud speech recognition is coming in Phase 2')}</h2>
+            <p className="text-step-12 leading-relaxed text-text-3">{t('Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.')}</p>
+            {importSubtitles && <Button size="sm" variant="primary" onClick={importSubtitles}><RemixIcon name="upload-2-line" size={14} />{t('Import SRT / VTT')}</Button>}
           </> : <>
             <h2 className="text-step-13 font-semibold">{t(latest?.state === 'failed' ? 'Transcription failed' : 'Ready to transcribe')}</h2>
             <p className="text-step-12 leading-relaxed text-text-3">{latest?.state === 'failed' ? latest.error : t('Turn speech into editable text, then style it as captions.')}</p>

@@ -41,19 +41,23 @@ export class StudioFileConflictError extends StudioSaveHttpError {
   readonly currentVersion: string | null;
   readonly currentContent: string | null;
   readonly attemptedContent: string;
+  readonly syncLatest: boolean;
 
   constructor(input: {
     filePath: string;
     currentVersion: string | null;
     currentContent: string | null;
     attemptedContent: string;
+    syncLatest?: boolean;
   }) {
-    super(`Save conflict: ${input.filePath} changed outside this Studio session`, 409);
+    super(input.syncLatest ? "The project changed elsewhere. Changes were not saved."
+      : `Save conflict: ${input.filePath} changed outside this Studio session`, 409);
     this.name = "StudioFileConflictError";
     this.filePath = input.filePath;
     this.currentVersion = input.currentVersion;
     this.currentContent = input.currentContent;
     this.attemptedContent = input.attemptedContent;
+    this.syncLatest = input.syncLatest === true;
   }
 }
 

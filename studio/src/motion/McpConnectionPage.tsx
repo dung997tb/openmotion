@@ -1,7 +1,9 @@
 import { Collapsible } from '@base-ui/react/collapsible';
 import { Button } from 'open-design-ui/button';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { manualConnection, setupGuideUrl, setupPrompt, transcriptExamplePrompt, type IntegrationInfo } from '../../../shared/integration';
+import { integrationConfig, isStreamableHttpTransport, manualConnection, setupGuideUrl, setupPrompt, transcriptExamplePrompt, type IntegrationInfo } from '../../../shared/integration';
+import { clipMoveExample, projectEditExample } from '../../../shared/clip-move-guide';
+import { projectFileExample } from '../../../shared/project-file-guide';
 import { reviewCommentsPrompt } from '../../../shared/review-comments';
 import { findScenario, scenarioAgentPrompt } from '../../../shared/scenarios';
 import { findTechniqueStudio } from '../../../shared/studio-catalog';
@@ -11,6 +13,7 @@ import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 import { useCommunityLink } from './CommunityLink';
 import { HorizontalRail } from './HorizontalRail';
 import { McpClientAvatar } from './McpClientAvatar';
@@ -22,8 +25,8 @@ import { McpManualConfiguration } from './McpManualConfiguration';
 import { McpSiteFooter } from './McpSiteFooter';
 import { McpTemplateShowcase } from './McpTemplateShowcase';
 import { McpTiltCard } from './McpTiltCard';
-import { mcpCapabilities, mcpScenarios, platformExportExample, searchRecoveryExample } from './mcpCapabilities';
-import { mcpClients as clients, supportsLocalConnection, type McpClient } from './mcpClients';
+import { mcpBenefits, mcpCapabilities, mcpFaq, mcpScenarios, platformExportExample, searchRecoveryExample } from './mcpCapabilities';
+import { mcpClients as clients, supportsConnection, supportsLocalConnection, type McpClient } from './mcpClients';
 import { readMcpGalleryPosition } from './mcpGallery';
 import { mcpAdvantagePillars, mcpQuickFaq, type McpCaseTarget } from './mcpShowcaseData';
 import * as tracking from './pageTracking';
@@ -34,12 +37,22 @@ import { readWorkspacePage, type WorkspacePage } from './workspacePageRouting';
 import type { WorkspaceChrome } from './WorkspaceChromeContext';
 import './McpConnectionPage.css';
 
-const primaryClients = clients.filter(supportsLocalConnection);
+const cloudFaqQuestions = new Set<string>([
+  'Which Agents are supported?',
+  'Does connecting start generation or spend credits?',
+  'Do I need an OpenMotion API key or third-party BYOK keys?',
+  'Can ChatGPT Cloud connect to this workspace?',
+  'How do I import my own files into a cloud project?',
+  'Can I transcribe recordings and make multilingual platform videos?',
+]);
+const cloudQuickFaq = mcpFaq
+  .filter(([question]) => cloudFaqQuestions.has(question))
+  .map(([questionKey, answerKey]) => ({ id: questionKey, questionKey, answerKey }));
 
 const DSH_PLUGIN_URL = 'https://github.com/nexu-io/openmotion/tree/main/integrations/dsh';
 
 function buildCursorDeeplink(info: IntegrationInfo | null): string | null {
-  if (!info || info.deployment?.type === 'docker') return null;
+  if (!info || info.transport.type !== 'stdio' || info.deployment?.type === 'docker') return null;
   const payload = {
     command: info.transport.command,
     args: info.transport.args,
@@ -83,6 +96,9 @@ export function McpConnectionPage({
   const toast = useToast();
   const community = useCommunityLink();
   const { info, failed, retry } = useIntegrationInfo();
+  const brandKitEnabled = useCloudFeatureEnabled('brandKit');
+  const httpTransport = isStreamableHttpTransport(info?.transport) ? info.transport : null;
+  const primaryClients = httpTransport ? clients : clients.filter(supportsLocalConnection);
   const [manualScenario, setManualScenario] = useState<{ id: string; text: string } | null>(null);
   const [localRoute, setLocalRoute] = useState(() => readWorkspacePage(location.search, location.hash, location.pathname));
   const [setupResult, setSetupResult] = useState<{
@@ -185,11 +201,15 @@ export function McpConnectionPage({
     section.scrollIntoView({ block: 'start' });
   };
 
-  const supported = supportsLocalConnection(client);
+  const supported = supportsConnection(client, info);
   const language = locale === 'zh-CN' ? 'zh-CN' : 'en';
   const prompt = setupPrompt(info, client.host, language, t).replace('MCP / CLI', agent);
   const manual = info ? manualConnection(info, client.host, language) : '';
   const cursorDeeplink = client.id === 'cursor' ? buildCursorDeeplink(info) : null;
+  const cloudConfig = info && httpTransport && supported ? integrationConfig(info, client.host) : null;
+  const downloadConfig = cloudConfig
+    ? { href: `data:${cloudConfig.contentType},${encodeURIComponent(cloudConfig.text)}`, filename: cloudConfig.filename }
+    : { href: `/connect/config?host=${client.host}`, filename: true as const };
 
   type CopyReport = {
     kind: Parameters<typeof tracking.reportMcpCopyResult>[0];
@@ -227,6 +247,10 @@ export function McpConnectionPage({
       instruction = [prompt, t(item.prompt), skillShotPrompt(starterSkill, studioSkillDefaults(explainer.id), t)].join('\n\n');
     } else if (item.id === 'review-comments') {
       instruction = reviewCommentsPrompt({ projectId, dataDirectory: info?.dataDirectory, previewUrl: info?.previewUrl });
+    } else if (item.id === 'project-file') {
+      instruction = [prompt, t(item.prompt), projectFileExample(projectId)].join('\n\n');
+    } else if (item.id === 'clip-move' || item.id === 'project-edit') {
+      instruction = [prompt, t(item.prompt), item.id === 'clip-move' ? clipMoveExample : projectEditExample].join('\n\n');
     } else if (item.id === 'transcript') {
       instruction = `${prompt}\n\n${transcriptExamplePrompt(info, locale)}`;
     } else if (item.id === 'scenario-black-friday') {
@@ -379,11 +403,24 @@ export function McpConnectionPage({
               </span>
             </h1>
 
+            {httpTransport && (
+              <div className="om-settings-tags justify-center" data-mcp-endpoint>
+                <span className="om-badge" data-active="true">Streamable HTTP · {httpTransport.url}</span>
+                <span className="om-badge">
+                  {httpTransport.auth.mode === 'dev'
+                    ? t('Local Dev Mode')
+                    : [httpTransport.auth.oauth2 && 'OAuth 2.1', httpTransport.auth.pat && 'PAT'].filter(Boolean).join(' · ')}
+                </span>
+              </div>
+            )}
+
             {!supported ? (
               <div className="om-card om-mcp-unavailable om-mcp-unavailable-hero">
                 <RemixIcon name="information-line" size={28} />
-                <h2>{t('Remote connection unavailable')}</h2>
-                <p>{t('ChatGPT cloud cannot connect to this local workspace. Choose a local Agent above.')}</p>
+                <h2>{t(httpTransport ? 'HTTPS required for ChatGPT Cloud' : 'Remote connection unavailable')}</h2>
+                <p>{t(httpTransport
+                  ? 'ChatGPT Cloud requires a public HTTPS Streamable HTTP /mcp endpoint with OAuth 2.1 enabled. Use Codex, Claude Code, Cursor or DeepSeek Harness with this local HTTP endpoint, or deploy OpenMotion behind HTTPS.'
+                  : 'ChatGPT cloud cannot connect to this local workspace. Choose a local Agent above.')}</p>
                 <pre className="om-code-block">{manual}</pre>
                 <Button
                   variant="ghost"
@@ -393,7 +430,7 @@ export function McpConnectionPage({
                     setClientId('codex');
                   }}
                 >
-                  {t('Use a local Agent')}
+                  {t(httpTransport ? 'Use Codex instead' : 'Use a local Agent')}
                 </Button>
               </div>
             ) : (
@@ -448,13 +485,14 @@ export function McpConnectionPage({
                         <McpManualConfiguration
                           key={client.id}
                           host={client.host}
+                          streamableHttp={Boolean(httpTransport)}
                           value={manual}
                           onCopy={value => copy(value, { kind: 'manual_config' })}
                         >
                           <a
                             className="om-mcp-manual-link"
-                            href={`/connect/config?host=${client.host}`}
-                            download
+                            href={downloadConfig.href}
+                            download={downloadConfig.filename}
                             onClick={() => click('mcp_setup', 'download_config', { setup_method: 'manual' })}
                           >
                             {t('Download configuration')}
@@ -469,10 +507,19 @@ export function McpConnectionPage({
                             <span>{t('Connection guide')}</span>
                             <RemixIcon name="arrow-right-up-line" size={14} />
                           </a>
+                          {httpTransport?.auth.pat && (
+                            <Button
+                              variant="plain"
+                              className="om-mcp-manual-link"
+                              onClick={() => changeRoute({ settings: 'account', assets: false, skills: false, templates: false })}
+                            >
+                              {t('Manage API tokens (PAT)')}
+                            </Button>
+                          )}
                         </McpManualConfiguration>
                       )}
 
-                      {client.host === 'deepseek' && (
+                      {!httpTransport && client.host === 'deepseek' && (
                         <div className="om-mcp-manual-note">
                           <span>{t('Optional: embed the Studio editor right inside DeepSeek Harness with the standalone host plugin (remove the plain MCP entry above first).')}</span>
                           <a href={DSH_PLUGIN_URL} target="_blank" rel="noreferrer">
@@ -482,7 +529,7 @@ export function McpConnectionPage({
                         </div>
                       )}
 
-                      {client.id === 'desktop' && (
+                      {!httpTransport && client.id === 'desktop' && (
                         <div className="om-mcp-manual-note">
                           <span>{t('Note: Claude Desktop has no local terminal access — keep your local OpenDesign service running before merging this JSON.')}</span>
                         </div>
@@ -507,12 +554,14 @@ export function McpConnectionPage({
         {/* 3 Higgsfield-Style Centered Cinematic Feature Carousels */}
         <McpFeatureCarousels
           enabled={previewsEnabled}
+          brandKitEnabled={brandKitEnabled}
           onCopy={(slideId, text) => copy(text, { kind: 'capability_example', capability: slideId, includesSetup: false })}
         />
 
         {/* 12-Card Scenario Template Gallery */}
         <McpTemplateShowcase
           enabled={previewsEnabled}
+          brandKitEnabled={brandKitEnabled}
           initialCategory={galleryPosition?.category ?? 'all'}
           openLibrary={openLibrary('mcp_templates')}
           onOpenTarget={openCaseTarget}
@@ -531,8 +580,8 @@ export function McpConnectionPage({
               <McpTiltCard key={pillar.num}>
                 <article className="om-mcp-pillar">
                   <div className="om-mcp-pillar-num">{pillar.num}</div>
-                  <h3>{t(pillar.titleKey)}</h3>
-                  <p>{t(pillar.bodyKey)}</p>
+                  <h3>{t(httpTransport && pillar.num === '03' ? mcpBenefits[2].title : pillar.titleKey)}</h3>
+                  <p>{t(httpTransport && pillar.num === '03' ? mcpBenefits[2].description : pillar.bodyKey)}</p>
                 </article>
               </McpTiltCard>
             ))}
@@ -544,7 +593,9 @@ export function McpConnectionPage({
           <div className="om-mcp-faq-layout">
             <div className="om-mcp-faq-intro">
               <h2 id="mcp-faq-heading">{t('Frequently asked questions')}</h2>
-              <p>{t('Quick answers on setup, billing boundaries, local privacy and editable multi-track projects.')}</p>
+              <p>{t(httpTransport
+                ? 'Connect, create, save and reuse—all in one guide.'
+                : 'Quick answers on setup, billing boundaries, local privacy and editable multi-track projects.')}</p>
               <div className="om-mcp-contact">
                 <a className="om-text-link" href={community.href} target="_blank" rel="noopener noreferrer" onClick={() => click('mcp_faq', 'community')}>
                   {community.label}
@@ -558,7 +609,7 @@ export function McpConnectionPage({
             </div>
 
             <div className="om-mcp-faq-acc-list">
-              {mcpQuickFaq.map((item, idx) => (
+              {(httpTransport ? cloudQuickFaq : mcpQuickFaq).map((item, idx) => (
                 <details
                   key={item.id}
                   className="om-mcp-faq-acc"

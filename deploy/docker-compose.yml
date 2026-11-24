@@ -1,31 +1,332 @@
 name: openmotion
 
 services:
-  openmotion:
-    container_name: openmotion
-    image: ${OPENMOTION_IMAGE:-openmotion:local}
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-openmotion}
+      POSTGRES_USER: ${POSTGRES_USER:-openmotion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openmotion_local_dev}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-openmotion} -d $${POSTGRES_DB:-openmotion}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "${REDIS_MAXMEMORY:-512mb}"
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+  s3:
+    image: rustfs/rustfs:1.0.6
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-openmotion}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-openmotion_local_dev}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "127.0.0.1:${S3_API_PORT:-9000}:9000"
+      - "127.0.0.1:${S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - s3_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  s3-init:
+    image: ${OPENMOTION_API_IMAGE:-openmotion-api:local}
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    restart: unless-stopped
+      target: api
+    restart: "no"
+    command: ["node", "--experimental-strip-types", "scripts/init-s3.ts"]
+    depends_on:
+      s3:
+        condition: service_healthy
     environment:
-      # The same port is used inside and outside the container, so the URLs the
-      # server and MCP return open unchanged in the host browser.
-      PORT: ${OPENMOTION_PORT:-4173}
-      # Used by Studio's host-side MCP commands to enter this exact container.
-      MOTION_CONTAINER_NAME: openmotion
-      DO_NOT_TRACK: ${DO_NOT_TRACK:-}
-    ports:
-      # Loopback only. This is what keeps other machines out: the Studio has no
-      # sign-in, so do not publish the port on another interface.
-      - "127.0.0.1:${OPENMOTION_PORT:-4173}:${OPENMOTION_PORT:-4173}"
-    volumes:
-      - openmotion_data:/data
+      NODE_ENV: ${NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-http://127.0.0.1:4173}
+      PREVIEW_PUBLIC_ORIGIN: ${PREVIEW_PUBLIC_ORIGIN:-}
+      S3_ENDPOINT: http://s3:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-openmotion}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-openmotion}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-openmotion_local_dev}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      S3_CORS_ALLOWED_ORIGINS: ${S3_CORS_ALLOWED_ORIGINS:-}
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
     security_opt:
       - no-new-privileges:true
-    mem_limit: ${OPENMOTION_MEM_LIMIT:-4g}
+
+  db-migrate:
+    image: ${OPENMOTION_API_IMAGE:-openmotion-api:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    restart: "no"
+    command: ["node", "--experimental-strip-types", "src/db/migrate.ts"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-openmotion}:${POSTGRES_PASSWORD:-openmotion_local_dev}@postgres:5432/${POSTGRES_DB:-openmotion}
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    security_opt:
+      - no-new-privileges:true
+
+  catalog-sync:
+    image: ${OPENMOTION_CATALOG_SYNC_IMAGE:-openmotion-catalog-sync:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: catalog-sync
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-openmotion}:${POSTGRES_PASSWORD:-openmotion_local_dev}@postgres:5432/${POSTGRES_DB:-openmotion}
+      S3_ENDPOINT: http://s3:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-openmotion}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-openmotion}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-openmotion_local_dev}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      CATALOG_SYNC_FETCH_REMOTE: ${CATALOG_SYNC_FETCH_REMOTE:-true}
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    image: ${OPENMOTION_API_IMAGE:-openmotion-api:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+      db-migrate:
+        condition: service_completed_successfully
+      catalog-sync:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      WORKER_ROLE: api
+      PORT: ${PORT:-4173}
+      PREVIEW_TOKEN_TTL_SEC: ${PREVIEW_TOKEN_TTL_SEC:-900}
+      BIND_HOST: 0.0.0.0
+      APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-http://127.0.0.1:4173}
+      PREVIEW_PUBLIC_ORIGIN: ${PREVIEW_PUBLIC_ORIGIN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-openmotion}:${POSTGRES_PASSWORD:-openmotion_local_dev}@postgres:5432/${POSTGRES_DB:-openmotion}
+      PG_POOL_MAX: ${PG_POOL_MAX:-20}
+      REDIS_URL: redis://redis:6379
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-}
+      REDIS_CACHE_TTL_SEC: ${REDIS_CACHE_TTL_SEC:-3600}
+      S3_ENDPOINT: http://s3:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-openmotion}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-openmotion}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-openmotion_local_dev}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      S3_PRESIGN_PUT_TTL_SEC: ${S3_PRESIGN_PUT_TTL_SEC:-900}
+      S3_PRESIGN_GET_TTL_SEC: ${S3_PRESIGN_GET_TTL_SEC:-300}
+      AUTH_MODE: ${AUTH_MODE:-dev}
+      ALLOW_INSECURE_DEV_AUTH: ${ALLOW_INSECURE_DEV_AUTH:-false}
+      DEV_WORKSPACE_ID: ${DEV_WORKSPACE_ID:-00000000-0000-4000-8000-000000000001}
+      DEV_USER_ID: ${DEV_USER_ID:-00000000-0000-4000-8000-000000000002}
+      DEV_PAT: ${DEV_PAT:-om_pat_devlocal_000000000000000000000000}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_CALLBACK_URL: ${OIDC_CALLBACK_URL:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
+      OIDC_CLAIM_SUB: ${OIDC_CLAIM_SUB:-sub}
+      OIDC_CLAIM_EMAIL: ${OIDC_CLAIM_EMAIL:-email}
+      OIDC_CLAIM_NAME: ${OIDC_CLAIM_NAME:-name}
+      OIDC_CLAIM_WORKSPACE: ${OIDC_CLAIM_WORKSPACE:-}
+      MCP_OAUTH_MODE: ${MCP_OAUTH_MODE:-proxy}
+      MCP_OAUTH_ISSUER: ${MCP_OAUTH_ISSUER:-}
+      MCP_MAX_BODY_BYTES: ${MCP_MAX_BODY_BYTES:-10485760}
+      OAUTH_DCR_ALLOWED_HTTPS_HOSTS: ${OAUTH_DCR_ALLOWED_HTTPS_HOSTS:-}
+      OAUTH_DCR_RATE_LIMIT_PER_MIN: ${OAUTH_DCR_RATE_LIMIT_PER_MIN:-10}
+      MODEL_GATEWAY_MODE: ${MODEL_GATEWAY_MODE:-mock}
+      OPENDESIGN_API_URL: ${OPENDESIGN_API_URL:-https://amr-api.open-design.ai}
+      OPENDESIGN_LINK_URL: ${OPENDESIGN_LINK_URL:-https://amr-link.open-design.ai}
+      OPENDESIGN_CONSOLE_URL: ${OPENDESIGN_CONSOLE_URL:-https://open-design.ai/cloud}
+      OPENDESIGN_INTERNAL_API_TOKEN: ${OPENDESIGN_INTERNAL_API_TOKEN:-}
+      OPENDESIGN_S2S_API_KEY: ${OPENDESIGN_S2S_API_KEY:-}
+      AMR_IDENTITY_CACHE_TTL_SEC: ${AMR_IDENTITY_CACHE_TTL_SEC:-60}
+      OPENDESIGN_ASR_URL: ${OPENDESIGN_ASR_URL:-}
+      OPENDESIGN_BILLING_SYNC_ENABLED: ${OPENDESIGN_BILLING_SYNC_ENABLED:-false}
+      ALLOW_DOH_FAKEIP_FALLBACK: ${ALLOW_DOH_FAKEIP_FALLBACK:-false}
+      SENTRY_WEB_DSN: ${SENTRY_WEB_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+    ports:
+      # Loopback publication keeps the local AUTH_MODE=dev stack unreachable from the LAN.
+      - "127.0.0.1:${OPENMOTION_PORT:-4173}:${PORT:-4173}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${API_MEM_LIMIT:-1g}
+    pids_limit: 512
+
+  worker-media:
+    image: ${OPENMOTION_WORKER_MEDIA_IMAGE:-openmotion-worker-media:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: worker-media
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+      db-migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      WORKER_ROLE: media
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-openmotion}:${POSTGRES_PASSWORD:-openmotion_local_dev}@postgres:5432/${POSTGRES_DB:-openmotion}
+      PG_POOL_MAX: ${WORKER_PG_POOL_MAX:-10}
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://s3:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-openmotion}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-openmotion}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-openmotion_local_dev}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      MODEL_GATEWAY_MODE: ${MODEL_GATEWAY_MODE:-mock}
+      OPENDESIGN_API_URL: ${OPENDESIGN_API_URL:-https://amr-api.open-design.ai}
+      OPENDESIGN_LINK_URL: ${OPENDESIGN_LINK_URL:-https://amr-link.open-design.ai}
+      OPENDESIGN_INTERNAL_API_TOKEN: ${OPENDESIGN_INTERNAL_API_TOKEN:-}
+      OPENDESIGN_S2S_API_KEY: ${OPENDESIGN_S2S_API_KEY:-}
+      OPENDESIGN_ASR_URL: ${OPENDESIGN_ASR_URL:-}
+      OPENDESIGN_BILLING_SYNC_ENABLED: ${OPENDESIGN_BILLING_SYNC_ENABLED:-false}
+      ALLOW_DOH_FAKEIP_FALLBACK: ${ALLOW_DOH_FAKEIP_FALLBACK:-false}
+      MEDIA_CONCURRENCY: ${MEDIA_CONCURRENCY:-20}
+      BLOB_GC_GRACE_SECONDS: ${BLOB_GC_GRACE_SECONDS:-604800}
+    read_only: true
+    tmpfs:
+      - /tmp:size=${MEDIA_TMP_SIZE:-1g}
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${MEDIA_MEM_LIMIT:-1g}
+    pids_limit: 512
+
+  worker-render:
+    image: ${OPENMOTION_WORKER_RENDER_IMAGE:-openmotion-worker-render:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: worker-render
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+      db-migrate:
+        condition: service_completed_successfully
+    # Security boundary: NEVER inject OPENDESIGN_*, OIDC_*, SESSION_SECRET, or DEV_PAT
+    # into worker-render (untrusted project HTML/JS executes inside headless Chromium).
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      WORKER_ROLE: render
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-openmotion}:${POSTGRES_PASSWORD:-openmotion_local_dev}@postgres:5432/${POSTGRES_DB:-openmotion}
+      PG_POOL_MAX: ${WORKER_PG_POOL_MAX:-10}
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://s3:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-openmotion}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-openmotion}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-openmotion_local_dev}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      RENDER_CONCURRENCY: ${RENDER_CONCURRENCY:-1}
+    read_only: true
+    tmpfs:
+      - /tmp:size=${RENDER_TMP_SIZE:-2g}
+    shm_size: ${RENDER_SHM_SIZE:-512m}
+    mem_limit: ${RENDER_MEM_LIMIT:-2g}
     pids_limit: 1024
-    shm_size: 1g
+    stop_grace_period: 120s
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
-  openmotion_data:
+  pg_data:
+  redis_data:
+  s3_data:

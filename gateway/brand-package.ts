@@ -9,13 +9,12 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { browserAutomation, browserExecutable } from "../browser.ts";
+import { browserAutomation, browserExecutable } from "../shared/browser-executable.ts";
 import {
   nativeProjectConfig,
   pluginRoot,
   runHyperframes,
 } from "../hyperframes.ts";
-import { requireNativeRuntime } from "../scripts/npm-runtime.mjs";
 import { inspectPackage } from "../packages/motion-package/index.mjs";
 import { zip } from "../scripts/zip.mjs";
 import {
@@ -53,7 +52,6 @@ export async function renderBrandPreview(
 ) {
   const signal = AbortSignal.any([parentSignal, AbortSignal.timeout(210_000)]);
   signal.throwIfAborted();
-  await requireNativeRuntime(pluginRoot, "export");
   const puppeteer = await browserAutomation(runtime);
   const browser = await puppeteer.launch({
     executablePath: await browserExecutable(),

@@ -91,12 +91,9 @@ test('built-in template detail stays local when the hosted catalog is unreachabl
   assert.match(index.warning, /内置模板/);
 });
 
-test('published repository files serve the HTTP gallery, public MCP and arbitrary project downloads in hosted mode', async t => {
+test('published repository files serve content-addressed hosted catalog entries and arbitrary project copies', async t => {
   const { mkdir, readFile, writeFile } = await import('node:fs/promises');
   const { buildTemplatePublication } = await import('../.github/scripts/publish-template-catalog.mjs');
-  const { WorkspaceStore } = await import('../workspace.ts');
-  const { transport } = await import('./http.ts');
-  const { rpc, mcpRegistry } = await import('../mcp.ts');
   const work = await mkdtemp(path.join(tmpdir(), 'openmotion-hosted-integration-'));
   t.after(() => rm(work, { recursive: true, force: true }));
   const root = path.join(work, 'library/templates/catalog'), folder = path.join(root, id);
@@ -113,42 +110,22 @@ test('published repository files serve the HTTP gallery, public MCP and arbitrar
   t.after(() => rm(built.staging, { recursive: true, force: true }));
   const uploaded = new Map(await Promise.all(built.uploads.map(async file => [`https://releases.open-design.ai/${file.key}`, await readFile(file.body)] as const)));
   uploaded.set(hostedCatalogUrl, Buffer.from(JSON.stringify(built.catalog)));
-  t.mock.method(globalThis, 'fetch', async input => {
+  const fetcher: typeof fetch = async input => {
     const bytes = uploaded.get(String(input));
     assert(bytes, 'Unexpected network access: ' + input);
     return new Response(new Uint8Array(bytes));
-  });
-  const previous = process.env.MOTION_TEMPLATE_SOURCE;
-  process.env.MOTION_TEMPLATE_SOURCE = 'hosted';
-  t.after(() => { if (previous === undefined) delete process.env.MOTION_TEMPLATE_SOURCE; else process.env.MOTION_TEMPLATE_SOURCE = previous; });
-  const store = new WorkspaceStore(path.join(work, 'data')), request = transport(store);
-  const page = await (await request('/motion-api/template-catalog?category=all&locale=en&covered=true')).json();
+  };
+  const catalog = new TemplateCatalog(path.join(work, 'copy-cache'), { source: 'hosted', locale: 'en', fetch: fetcher });
+  const page = await catalog.page({ category: 'all', covered: true });
   assert.equal(page.source, 'hosted');
-  const item = page.items.find(item => item.id === id);
+  const item = page.items.find(candidate => candidate.id === id);
   assert(item?.hasHtmlProject);
   assert.equal('localSource' in item, false);
-  const call = async (name: string, args = {}) => {
-    const result = await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, store, mcpRegistry('phase1'));
-    assert.equal(result.result.isError, undefined, JSON.stringify(result));
-    return result.result.structuredContent;
-  };
-  const index = await call('openmotion_list_templates');
-  assert.equal(index.catalogVersion, page.catalogVersion);
-  assert.match(await readFile(index.indexPath, 'utf8'), /Hosted fixture/);
-  const detail = await call('openmotion_get_template', { templateId: id });
+  const detail = await catalog.detail(id);
   assert.equal(detail.motionDocument.content, motion.toString());
-  assert.equal(detail.localSource, undefined);
   assert.equal(detail.workflowGuide.workflow, 'template');
-  const guide = await (await request(item.motionGuideUrl)).text();
-  assert(guide.includes('/guide-assets/viewer.js'));
-  assert(guide.includes('"id":"' + id + '"'));
-  assert.equal(await (await request(item.motionGuideUrl + '?raw=1')).text(), contents['preview.html'].toString());
-  assert.equal(await (await request(`/api/template-source/${id}/style.css`)).text(), contents['style.css'].toString());
-  const downloaded = await request(`/api/template-source/${id}/${encodeURIComponent('工程.custom')}`);
-  assert.equal(downloaded.status, 200);
-  assert.equal(downloaded.headers.get('content-type'), 'application/octet-stream');
-  assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), contents['工程.custom']);
-  const catalog = new TemplateCatalog(path.join(work, 'copy-cache'), { source: 'hosted' });
+  assert.equal((await catalog.sourceFile(id, 'style.css')).toString(), contents['style.css'].toString());
+  assert.deepEqual(await catalog.sourceFile(id, '工程.custom'), contents['工程.custom']);
   const output = path.join(work, 'copied');
   await catalog.copy(await catalog.get(id), output, work);
   assert.deepEqual(await readFile(path.join(output, '工程.custom')), contents['工程.custom']);

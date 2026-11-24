@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { browserAutomation, browserExecutable } from '../browser.ts';
+import { browserAutomation, browserExecutable } from '../shared/browser-executable.ts';
 import { validateBrandStyle, type BrandSample } from '../shared/brand-kit.ts';
 import type { BrandCatalog, BrandCatalogEntry } from '../shared/brand-catalog.ts';
 

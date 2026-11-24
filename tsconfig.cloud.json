@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.backend.json",
+  "compilerOptions": {
+    "strict": true
+  },
+  "include": [
+    "drizzle.config.ts",
+    "src/**/*.ts",
+    "scripts/init-s3.ts",
+    "shared/version.ts",
+    "shared/browser-executable.ts",
+    "shared/project-validation.ts",
+    "packages/observability/config.ts",
+    "packages/observability/sanitize.ts",
+    "packages/observability/index.ts",
+    "tests/cloud/**/*.ts"
+  ]
+}

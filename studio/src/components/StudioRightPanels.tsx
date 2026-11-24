@@ -31,6 +31,7 @@ import { timelineKeysForSelections } from "../utils/studioHelpers";
 import { canHideSelections } from "../utils/timelineInspector";
 import { useRemoveBackground } from "../hooks/useRemoveBackground";
 import { useApplyColorGradingScope } from "../hooks/useApplyColorGradingScope";
+import { useCloudFeatureEnabled } from "../utils/cloudFeatures";
 
 // fallow-ignore-next-line complexity
 const seekToTime = (t: number) => usePlayerStore.getState().requestSeek(t);
@@ -43,6 +44,7 @@ export const StudioRightPanels = memo(function StudioRightPanels({
   recordingDuration,
   onToggleRecording,
   sdkSession,
+  sdkSourcePath,
   publishSdkSession,
   forceReloadSdkSession,
   reloadPreview,
@@ -52,6 +54,7 @@ export const StudioRightPanels = memo(function StudioRightPanels({
   onAddMediaOverlay,
 }: StudioRightPanelsProps) {
   const { t } = useI18n();
+  const reviewCommentsEnabled = useCloudFeatureEnabled('reviewComments');
   const { previewIframeRef, projectId, activeCompPath, showToast, renderQueue } =
     useStudioShellContext();
   const { captionEditMode, refreshKey } = useStudioPlaybackContext();
@@ -195,12 +198,14 @@ export const StudioRightPanels = memo(function StudioRightPanels({
     <DesignPanelPromoteProvider
       selection={domEditGroupSelections.length > 1 ? null : domEditSelection}
       projectId={projectId}
-      activeCompPath={activeCompPath}
+      activeCompPath={sdkSourcePath}
       showToast={showToast}
       readProjectFile={readProjectFile}
       writeProjectFile={writeProjectFile}
       recordEdit={recordEdit}
       reloadPreview={reloadPreview}
+      sdkSession={sdkSession}
+      publishSdkSession={publishSdkSession}
       forceReloadSharedSdkSession={forceReloadSdkSession}
     >
       <PropertyPanel
@@ -276,6 +281,7 @@ export const StudioRightPanels = memo(function StudioRightPanels({
   } else if (activeBlockParams) {
     designBody = (
       <BlockParamsPanel
+        key={JSON.stringify([projectId, activeBlockParams.compositionPath])}
         blockName={activeBlockParams.blockName}
         blockTitle={activeBlockParams.blockTitle}
         params={activeBlockParams.params}
@@ -287,8 +293,12 @@ export const StudioRightPanels = memo(function StudioRightPanels({
 
   return (
     <>
-      <ReviewCommentsPanel />
-      <Dock.Panel id="comments"><ReviewCommentsListSlot /></Dock.Panel>
+      {reviewCommentsEnabled && (
+        <>
+          <ReviewCommentsPanel />
+          <Dock.Panel id="comments"><ReviewCommentsListSlot /></Dock.Panel>
+        </>
+      )}
       <Dock.Panel id="design">
         <div className="motion-inspector-surface h-full min-h-0">{designBody}</div>
       </Dock.Panel>

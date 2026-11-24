@@ -76,6 +76,98 @@ async function studio({ withHistory = true, initialFiles = {} as Record<string, 
   return { dir, history, hook: () => hook, file, save, readFile, host };
 }
 
+it("uses an explicit history read for pending notifications and still refreshes on later notifications", async () => {
+  const { hook } = await studio();
+  const fetch = vi.fn(globalThis.fetch);
+  vi.stubGlobal("fetch", fetch);
+  vi.useFakeTimers();
+  try {
+    hook().refreshAfterEvent();
+    await act(() => hook().refresh());
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    hook().refreshAfterEvent();
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(fetch).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("uses navigation returned by a cloud step and ignores its own history event", async () => {
+  const { hook } = await studio();
+  const readFile = vi.fn(async () => "note");
+  const edit = { id: "edit", label: "Edit title", paths: ["qa-history-1.txt"], endedAt: 1000 };
+  let token: string | undefined;
+  const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== "POST") return Response.json({ currentSeq: 2, back: edit, forward: null, entries: [] });
+    token = new Headers(init.headers).get("x-hyperframes-write-token")!;
+    hook().refreshAfterEvent(token);
+    const undo = JSON.parse(String(init.body)).direction === "back";
+    return Response.json({ ok: true, stepLabel: edit.label, appliedFiles: ["qa-history-1.txt"],
+      navigation: undo ? { currentSeq: 1, back: null, forward: edit } : { currentSeq: 2, back: edit, forward: null } });
+  });
+  vi.stubGlobal("fetch", fetch);
+  await act(() => hook().refresh());
+  vi.useFakeTimers();
+  try {
+    await act(() => hook().undo({ readFile }));
+    hook().refreshAfterEvent(token);
+    expect(hook().availableNow("redo")).toBe(true);
+    expect(hook().canUndo).toBe(false);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await act(() => hook().redo({ readFile }));
+    expect(hook().canUndo).toBe(true);
+    expect(readFile).not.toHaveBeenCalled();
+    hook().refreshAfterEvent("another-editor");
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(fetch).toHaveBeenCalledTimes(4);
+  } finally { vi.useRealTimers(); }
+});
+
+it("uses the files actually restored by cloud history in both directions", async () => {
+  const { hook, save, readFile } = await studio();
+  let seq = 2;
+  const edit = { id: "edit", label: "Edit title", paths: ["index.html"], endedAt: 1000 };
+  vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      seq = JSON.parse(String(init.body)).direction === "back" ? 1 : 2;
+      save(seq === 1 ? "A" : "B");
+      return Response.json({ ok: true, appliedFiles: ["index.html"],
+        entry: { label: "Destination", files: [{ path: "other.html" }] } });
+    }
+    return Response.json({ currentSeq: seq, back: seq === 2 ? edit : null,
+      forward: seq === 1 ? edit : null, entries: [{ id: "edit", endedAt: new Date(1000).toISOString() }] });
+  });
+  save("B");
+  await act(() => hook().refresh());
+  const undo = await act(() => hook().undo({ readFile }));
+  expect(undo.files).toEqual({ "index.html": { previous: "B", restored: "A" } });
+  await vi.waitFor(() => expect(hook().state.redo).toEqual([{ createdAt: 1000 }]));
+  const redo = await act(() => hook().redo({ readFile }));
+  expect(redo.files).toEqual({ "index.html": { previous: "A", restored: "B" } });
+});
+
+it("cloud saves need no claim and a stale tab always steps the latest project edit", async () => {
+  const { hook, readFile } = await studio();
+  const own = { id: "title", label: "Edit title", paths: ["index.html"], endedAt: 1000 };
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      expect(url).toMatch(/\/history\/step$/);
+      expect(JSON.parse(String(init.body))).toEqual({ direction: "back" });
+      return Response.json({ ok: true, appliedFiles: ["captions.srt"], stepLabel: "Edit subtitles" });
+    }
+    return Response.json({ currentSeq: 2, back: own, forward: null, entries: [] });
+  });
+  vi.stubGlobal("fetch", fetch);
+  await act(() => hook().refresh());
+  await act(() => hook().recordEdit({ label: "Edit title", files: { "index.html": { before: "A", after: "B" } } }));
+  const result = await act(() => hook().undo({ readFile, claimedAfter: 0 }));
+  expect(result).toMatchObject({ ok: true, label: "Edit subtitles", paths: ["captions.srt"] });
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+});
+
 it("reads a multi-file history step concurrently without waiting once per file", async () => {
   const { dir, hook, save, readFile } = await studio({ initialFiles: { "other.html": "X" } });
   save("B"); writeFileSync(join(dir, "other.html"), "Y");

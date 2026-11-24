@@ -1,3 +1,5 @@
+import { readVersionedSource } from "../utils/readVersionedSource";
+import { confirmedSource, observeSourceRead, type ConfirmedSource } from "../utils/confirmedTextSources";
 // Soft-reload-first preview sync for timeline timing edits: server GSAP
 // position mutations (shift / scale), folding those rewrites into the timing
 // edit's undo history, and swapping the rewritten script into the live preview
@@ -29,15 +31,17 @@ import {
   serializeStudioFileMutations,
   type StudioProjectFileWriter,
 } from "../utils/studioFileMutationCoordinator";
-import { studioApiFetch } from "../utils/studioApiFetch";
 import { moveLiveTweens } from "../utils/gsapLiveRetime";
+import { createPreviewAdapter } from "../player/lib/previewAdapter";
+import { scheduleCommittedTimelinePreview } from "../player/committedTimelinePreview";
 
 export async function readFileContent(projectId: string, targetPath: string): Promise<string> {
   if (targetPath.includes("\0") || targetPath.includes("..")) {
     throw new Error(`Unsafe path: ${targetPath}`);
   }
-  const response = await studioApiFetch(
+  const response = await readVersionedSource(
     `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(targetPath)}`,
+    confirmedSource(projectId, targetPath),
   );
   if (!response.ok) {
     throw new Error(`Failed to read ${targetPath}`);
@@ -46,6 +50,7 @@ export async function readFileContent(projectId: string, targetPath: string): Pr
   if (typeof data.content !== "string") {
     throw new Error(`Missing file contents for ${targetPath}`);
   }
+  observeSourceRead(projectId, targetPath, response, data);
   return data.content;
 }
 
@@ -155,6 +160,7 @@ export async function finishTimelineTimingFallback(input: {
   iframe: HTMLIFrameElement | null;
   projectId: string | null;
   reloadPreview: () => void;
+  invalidateGsapCache?: () => void;
   gsapMutation?: () => Promise<GsapMutationStatus>;
   onGsapError: (error: unknown) => void;
   /**
@@ -166,25 +172,31 @@ export async function finishTimelineTimingFallback(input: {
    */
   rebindWhenUnmutated: boolean;
 }): Promise<void> {
+  let fullReload = false;
+  const reloadPreview = () => {
+    fullReload = true;
+    input.reloadPreview();
+  };
   let outcome = UNMUTATED;
-  if (input.gsapMutation) {
-    try {
-      outcome = await input.gsapMutation();
-    } catch (error) {
-      input.onGsapError(error);
-      // Protocol and ownership conflicts mean the live iframe may no longer
-      // represent the bytes that won on disk. Converge explicitly by reloading.
-      if (error instanceof GsapPreviewConvergenceError) input.reloadPreview();
-      return;
+  try {
+    if (input.gsapMutation) {
+      try {
+        outcome = await input.gsapMutation();
+      } catch (error) {
+        input.onGsapError(error);
+        // Ownership conflicts require the preview to converge on the bytes that won on disk.
+        if (error instanceof GsapPreviewConvergenceError) reloadPreview();
+        return;
+      }
     }
+    await syncTimingEditPreview(
+      input.iframe, outcome, input.projectId, reloadPreview, input.rebindWhenUnmutated,
+    );
+  } finally {
+    // A full reload already invalidates the GSAP cache through refreshKey. An
+    // in-place update or failed rewrite still needs to refresh the committed timing.
+    if (!fullReload) input.invalidateGsapCache?.();
   }
-  await syncTimingEditPreview(
-    input.iframe,
-    outcome,
-    input.projectId,
-    input.reloadPreview,
-    input.rebindWhenUnmutated,
-  );
 }
 
 // Held until the next edit: the key is the gesture's own, so only its GSAP fold can join it.
@@ -403,6 +415,22 @@ async function scaleGsapPositions(
   return postGsapMutation(projectId, filePath, mutation, "scale-positions failed");
 }
 
+/** Rebind the optimistic clip timing or swap the animation script produced by the shared edit. */
+export function refreshCommittedTimeline(iframe: HTMLIFrameElement | null, path: string, projectId: string | null, reloadPreview: () => void) {
+  const isolatedSrc = iframe && !createPreviewAdapter({ iframe }).sameOrigin ? iframe.src : undefined;
+  return async (files: Record<string, {before: string; after: string}>, previous?: ConfirmedSource) => {
+    if (iframe && projectId && isolatedSrc !== undefined) {
+      if (!iframe.isConnected || iframe.src !== isolatedSrc) return;
+      scheduleCommittedTimelinePreview(iframe, projectId, path, files, previous, reloadPreview);
+      return;
+    }
+    const file = files[path];
+    if (!file) { reloadPreview(); return; }
+    const status = sdkTimingGsapSync({status: "committed", version:"", ...file});
+    await syncTimingEditPreview(iframe, status ?? UNMUTATED, projectId, reloadPreview, true);
+  };
+}
+
 /** The GSAP sync a committed SDK timing write made, or null when its timeline script is unchanged. */
 export function sdkTimingGsapSync(
   result: Extract<CutoverResult, { status: "committed" }>,
@@ -414,7 +442,10 @@ export function sdkTimingGsapSync(
     });
     return findTimelineScript(scripts)?.textContent ?? null;
   };
-  if (timelineText(result.before) === timelineText(result.after)) return null;
+  if (timelineText(result.before) === timelineText(result.after)) {
+    // The shared move already inspected the animation script during the commit.
+    return result.command?.kind === "moveClip" ? UNMUTATED : null;
+  }
   return { mutated: true, scriptText: extractGsapScriptText(result.after), after: result.after };
 }
 
@@ -439,7 +470,8 @@ export type SingleClipGsapEdit =
  */
 export function finishClipTimingFallback(input: {
   iframe: HTMLIFrameElement | null;
-  reloadPreview: () => void;
+  reloadPreview: (path?: string) => void;
+  invalidateGsapCache?: (path?: string) => void;
   projectId: string | null;
   targetPath: string;
   domId: string | undefined;
@@ -472,7 +504,8 @@ export function finishClipTimingFallback(input: {
   return finishTimelineTimingFallback({
     iframe: input.iframe,
     projectId,
-    reloadPreview: input.reloadPreview,
+    reloadPreview: () => input.reloadPreview(targetPath),
+    invalidateGsapCache: () => input.invalidateGsapCache?.(targetPath),
     gsapMutation: sdkGsap
       ? () => Promise.resolve(sdkGsap)
       : timingChanged && domId && projectId
@@ -509,6 +542,7 @@ export async function finishGroupTimingGsapFallback<C extends { element: Timelin
   projectId: string;
   iframe: HTMLIFrameElement | null;
   reloadPreview: () => void;
+  invalidateGsapCache?: () => void;
   label: string;
   errorLabel: string;
   coalesceKey?: string;
@@ -532,6 +566,7 @@ export async function finishGroupTimingGsapFallback<C extends { element: Timelin
       iframe: input.iframe,
       projectId: input.projectId,
       reloadPreview: input.reloadPreview,
+      invalidateGsapCache: input.invalidateGsapCache,
       gsapMutation: () => Promise.resolve(sdkGsap),
       onGsapError,
       rebindWhenUnmutated: !otherFileChanged,
@@ -542,6 +577,7 @@ export async function finishGroupTimingGsapFallback<C extends { element: Timelin
     iframe: input.iframe,
     projectId: input.projectId,
     reloadPreview: input.reloadPreview,
+    invalidateGsapCache: input.invalidateGsapCache,
     gsapMutation: () =>
       foldGsapMutationIntoHistory({
         writeFile: input.writeProjectFile,

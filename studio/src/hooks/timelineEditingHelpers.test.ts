@@ -18,6 +18,7 @@ import { readMediaOffsetSeconds } from "@hyperframes/parsers/media-duration";
 import { usePlayerStore } from "../player/store/playerStore";
 import type { CommitMutationOptions } from "./gsapScriptCommitTypes";
 import { timelineKeyframeSelectionKey } from "../player/components/timelineKeyframeIdentity";
+import { setCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { parseTimelineFromDOM } from "../player/lib/timelineDOM";
 
 afterEach(() => {
@@ -301,6 +302,15 @@ describe("buildTimelineMoveTimingPatch", () => {
 });
 
 describe("buildTimelineResizeTimingPatch", () => {
+  it("preserves the frame-aligned stationary edge when saving either trim", () => {
+    const source = '<div id="root"><div id="a" data-start="4.6666666667" data-duration="3.1"></div></div>';
+    const element = el({ id: "a", tag: "div", domId: "a", start: 4.6666666667, duration: 3.1 });
+    const head = buildTimelineResizeTimingPatch(source, { id: "a" }, element, { start: 5.77, duration: 1.9966666667 });
+    expect(head).toContain('data-duration="1.9966666667"');
+    const tail = buildTimelineResizeTimingPatch(source, { id: "a" }, element, { start: element.start, duration: 2 });
+    expect(tail).toContain('data-start="4.6666666667"');
+  });
+
   it("moves a source-only in-point by the caller's own start change", () => {
     const source = `<div id="root"><video id="a" class="clip" data-start="5" data-duration="3" data-media-start="0.337"></video></div>`;
     const element = el({ id: "a", tag: "video", domId: "a", start: 5, duration: 3 });
@@ -638,6 +648,27 @@ describe("persistElementAttribute", () => {
    * writer's catch mirrors the live DOM into the store, so the UI reported the
    * write as applied until a reload dropped it.
    */
+  it("saves an audio group gain change with the shared property command", async () => {
+    const source = '<div data-composition-id="s"><hf-audio-group id="music" data-volume="1"></hf-audio-group></div>';
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ content: source })));
+    setCachedCloudDisklessMode(true);
+    try {
+      const writeProjectFile = vi.fn(async () => {});
+      await persistElementAttribute({
+        projectId: "p", targetPath: "index.html", patchTarget: { id: "music" },
+        attr: "data-volume", value: "0.4", label: "Set volume", writeProjectFile,
+        recordEdit: vi.fn(), pendingTimelineEditPathRef: { current: new Set() },
+        onFileRead: vi.fn(), patchLive: vi.fn(),
+      });
+      expect(writeProjectFile).toHaveBeenCalledWith("index.html", expect.stringContaining('data-volume="0.4"'), source,
+        { kind: "editElements", patches: [{ target: { id: "music" }, operations: [{type: "html-attribute", property: "data-volume", value: "0.4"}] }] },
+        {label: "Set volume", windowId: expect.any(String)});
+    } finally {
+      fetch.mockRestore();
+      setCachedCloudDisklessMode(null);
+    }
+  });
+
   it("does not patch the live DOM when the target resolves to nothing", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")

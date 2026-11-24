@@ -260,6 +260,53 @@ function renderDomEditCommits(
   } satisfies RenderedDomEditCommits;
 }
 
+it("submits the isolated frame's position intent with its displayed source version", async () => {
+  const { setCachedCloudDisklessMode } = await import("../utils/cloudRuntime");
+  const { iframe, element } = createPreviewElement('<div data-hf-id="hf-card" id="title">Title</div>');
+  const selection = createSelection(element);
+  selection.sourceFile = "intro.html";
+  selection.isolatedTarget = { sourceFile: "intro.html", sha256: "c".repeat(64), hfId: "hf-card", elementId: "title" };
+  const rendered = renderDomEditCommits(selection, iframe);
+  const seen: Array<{ url: string; init?: RequestInit }> = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo, init?: RequestInit) => {
+    seen.push({ url: requestUrl(input), init });
+    return jsonResponse({ versions: { "intro.html": "new-version" }, changedPaths: ["intro.html"] });
+  });
+  setCachedCloudDisklessMode(true);
+  try {
+    const target = { hfId: "hf-title", id: "title" };
+    const box = { top: 25, left: 50, makeRelative: false };
+    await act(async () => {
+      await rendered.hook.commitDomEditPatchBatches([{
+        sourceFile: "intro.html", ifMatch: "displayed", box,
+        position: { time: 0.967, delta: { x: 5, y: 8 } },
+        patches: [{target, operations: [{ type: "inline-style", property: "top", value: "25px" }]}],
+      }], { label: "Move title" });
+    });
+    expect(rendered.reloadPreview).toHaveBeenCalledWith(["intro.html"]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.url).toMatch(/\/edits$/);
+    expect(new Headers(seen[0]?.init?.headers).get("Idempotency-Key")).toBeTruthy();
+    expect(JSON.parse(String(seen[0]?.init?.body))).toEqual({
+      versions: { "intro.html": "displayed" },
+      edit: { kind: "batch", commands: [{ compositionPath: "intro.html", kind: "moveCanvasElement",
+        target, staticBox: box, time: 0.967, delta: {x: 5, y: 8} }] },
+    });
+    await act(async () => { await rendered.hook.handleDomStyleCommit("color", "blue"); });
+    expect(seen).toHaveLength(2);
+    expect(seen[1]?.url).toMatch(/\/edits$/);
+    expect(JSON.parse(String(seen[1]?.init?.body))).toMatchObject({
+      versions: { "intro.html": '"sha256:' + "c".repeat(64) + '"' },
+      edit: { commands: [{ kind: "editElements", compositionPath: "intro.html",
+        patches: [{ operations: [{ type: "inline-style", property: "color", value: "blue" }] }] }] },
+    });
+  } finally {
+    setCachedCloudDisklessMode(null);
+    rendered.cleanup();
+    vi.unstubAllGlobals();
+  }
+});
+
 describe("useDomEditCommits z-index reorder persistence", () => {
   beforeEach(() => {
     ensureCssEscape();
@@ -688,7 +735,7 @@ describe("useDomEditCommits z-index reorder persistence", () => {
         hasExplicitZIndex: true,
       });
       expect(rendered.recordEdit).not.toHaveBeenCalled();
-      expect(rendered.reloadPreview).toHaveBeenCalledTimes(1);
+      expect(rendered.reloadPreview).toHaveBeenCalledWith();
       expect(
         fetchMock.mock.calls.filter(([input]) =>
           requestUrl(input).endsWith("/file-mutations/patch-element-batches"),

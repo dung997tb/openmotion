@@ -927,7 +927,9 @@
     "Design via MCP": "通过 MCP 设计",
     "Write via MCP": "通过 MCP 撰写",
     "Write script via MCP": "通过 MCP 写脚本",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "初始页面已创建，但有 {count} 张已关联的图片未能自动嵌入。"
+    "Starter page created, but {count} attached image(s) could not be embedded.": "初始页面已创建，但有 {count} 张已关联的图片未能自动嵌入。",
+    "Workflows are coming in Phase 2.": "工作流将在第二阶段上线。",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "场景工作流计划在 OpenMotion Cloud 第二阶段提供。"
   },
   "ja": {
     "Supported formats \u00b7 {formats}": "対応形式 · {formats}",
@@ -1857,7 +1859,9 @@
     "Design via MCP": "MCP でデザイン",
     "Write via MCP": "MCP で執筆",
     "Write script via MCP": "MCP で台本を作成",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "スターターページを作成しましたが、添付画像 {count} 件を埋め込めませんでした。"
+    "Starter page created, but {count} attached image(s) could not be embedded.": "スターターページを作成しましたが、添付画像 {count} 件を埋め込めませんでした。",
+    "Workflows are coming in Phase 2.": "ワークフローはフェーズ 2 で提供予定です。",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "シナリオワークフローは OpenMotion Cloud のフェーズ 2 で提供予定です。"
   },
   "ko": {
     "Supported formats \u00b7 {formats}": "지원 형식 · {formats}",
@@ -2787,7 +2791,9 @@
     "Design via MCP": "MCP로 디자인",
     "Write via MCP": "MCP로 작성",
     "Write script via MCP": "MCP로 스크립트 작성",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "스타터 페이지가 생성되었지만 첨부된 이미지 {count}개를 삽입하지 못했습니다."
+    "Starter page created, but {count} attached image(s) could not be embedded.": "스타터 페이지가 생성되었지만 첨부된 이미지 {count}개를 삽입하지 못했습니다.",
+    "Workflows are coming in Phase 2.": "워크플로는 Phase 2에서 제공될 예정입니다.",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "시나리오 워크플로는 OpenMotion Cloud의 Phase 2에 제공될 예정입니다."
   },
   "de": {
     "Supported formats \u00b7 {formats}": "Unterstützte Formate · {formats}",
@@ -3717,7 +3723,9 @@
     "Design via MCP": "Per MCP gestalten",
     "Write via MCP": "Per MCP schreiben",
     "Write script via MCP": "Skript per MCP schreiben",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "Startseite wurde erstellt, aber {count} angehängte Bild(er) konnten nicht eingebettet werden."
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Startseite wurde erstellt, aber {count} angehängte Bild(er) konnten nicht eingebettet werden.",
+    "Workflows are coming in Phase 2.": "Workflows folgen in Phase 2.",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "Szenario-Workflows sind für Phase 2 in OpenMotion Cloud geplant."
   },
   "fr": {
     "Supported formats \u00b7 {formats}": "Formats pris en charge · {formats}",
@@ -4647,7 +4655,9 @@
     "Design via MCP": "Concevoir via MCP",
     "Write via MCP": "Rédiger via MCP",
     "Write script via MCP": "Rédiger le script via MCP",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "La page de démarrage a été créée, mais {count} image(s) jointe(s) n’ont pas pu être intégrées."
+    "Starter page created, but {count} attached image(s) could not be embedded.": "La page de démarrage a été créée, mais {count} image(s) jointe(s) n’ont pas pu être intégrées.",
+    "Workflows are coming in Phase 2.": "Les flux de travail arrivent en phase 2.",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "Les flux de travail de scénarios sont prévus pour la phase 2 dans OpenMotion Cloud."
   },
   "ru": {
     "Supported formats \u00b7 {formats}": "Поддерживаемые форматы · {formats}",
@@ -5577,7 +5587,9 @@
     "Design via MCP": "Дизайн через MCP",
     "Write via MCP": "Написать через MCP",
     "Write script via MCP": "Написать сценарий через MCP",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "Стартовая страница создана, но не удалось встроить прикреплённые изображения: {count}."
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Стартовая страница создана, но не удалось встроить прикреплённые изображения: {count}.",
+    "Workflows are coming in Phase 2.": "Сценарии появятся во 2-й фазе.",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "Сценарные рабочие процессы запланированы на 2-ю фазу в OpenMotion Cloud."
   },
   "es": {
     "Supported formats \u00b7 {formats}": "Formatos compatibles · {formats}",
@@ -6507,7 +6519,9 @@
     "Design via MCP": "Diseñar vía MCP",
     "Write via MCP": "Redactar vía MCP",
     "Write script via MCP": "Escribir guion vía MCP",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "Se creó la página inicial, pero no se pudieron incrustar {count} imagen(es) adjunta(s)."
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Se creó la página inicial, pero no se pudieron incrustar {count} imagen(es) adjunta(s).",
+    "Workflows are coming in Phase 2.": "Los flujos de trabajo llegarán en la fase 2.",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "Los flujos de trabajo por escenarios están previstos para la fase 2 en OpenMotion Cloud."
   },
   "pt-BR": {
     "Supported formats \u00b7 {formats}": "Formatos compatíveis · {formats}",
@@ -7437,7 +7451,9 @@
     "Design via MCP": "Criar design via MCP",
     "Write via MCP": "Escrever via MCP",
     "Write script via MCP": "Escrever roteiro via MCP",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "Página inicial criada, mas não foi possível incorporar {count} imagem(ns) anexada(s)."
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Página inicial criada, mas não foi possível incorporar {count} imagem(ns) anexada(s).",
+    "Workflows are coming in Phase 2.": "Os fluxos de trabalho chegarão na Fase 2.",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "Os fluxos de trabalho de cenários estão previstos para a Fase 2 no OpenMotion Cloud."
   },
   "it": {
     "Supported formats \u00b7 {formats}": "Formati supportati · {formats}",
@@ -8367,7 +8383,9 @@
     "Design via MCP": "Progetta via MCP",
     "Write via MCP": "Scrivi via MCP",
     "Write script via MCP": "Scrivi copione via MCP",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "Pagina iniziale creata, ma non è stato possibile incorporare {count} immagine/i allegata/e."
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Pagina iniziale creata, ma non è stato possibile incorporare {count} immagine/i allegata/e.",
+    "Workflows are coming in Phase 2.": "I flussi di lavoro arriveranno nella Fase 2.",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "I flussi di lavoro per scenari sono previsti nella Fase 2 di OpenMotion Cloud."
   },
   "tr": {
     "Supported formats \u00b7 {formats}": "Desteklenen biçimler · {formats}",
@@ -9297,6 +9315,8 @@
     "Design via MCP": "MCP ile tasarla",
     "Write via MCP": "MCP ile yaz",
     "Write script via MCP": "MCP ile senaryo yaz",
-    "Starter page created, but {count} attached image(s) could not be embedded.": "Başlangıç sayfası oluşturuldu, ancak ekli {count} görsel gömülemedi."
+    "Starter page created, but {count} attached image(s) could not be embedded.": "Başlangıç sayfası oluşturuldu, ancak ekli {count} görsel gömülemedi.",
+    "Workflows are coming in Phase 2.": "İş akışları Faz 2’de gelecek.",
+    "Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.": "Senaryo iş akışları OpenMotion Cloud’da Faz 2 için planlanmıştır."
   }
 }

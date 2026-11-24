@@ -38,6 +38,7 @@ function AppHotkeyHarness() {
   const clearDomSelectionRef = useRef<() => void>(() => undefined);
 
   useAppHotkeys({
+    projectId: "current",
     handleTimelineElementsDelete: vi.fn(async () => {}),
     handleTimelineElementSplit: vi.fn(),
     handleDomEditElementDelete: vi.fn(),
@@ -185,7 +186,11 @@ describe("SnapToolbar ruler and safe-margin toggles", () => {
 });
 
 vi.mock("../../utils/studioTelemetry", () => ({ trackStudioEvent: vi.fn() }));
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  usePlayerStore.getState().beginTimelineSession("current");
+  usePlayerStore.getState().setTimelineReady(true);
+});
 describe("preview setting usage", () => {
   it.each([
     ["Toggle snap", "snapping"],

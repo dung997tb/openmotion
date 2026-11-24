@@ -37,6 +37,7 @@ import {
 } from './lazyPages';
 import { KeepAliveSlot, useKeepAliveVisited } from './KeepAliveOutlet';
 import { resolveActiveWorkspaceRoute } from './routeRegistry';
+import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
 
 function RouteLoadingFallback() {
   return (
@@ -144,6 +145,10 @@ export function RouteViewport({
   selectAssetRoute,
 }: RouteViewportProps) {
   const { t } = useI18n();
+  const gameStudioEnabled = useCloudFeatureEnabled('gameStudio');
+  const workflowsEnabled = useCloudFeatureEnabled('workflows');
+  const designStudioEnabled = useCloudFeatureEnabled('designStudio');
+  const brandKitEnabled = useCloudFeatureEnabled('brandKit');
   const { settings, assets: assetsOpen, skills: skillsOpen } = page;
   const activeRoute = resolveActiveWorkspaceRoute(page, { templatesPage, standaloneMcp });
   const keepAliveVisited = useKeepAliveVisited(activeRoute.id, [
@@ -191,16 +196,20 @@ export function RouteViewport({
               libraryTrigger.current = trigger;
               navigatePage({ templates: true, creators: true, creator: null, template: null });
             }}
-            onBrandKit={() => openSettings('brand-kit')}
+            onBrandKit={brandKitEnabled ? () => openSettings('brand-kit') : undefined}
             onMcp={(client, example) => openMcp(client, example, true)}
-            onSelectDesignScene={designScene =>
-              navigatePage({ designScene, designProject: null, templates: false, ...lastExplore })
+            onSelectDesignScene={
+              designStudioEnabled
+                ? designScene => navigatePage({ designScene, designProject: null, templates: false, ...lastExplore })
+                : undefined
             }
-            onOpenDesignProject={id =>
-              navigatePage({ designScene: 'projects', designProject: id, templates: false, ...lastExplore })
+            onOpenDesignProject={
+              designStudioEnabled
+                ? id => navigatePage({ designScene: 'projects', designProject: id, templates: false, ...lastExplore })
+                : undefined
             }
-            onStartScenario={id => openScenario(id, undefined, true)}
-            onOpenScenarioHub={() => openScenarioHub(true)}
+            onStartScenario={workflowsEnabled ? id => openScenario(id, undefined, true) : undefined}
+            onOpenScenarioHub={workflowsEnabled ? () => openScenarioHub(true) : undefined}
             filters={lastExplore}
             onChooseStudio={studio => chooseStudio(studio, undefined, true)}
             active={page.explore && !connectionsOpen}
@@ -210,7 +219,7 @@ export function RouteViewport({
         </RouteSurface>
       </KeepAliveSlot>
 
-      {page.scenarioHub && !templatesPage && !settings && (
+      {workflowsEnabled && page.scenarioHub && !templatesPage && !settings && (
         <div className="om-explore-host">
           <RouteSurface>
             <LazyScenarioHub
@@ -224,7 +233,7 @@ export function RouteViewport({
         </div>
       )}
 
-      {page.scenario && !templatesPage && !settings && (
+      {workflowsEnabled && page.scenario && !templatesPage && !settings && (
         <div className="om-assets-host om-scenario-host" style={{ padding: 0 }}>
           <RouteSurface>
             <LazyScenarioWorkspace
@@ -312,7 +321,7 @@ export function RouteViewport({
               onOpenEditor={() => void openMotionEditor('first')}
               editorDisabled={motionEditorDisabled}
               onBackToExplore={fromExplore ? returnToExplore : undefined}
-              onStartScenario={() => openScenario('motion-full-chain', undefined, true)}
+              onStartScenario={workflowsEnabled ? () => openScenario('motion-full-chain', undefined, true) : undefined}
             />
           </RouteSurface>
         </div>
@@ -330,7 +339,7 @@ export function RouteViewport({
               onProvider={provider => navigatePage({ settings: 'providers', provider, templates: false })}
               onUse={() => chooseStudio(motionStudio)}
               onStartScenario={
-                page.modelHub === 'gemini-4' ? () => openScenario('gemini-4-neon', undefined, true) : undefined
+                workflowsEnabled && page.modelHub === 'gemini-4' ? () => openScenario('gemini-4-neon', undefined, true) : undefined
               }
             />
           </RouteSurface>
@@ -372,14 +381,16 @@ export function RouteViewport({
         <div className="om-workspace-layer" hidden={templatesPage} aria-hidden={templatesPage} inert={templatesPage}>
           <RouteSurface>
             <LazyCreativeWorkspace
-              onOpenBrandKit={hostChrome ? () => openSettings('brand-kit') : undefined}
+              onOpenBrandKit={hostChrome && brandKitEnabled ? () => openSettings('brand-kit') : undefined}
               soundTab={page.soundTab ?? null}
               skill={page.skill}
               onCollection={(specialty: TechniqueStudio, replace?: boolean) =>
                 navigatePage({ specialty, templates: false }, Boolean(replace))
               }
-              onSelectDesignScene={designScene =>
-                navigatePage({ designScene, designProject: null, templates: false, ...lastExplore })
+              onSelectDesignScene={
+                designStudioEnabled
+                  ? designScene => navigatePage({ designScene, designProject: null, templates: false, ...lastExplore })
+                  : undefined
               }
               breadcrumb={
                 source && !showStudioBackToExplore ? (
@@ -418,7 +429,7 @@ export function RouteViewport({
         </div>
       )}
 
-      {page.designScene && !templatesPage && (
+      {designStudioEnabled && page.designScene && !templatesPage && (
         <div className="om-assets-host" style={{ padding: 0 }}>
           <RouteSurface>
             {page.designProject ? (
@@ -438,7 +449,7 @@ export function RouteViewport({
                 }
                 onExplore={returnToExplore}
                 onOpenMcp={() => openMcp(undefined, undefined, true)}
-                onStartScenario={() => openScenario('design-full-chain', undefined, true)}
+                onStartScenario={workflowsEnabled ? () => openScenario('design-full-chain', undefined, true) : undefined}
               />
             )}
           </RouteSurface>
@@ -462,7 +473,7 @@ export function RouteViewport({
         </RouteSurface>
       </KeepAliveSlot>
 
-      {page.specialty?.id === 'game' && !skillsOpen && !settings && !templatesPage && (
+      {gameStudioEnabled && page.specialty?.id === 'game' && !skillsOpen && !settings && !templatesPage && (
         <div className="om-skills-host">
           <RouteSurface>
             <LazyGameStudio onExplore={returnToExplore} onOpenMcp={() => openMcp(undefined, undefined, true)} />
@@ -496,7 +507,7 @@ export function RouteViewport({
 
       {standaloneMcp && !templatesPage && <SettingsSurfaceBoundary>{mcpPage}</SettingsSurfaceBoundary>}
 
-      {visibleSettings === 'brand-kit' ? (
+      {visibleSettings === 'brand-kit' && brandKitEnabled ? (
         <SettingsSurfaceBoundary key="brand-kit">
           <LazyBrandKitPage
             inWorkspace={!hostChrome}
@@ -508,7 +519,7 @@ export function RouteViewport({
           />
         </SettingsSurfaceBoundary>
       ) : (
-        visibleSettings && (
+        visibleSettings && visibleSettings !== 'brand-kit' && (
           <SettingsSurfaceBoundary key="settings">
             <LazySettingsCenter
               hasProject={Boolean(projectId)}

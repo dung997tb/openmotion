@@ -1,9 +1,6 @@
 /* One interaction palette for editor chrome; authored content and catalogs keep
    their own presentation. Scope by document so preview iframes are unaffected. */
 
-/* Initialization settles under a loading surface; normal interaction motion resumes on reveal. */
-[data-editor-initializing="true"] > .motion-project-editor { opacity: 0; }
-[data-editor-initializing="true"] .motion-project-editor :is(button, input, [role="button"], [role="tab"]) { transition: none !important; }
 .motion-editor-placeholder { background: var(--motion-panel); }
 .motion-editor-placeholder-header, .motion-editor-placeholder-timeline { border-top: 1px solid var(--motion-border); }
 .motion-editor-placeholder-panels > div + div { border-left: 1px solid var(--motion-border); }

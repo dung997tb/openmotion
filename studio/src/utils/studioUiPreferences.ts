@@ -1,6 +1,12 @@
-import { isPreviewQuality, type PreviewQuality } from "@hyperframes/core/preview-quality";
+import type { PreviewQuality } from "@hyperframes/core/preview-quality";
 import type { SerializedDockview } from "dockview-react";
 import { parseDockLayout } from "../components/dock/dockLayoutSchema";
+
+const PREVIEW_QUALITY_LEVELS: readonly PreviewQuality[] = [1, 0.5, 0.25, 0.125];
+
+function isPreviewQuality(value: unknown): value is PreviewQuality {
+  return PREVIEW_QUALITY_LEVELS.some((level) => level === value);
+}
 
 export type TimelineTimeDisplayMode = "time" | "frame";
 export type StudioTheme = "light" | "dark";

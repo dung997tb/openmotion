@@ -2,14 +2,14 @@ import { useI18n } from "../../i18n/I18n";
 import { memo, useMemo, useState } from "react";
 import { useThumbnailLease } from "../../hooks/useThumbnailLease";
 import { useThumbnailStripSize } from "../../hooks/useThumbnailStripSize";
+import { useLocalUploadPreview } from "../../utils/localUploadPreviewStore";
 import {
-  createThumbnailKey,
   thumbnailScheduler,
   type ThumbnailPriority,
   type ThumbnailSnapshot,
 } from "../lib/thumbnailScheduler";
 import { bindThumbnailPlaybackHold } from "../lib/thumbnailPlaybackHold";
-import { decodeVideoThumbnail } from "../lib/thumbnailVideoDecoder";
+import { createVideoThumbnailRequest } from "../lib/videoThumbnailRequest";
 import { usePlayerStore } from "../store/playerStore";
 import { ThumbnailTiles } from "./ThumbnailTiles";
 import {
@@ -32,49 +32,6 @@ interface VideoThumbnailProps {
   projectId?: string;
   sessionEpoch?: number;
   priority?: ThumbnailPriority;
-}
-
-function createVideoThumbnailRequest(
-  props: Pick<VideoThumbnailProps, "videoSrc" | "sourceStart" | "sourceRangeDuration"> &
-    Required<Pick<VideoThumbnailProps, "duration" | "projectId" | "sessionEpoch" | "priority">>,
-  frameCount: number,
-  rich: boolean,
-) {
-  const {
-    videoSrc,
-    sourceStart,
-    sourceRangeDuration,
-    duration,
-    projectId,
-    sessionEpoch,
-    priority,
-  } = props;
-  return {
-    key: createThumbnailKey({
-      kind: "video",
-      source: videoSrc,
-      start: sourceStart,
-      duration: sourceRangeDuration ?? duration,
-      frames: frameCount,
-    }),
-    projectId,
-    sessionEpoch,
-    kind: "video" as const,
-    priority,
-    rich,
-    load: (signal: AbortSignal) =>
-      decodeVideoThumbnail(
-        {
-          source: videoSrc,
-          contentVersion: createThumbnailKey({ project: projectId, session: sessionEpoch }),
-          sourceStart,
-          sourceRangeDuration: sourceRangeDuration ?? duration,
-          frameCount,
-          fit: "cover",
-        },
-        signal,
-      ),
-  };
 }
 
 function selectThumbnailSnapshot(
@@ -132,7 +89,7 @@ function useRangeHeldDuringTrim(
   );
 }
 
-/** Sparse, bounded video frames supplied by the shared thumbnail scheduler. */
+/** Sparse frames from the original media, shared across visible clips and asset cards. */
 export const VideoThumbnail = memo(function VideoThumbnail({
   videoSrc,
   label,
@@ -146,6 +103,16 @@ export const VideoThumbnail = memo(function VideoThumbnail({
 }: VideoThumbnailProps) {
   const { t } = useI18n();
   const [container, setContainerRef, watchGap] = useThumbnailStripSize();
+  const localAssetPath = useMemo(() => {
+    try {
+      const url = new URL(videoSrc, typeof window !== "undefined" ? window.location.href : "http://localhost");
+      const match = url.pathname.match(/^\/api\/projects\/[^/]+\/preview\/(.+)$/);
+      return match ? decodeURIComponent(match[1]) : "";
+    } catch {
+      return "";
+    }
+  }, [videoSrc]);
+  const localPreviewUrl = useLocalUploadPreview(projectId, localAssetPath);
   const requestFrameCount = useValueAtRest(
     quantizeThumbnailFrameCount(
       computeThumbnailStrip(container.width, 16 / 9, container.height).frameCount,
@@ -160,6 +127,7 @@ export const VideoThumbnail = memo(function VideoThumbnail({
     sessionEpoch,
     priority,
   });
+  const measured = useValueAtRest(container.width > 0);
   const posterRequest = useMemo(
     () => createVideoThumbnailRequest(requestProps, 1, false),
     [requestProps],
@@ -168,20 +136,23 @@ export const VideoThumbnail = memo(function VideoThumbnail({
     () => createVideoThumbnailRequest(requestProps, requestFrameCount, true),
     [requestFrameCount, requestProps],
   );
-  const measured = useValueAtRest(container.width > 0);
   const snapshot = useVideoThumbnailSnapshot(
     measured ? posterRequest : null,
     measured && requestFrameCount > 1 ? richRequest : null,
     posterRequest.key,
   );
+
   const value = snapshot.status === "ready" ? snapshot.value : null;
-  const urls =
-    value?.kind === "filmstrip" ? value.urls : value?.kind === "image" ? [value.url] : [];
-  const aspect = value?.kind === "image" || value?.kind === "filmstrip" ? value.aspect : 16 / 9;
+  const urls = value?.kind === "filmstrip" ? value.urls : value?.kind === "image" ? [value.url] : [];
+  const aspect = value && value.kind !== "waveform" ? value.aspect : 16 / 9;
   const { frameW, frameCount } = computeThumbnailStrip(container.width, aspect, container.height);
+  const showLoadingShimmer = snapshot.status === "loading" && !localPreviewUrl;
 
   return (
     <div ref={setContainerRef} className="absolute inset-0 overflow-hidden">
+      {!urls.length && localPreviewUrl && (
+        <img src={localPreviewUrl} alt="" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
+      )}
       {urls.length > 0 && (
         <ThumbnailTiles
           strip={container}
@@ -208,7 +179,7 @@ export const VideoThumbnail = memo(function VideoThumbnail({
           }}
         </ThumbnailTiles>
       )}
-      {snapshot.status === "loading" && urls.length === 0 && (
+      {showLoadingShimmer && (
         <div
           className="absolute inset-0 animate-pulse motion-reduce:animate-none"
           style={{
@@ -216,7 +187,7 @@ export const VideoThumbnail = memo(function VideoThumbnail({
           }}
         />
       )}
-      {snapshot.status === "error" && (
+      {!localPreviewUrl && snapshot.status === "error" && (
         <div className="absolute inset-0 flex items-center justify-center bg-neutral-900/60">
           <span className="rounded-sm bg-black/50 px-1 text-[8px] text-neutral-500">
             {t("no preview")}</span>

@@ -87,7 +87,7 @@ export function ensureMotionPathPluginLoaded(iframe: HTMLIFrameElement | null): 
       if (event.source !== win || data?.source !== "hf-preview" || data.type !== "ready") return;
       window.removeEventListener("message", retry);
       pendingReadyRetry = null;
-      if (win.gsap?.registerPlugin) ensureMotionPathPluginLoaded(iframe);
+      if (iframe.contentDocument === doc && win.gsap?.registerPlugin) ensureMotionPathPluginLoaded(iframe);
     };
     pendingReadyRetry = retry;
     window.addEventListener("message", retry);
@@ -286,8 +286,9 @@ export function applySoftReloadFinalization(
   currentTime: number,
 ): boolean {
   const win = iframe?.contentWindow as IframeWindow | null;
-  if (!win?.__hfForceTimelineRebind) return false;
+  if (!iframe?.contentDocument || !win) return false;
   try {
+    if (!win.__hfForceTimelineRebind) return false;
     if (win.__hfSuppressSceneMutations) {
       win.__hfSuppressSceneMutations(() => finalizeSoftReload(win, currentTime));
     } else {

@@ -1,3 +1,5 @@
+import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
+import { type TimelineFileEdit, saveCloudTimeline } from "../utils/cloudTimelineEdit";
 import { useCallback, type MutableRefObject } from "react";
 import { usePlayerStore, type TimelineElement } from "../player";
 import type { TimelineLinkEdit } from "../player/components/timelineCallbacks";
@@ -78,8 +80,18 @@ export function useTimelineLinkEditing({
       clearSelectionOnUnlink(edit);
       const path = plan.anchor.sourceFile || activeCompPath || "index.html";
       pendingTimelineEditPathRef.current.add(path);
+      const targets = linkEditTargets(edit);
+      const command: TimelineFileEdit["command"] | undefined = getCachedCloudDisklessMode() ? resolve => {
+        switch (edit.kind) {
+          case "link": case "unlink": return { kind: edit.kind === "link" ? "linkClips" : "unlinkClips", hfIds: targets.map(resolve) };
+          case "detach": return {kind:"detachAudio",hfId:resolve(edit.element)};
+          case "merge": return {kind:"mergeAudio",audioId:resolve(edit.audio),videoId:resolve(edit.video)};
+          case "move-into-sync": case "slip-into-sync": return {kind:edit.kind === "move-into-sync" ? "moveIntoSync" : "slipIntoSync",hfId:resolve(edit.element)};
+        }
+      } : undefined;
       const queued = editQueueRef.current.then(() =>
-        saveProjectFilesWithHistory({
+        command ? saveCloudTimeline(pid, [{ path, command }], writeProjectFile, recordEdit, plan.label)
+          : saveProjectFilesWithHistory({
           projectId: pid,
           label: plan.label,
           files: {

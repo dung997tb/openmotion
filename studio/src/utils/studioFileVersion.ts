@@ -3,6 +3,16 @@
 const WRITE_TOKEN_TTL_MS = 5 * 60_000;
 const studioWriteTokens = new Map<string, number>();
 let fileRevision = 0;
+let latestSourceWrite: string | null = null;
+
+/** Another write or a new editing session invalidates reuse of older local receipts. */
+export function invalidateLatestSourceWrite(): void {
+  latestSourceWrite = null;
+}
+
+export function isLatestSourceWrite(token: string): boolean {
+  return latestSourceWrite === token;
+}
 
 /** One step per write Studio claims: a copy of the project read at a lower revision is stale. */
 export function studioFileRevision(): number {
@@ -19,6 +29,7 @@ function pruneStudioWriteTokens(now: number): void {
 export function markStudioWriteToken(token: string, now: number = Date.now()): void {
   pruneStudioWriteTokens(now);
   studioWriteTokens.set(token, now);
+  latestSourceWrite = token;
   fileRevision += 1;
 }
 
@@ -33,6 +44,7 @@ export function consumeStudioWriteToken(token: string | null, now: number = Date
 /** Resets module-level echo identity between PR #2991 coordinator tests. */
 export function resetStudioWriteTokens(): void {
   studioWriteTokens.clear();
+  invalidateLatestSourceWrite();
 }
 
 /** Browser-safe SHA-256 version matching studio-server's strong ETag format. */
@@ -78,8 +90,13 @@ export function createStudioWriteToken(): string {
  * match. An unmatched echo reads as an external change and costs a full preview
  * reload, which the user sees as a flash right after their own edit.
  */
-export function studioWriteHeaders(): Record<string, string> {
-  const token = createStudioWriteToken();
+export function studioWriteHeaders(history?: { label: string; windowId: string }, token = createStudioWriteToken()): Record<string, string> {
   markStudioWriteToken(token);
-  return { "X-Hyperframes-Write-Token": token };
+  return {
+    "X-Hyperframes-Write-Token": token,
+    ...(history && {
+      "X-OpenMotion-Edit-Label": encodeURIComponent(history.label),
+      "X-OpenMotion-Edit-Window": history.windowId,
+    }),
+  };
 }

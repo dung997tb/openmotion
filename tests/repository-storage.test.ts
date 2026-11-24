@@ -6,7 +6,7 @@ import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { checkRepositoryStorage } from '../scripts/check-repository-storage.ts';
-import { requireDownloadedMedia } from '../scripts/distribution.ts';
+import { lfsPointer } from '../shared/repository-template-catalog.ts';
 
 function git(root: string, args: string[]) {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -56,11 +56,11 @@ test('new raw large blobs fail both before commit and after deletion from new hi
   assert.match(checkRepositoryStorage(f.root, f.base, { finalTreeOnly: true }).errors.join('\n'), /ordinary Git file exceeds/, 'Committed large files in the final tree must still fail');
 });
 
-test('bundle construction refuses a pointer instead of silently shipping it as a video', async t => {
+test('LFS pointer detection distinguishes pointer stubs from downloaded media bytes', t => {
   const f = fixture(t); f.write('demo.mp4', pointer());
-  await assert.rejects(requireDownloadedMedia(['demo.mp4'], f.root), /git lfs pull --include="demo.mp4" --exclude=""/);
+  assert.ok(lfsPointer(readFileSync(path.join(f.root, 'demo.mp4'))), 'pointer stub must be detected');
   f.write('demo.mp4', Buffer.from([0, 1, 2, 255]));
-  await requireDownloadedMedia(['demo.mp4'], f.root);
+  assert.equal(lfsPointer(readFileSync(path.join(f.root, 'demo.mp4'))), null, 'real media bytes are not a pointer');
 });
 
 test('checkout size warns without blocking even when Git deduplicates their blobs', t => {

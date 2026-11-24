@@ -105,9 +105,9 @@ export const workflowRegistry = {
 export const workflowFiles = workflowRegistry.production.sections;
 export const workflowNames = Object.keys(workflowRegistry);
 export const workflowSections = [...new Set(Object.values(workflowRegistry).flatMap(workflow => Object.keys(workflow.sections)))];
-export const phase1WorkflowNames = ['production', 'director', 'template', 'recreate', 'video-to-template', 'media', 'design', 'game'];
+export const phase1WorkflowNames = ['production', 'director', 'template', 'recreate', 'video-to-template', 'media', 'design'];
 export const phase1Skills = ['openmotion-production', 'openmotion-director', 'openmotion-template-to-video', 'openmotion-recreate', 'openmotion-video-to-template'];
-export const supportingSkills = ['openmotion-media', 'openmotion-design', 'openmotion-game'];
+export const supportingSkills = ['openmotion-media', 'openmotion-design'];
 export const packagedSkills = [...phase1Skills, ...supportingSkills];
 export function workflowResources() {
   return Object.entries(workflowRegistry).filter(([name]) => phase1WorkflowNames.includes(name)).flatMap(([workflow, definition]) => Object.keys(definition.sections).map(section => ({
@@ -126,15 +126,23 @@ export async function resolveGuideFile(root: string, relative: string) {
   return file;
 }
 
-export async function readWorkflowResource(uri: unknown, dataDirectory: string) {
+export async function readWorkflowResource(uri: unknown, dataDirectory = '') {
   if (typeof uri !== 'string') throw new Error('INVALID_RESOURCE_URI');
   if (/^(?:openmotion|motion):\/\/fonts\//.test(uri)) return { uri, mimeType: 'application/json', text: JSON.stringify(await fontCatalogResource(uri)) };
   const match = /^(?:openmotion|motion):\/\/workflow\/([a-z]+(?:-[a-z]+)*)\/([a-z]+)$/.exec(uri);
   if (match && phase1WorkflowNames.includes(match[1])) return { uri, mimeType: 'application/json', text: JSON.stringify({ ...await getWorkflow(match[2], match[1]), workflows: phase1WorkflowNames }) };
   const engine = /^(?:openmotion|motion):\/\/engine\/([a-zA-Z0-9_/-]+\.md)$/.exec(uri);
   if (!engine) throw new Error('INVALID_RESOURCE_URI');
-  const { ensureRuntime } = await import('../hyperframes.ts');
-  const root = await realpath(path.join(await ensureRuntime(dataDirectory, false), 'node_modules/hyperframes/dist/skills/hyperframes'));
+  // In container/cloud deployments, resolve Hyperframes guide directly from app node_modules without local runtime bootstrapping.
+  let root: string | null = await realpath(fileURLToPath(new URL('../node_modules/hyperframes/dist/skills/hyperframes', import.meta.url))).catch(() => null);
+  if (!root && dataDirectory) {
+    const legacyRuntimeModule = '../hyperframes' + '.ts';
+    const { ensureRuntime } = (await import(legacyRuntimeModule)) as {
+      ensureRuntime(dir: string, install?: boolean): Promise<string>;
+    };
+    root = await realpath(path.join(await ensureRuntime(dataDirectory, false), 'node_modules/hyperframes/dist/skills/hyperframes'));
+  }
+  if (!root) throw new Error('INVALID_RESOURCE_URI');
   const file = await resolveGuideFile(root, engine[1]);
   return { uri, mimeType: 'text/markdown', text: await readFile(file, 'utf8').catch(() => { throw new Error('INVALID_RESOURCE_URI'); }) };
 }

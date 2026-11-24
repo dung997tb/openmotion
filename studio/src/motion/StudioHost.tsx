@@ -1,3 +1,4 @@
+import type { PreparedPreviewLease } from "../player/lib/previewLease";
 import { createContext, useContext, type ReactNode, type ComponentType } from 'react';
 
 /** Product chrome only. Editing, panel state and rendering stay owned by Studio. */
@@ -20,8 +21,14 @@ export interface StudioHost {
   desktopLink?: boolean;
   feedback?: boolean;
   themeToggle?: boolean;
+  /** Optional lazy host wrapper mounted around the lazy editor inside ArtifactViewer. */
+  EditorHost?: ComponentType<{ children: ReactNode }>;
+  /** Optional prefetcher paired with EditorHost to load it in parallel with the editor chunk. */
+  preloadEditorHost?: () => void;
 }
 
 export const StudioHostContext = createContext<StudioHost | null>(null);
 export const useStudioHost = () => useContext(StudioHostContext);
 export const useMvpEditor = () => useStudioHost()?.mvpEditor === true;
+
+export const InitialPreviewLeaseContext = createContext<PreparedPreviewLease | undefined>(undefined);

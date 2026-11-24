@@ -1,8 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { browserAutomation, browserExecutable } from "../browser.ts";
-import { pluginRoot } from "../hyperframes.ts";
-import { requireNativeRuntime } from "../scripts/npm-runtime.mjs";
+import { browserAutomation, browserExecutable } from "../shared/browser-executable.ts";
 import { brandWebsite, fetchBrandResource, resolveBrandAddresses } from "./brand-network.ts";
 import { captureBrandLogos, type CapturedBrandImage } from "./brand-assets.ts";
 import { brandSampleScript } from "./brand-sampler.mjs";
@@ -34,7 +32,6 @@ export async function extractBrand(
 ): Promise<BrandCapture> {
   brandWebsite(url);
   signal.throwIfAborted();
-  await requireNativeRuntime(pluginRoot, "capture");
   const puppeteer = await browserAutomation(runtimeRoot);
   await mkdir(path.join(directory, "assets"), { recursive: true });
   const browser = await puppeteer.launch({

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DesignComment, DesignEditorApp, DesignProjectDetail, DesignVersion } from '../../../shared/design-project';
+import { isDeferredP2Error } from '../motion/p2Deferred';
 import { designClient } from './designClient';
 
 export type DesignProjectState = {
@@ -10,6 +11,7 @@ export type DesignProjectState = {
   editors: DesignEditorApp[];
   loading: boolean;
   error: string | null;
+  deferred: boolean;
   refresh: () => Promise<void>;
   setProject: (next: DesignProjectDetail) => void;
   setComments: (next: DesignComment[]) => void;
@@ -27,6 +29,7 @@ export function useDesignProject(projectId: string): DesignProjectState {
   const [editors, setEditors] = useState<DesignEditorApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deferred, setDeferred] = useState(false);
   const revRef = useRef<string | null>(null);
   const commentsCountRef = useRef<number | null>(null);
 
@@ -44,9 +47,15 @@ export function useDesignProject(projectId: string): DesignProjectState {
       setVersions(verRes.versions);
       setCurrentVersionId(verRes.currentVersionId);
       setComments(comRes.comments);
+      setDeferred(false);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load design project');
+      if (isDeferredP2Error(err)) {
+        setDeferred(true);
+        setError(null);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load design project');
+      }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -58,6 +67,7 @@ export function useDesignProject(projectId: string): DesignProjectState {
   }, [loadAll]);
 
   useEffect(() => {
+    if (!projectId || deferred) return;
     let active = true;
     const tick = async () => {
       if (!active || document.visibilityState !== 'visible') return;
@@ -67,14 +77,18 @@ export function useDesignProject(projectId: string): DesignProjectState {
         if (state.revision !== revRef.current || state.openComments !== commentsCountRef.current) {
           await loadAll(true);
         }
-      } catch { /* transient poll failure */ }
+      } catch (err) {
+        if (active && isDeferredP2Error(err)) {
+          setDeferred(true);
+        }
+      }
     };
     const timer = window.setInterval(tick, 2500);
     return () => { active = false; window.clearInterval(timer); };
-  }, [projectId, loadAll]);
+  }, [projectId, deferred, loadAll]);
 
   return {
-    project, versions, currentVersionId, comments, editors, loading, error,
+    project, versions, currentVersionId, comments, editors, loading, error, deferred,
     refresh: () => loadAll(true),
     setProject: (next) => { revRef.current = next.revision; commentsCountRef.current = next.openComments; setProject(next); },
     setComments,

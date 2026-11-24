@@ -340,6 +340,74 @@
     "Other platforms": "其他平台（可选）",
     "Other subtitle languages": "其他字幕语言（可选）",
     "Choose at least one platform": "请选择至少一个目标平台",
-    "Yes. Open Captions → Auto captions to recognize video or audio directly, Add captions to type or paste subtitles, or import SRT/VTT without a model. The timeline T icon opens Add captions; creation selects the new track and opens Style. Existing managed text remains editable in the same panel. The timeline music icon imports audio, and the microphone records locally at the playhead. Transcribe with a configured speech model, review the text, then open Captions to choose a style and add captions to the video. Existing caption style, position and size changes apply immediately while preserving cue edits. The timeline CC menu opens recognition, manual creation or the chosen track’s styles and controls visibility. Use Translate or create versions to select a goal, platforms and subtitle languages, then copy an Agent brief with the exact project and transcript. Defaults use highlights, one platform and the source language; source links and custom choices are under More options. The Agent can retrieve supported links, inspect pictures, translate timed captions and create independent versions through MCP. Link retrieval and visual understanding depend on the host; subtitle translation keeps the original voice. Exports are files, not automatic platform publishing.": "可以。在「字幕 → 自动识别」中直接识别音视频；通过「添加字幕」输入或粘贴内容，也可以无需模型直接导入 SRT/VTT。时间轴 T 图标打开「手动字幕」，添加后会选中新轨道并打开样式；已有文字也可在同一面板中编辑。时间轴上的音乐图标用于导入音频，麦克风图标可在播放头位置录音。配置语音模型后识别字幕，并在转写面板校对。字幕样式、位置和字号调整会立即生效，并保留内容与时间修改；CC 菜单可打开自动识别、手动添加或指定轨道的样式，也可控制字幕显示。在「翻译字幕与制作其他版本」中点选剪辑目标、平台与字幕语言；默认提取精彩片段、一个目标平台并保留原语言，素材链接和自定义选项收在「补充要求」中。随后复制包含工程和字幕身份的简报，Agent 可通过 MCP 获取支持的链接、分析画面、翻译带时间戳的字幕并创建独立版本。链接获取与画面理解依赖宿主；字幕翻译保留原声，导出文件不会自动发布到平台。"
+    "Yes. Open Captions → Auto captions to recognize video or audio directly, Add captions to type or paste subtitles, or import SRT/VTT without a model. The timeline T icon opens Add captions; creation selects the new track and opens Style. Existing managed text remains editable in the same panel. The timeline music icon imports audio, and the microphone records locally at the playhead. Transcribe with a configured speech model, review the text, then open Captions to choose a style and add captions to the video. Existing caption style, position and size changes apply immediately while preserving cue edits. The timeline CC menu opens recognition, manual creation or the chosen track’s styles and controls visibility. Use Translate or create versions to select a goal, platforms and subtitle languages, then copy an Agent brief with the exact project and transcript. Defaults use highlights, one platform and the source language; source links and custom choices are under More options. The Agent can retrieve supported links, inspect pictures, translate timed captions and create independent versions through MCP. Link retrieval and visual understanding depend on the host; subtitle translation keeps the original voice. Exports are files, not automatic platform publishing.": "可以。在「字幕 → 自动识别」中直接识别音视频；通过「添加字幕」输入或粘贴内容，也可以无需模型直接导入 SRT/VTT。时间轴 T 图标打开「手动字幕」，添加后会选中新轨道并打开样式；已有文字也可在同一面板中编辑。时间轴上的音乐图标用于导入音频，麦克风图标可在播放头位置录音。配置语音模型后识别字幕，并在转写面板校对。字幕样式、位置和字号调整会立即生效，并保留内容与时间修改；CC 菜单可打开自动识别、手动添加或指定轨道的样式，也可控制字幕显示。在「翻译字幕与制作其他版本」中点选剪辑目标、平台与字幕语言；默认提取精彩片段、一个目标平台并保留原语言，素材链接和自定义选项收在「补充要求」中。随后复制包含工程和字幕身份的简报，Agent 可通过 MCP 获取支持的链接、分析画面、翻译带时间戳的字幕并创建独立版本。链接获取与画面理解依赖宿主；字幕翻译保留原声，导出文件不会自动发布到平台。",
+    "Cloud speech recognition is coming in Phase 2": "云端语音识别将在第二阶段上线",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "云端语音识别将在第二阶段上线。你现在可以直接导入 SRT 或 VTT 字幕。",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "自动语音转写任务计划在第二阶段提供。字幕样式与手动字幕编辑可在字幕面板中正常使用。",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "自动转写任务计划在第二阶段提供。现在即可导入已有 SRT 或 VTT 字幕进行编辑与样式排版。",
+    "Open Captions": "打开字幕面板"
+  },
+  "ja": {
+    "Cloud speech recognition is coming in Phase 2": "クラウド音声認識は Phase 2 で提供予定です",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "クラウド音声認識は Phase 2 で提供予定です。現在は SRT または VTT 字幕をインポートできます。",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "自動音声文字起こしジョブは Phase 2 で提供予定です。字幕スタイル設定は「字幕」パネルで引き続き利用できます。",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "自動文字起こしジョブは Phase 2 で提供予定です。既存の SRT または VTT 字幕をインポートして編集・スタイル設定できます。",
+    "Open Captions": "字幕を開く"
+  },
+  "ko": {
+    "Cloud speech recognition is coming in Phase 2": "클라우드 음성 인식은 Phase 2에서 제공될 예정입니다",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "클라우드 음성 인식은 Phase 2에서 제공될 예정입니다. 지금은 SRT 또는 VTT 자막을 가져올 수 있습니다.",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "자동 음성 받아쓰기 작업은 Phase 2로 예정되어 있습니다. 자막 스타일 지정은 자막 패널에서 계속 사용할 수 있습니다.",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "자동 받아쓰기 작업은 Phase 2로 예정되어 있습니다. 지금 기존 SRT 또는 VTT 자막을 가져와 편집하고 스타일을 지정할 수 있습니다.",
+    "Open Captions": "자막 열기"
+  },
+  "de": {
+    "Cloud speech recognition is coming in Phase 2": "Cloud-Spracherkennung kommt in Phase 2",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "Cloud-Spracherkennung kommt in Phase 2. Du kannst jetzt bereits SRT- oder VTT-Untertitel importieren.",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "Automatische Sprachtranskriptions-Jobs sind für Phase 2 geplant. Die Untertitel-Formatierung bleibt im Untertitel-Panel verfügbar.",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "Automatische Transkriptions-Jobs sind für Phase 2 geplant. Importiere jetzt vorhandene SRT- oder VTT-Untertitel, um sie zu bearbeiten und zu gestalten.",
+    "Open Captions": "Untertitel öffnen"
+  },
+  "fr": {
+    "Cloud speech recognition is coming in Phase 2": "La reconnaissance vocale cloud arrive en Phase 2",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "La reconnaissance vocale cloud arrive en Phase 2. Vous pouvez déjà importer des sous-titres SRT ou VTT.",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "Les tâches de transcription vocale automatique sont prévues pour la Phase 2. La mise en forme des sous-titres reste disponible dans le panneau Sous-titres.",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "Les tâches de transcription automatique sont prévues pour la Phase 2. Importez dès maintenant des sous-titres SRT ou VTT existants pour les éditer et les styliser.",
+    "Open Captions": "Ouvrir les sous-titres"
+  },
+  "ru": {
+    "Cloud speech recognition is coming in Phase 2": "Облачное распознавание речи появится в фазе 2",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "Облачное распознавание речи появится в фазе 2. Сейчас вы можете импортировать субтитры SRT или VTT.",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "Автоматические задачи транскрибации речи запланированы на фазу 2. Стилизация субтитров по-прежнему доступна на панели «Субтитры».",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "Автоматические задачи транскрибации запланированы на фазу 2. Импортируйте существующие субтитры SRT или VTT, чтобы редактировать и оформлять их прямо сейчас.",
+    "Open Captions": "Открыть субтитры"
+  },
+  "es": {
+    "Cloud speech recognition is coming in Phase 2": "El reconocimiento de voz en la nube llegará en la Fase 2",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "El reconocimiento de voz en la nube llegará en la Fase 2. Ya puedes importar subtítulos SRT o VTT.",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "Los trabajos de transcripción automática de voz están programados para la Fase 2. El estilo de subtítulos sigue disponible en el panel Subtítulos.",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "Los trabajos de transcripción automática están programados para la Fase 2. Importa subtítulos SRT o VTT existentes ahora para editarlos y darles estilo.",
+    "Open Captions": "Abrir subtítulos"
+  },
+  "pt-BR": {
+    "Cloud speech recognition is coming in Phase 2": "O reconhecimento de fala na nuvem chega na Fase 2",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "O reconhecimento de fala na nuvem chega na Fase 2. Você já pode importar legendas SRT ou VTT.",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "As tarefas de transcrição automática de fala estão programadas para a Fase 2. A estilização de legendas continua disponível no painel Legendas.",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "As tarefas de transcrição automática estão programadas para a Fase 2. Importe legendas SRT ou VTT existentes agora para editar e estilizar.",
+    "Open Captions": "Abrir legendas"
+  },
+  "it": {
+    "Cloud speech recognition is coming in Phase 2": "Il riconoscimento vocale cloud arriverà nella Fase 2",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "Il riconoscimento vocale cloud arriverà nella Fase 2. Puoi già importare sottotitoli SRT o VTT.",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "I job di trascrizione vocale automatica sono previsti per la Fase 2. Lo stile dei sottotitoli rimane disponibile nel pannello Sottotitoli.",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "I job di trascrizione automatica sono previsti per la Fase 2. Importa subito sottotitoli SRT o VTT esistenti per modificarli e personalizzarne lo stile.",
+    "Open Captions": "Apri sottotitoli"
+  },
+  "tr": {
+    "Cloud speech recognition is coming in Phase 2": "Bulut konuşma tanıma Aşama 2’de geliyor",
+    "Cloud speech recognition is coming in Phase 2. You can import SRT or VTT subtitles now.": "Bulut konuşma tanıma Aşama 2’de geliyor. Şimdilik SRT veya VTT altyazılarını içe aktarabilirsiniz.",
+    "Automated speech transcription jobs are scheduled for Phase 2. Caption styling remains available in the Captions panel.": "Otomatik konuşma transkripsiyon görevleri Aşama 2 için planlandı. Altyazı stillendirme Altyazılar panelinde kullanılmaya devam eder.",
+    "Automated transcription jobs are scheduled for Phase 2. Import existing SRT or VTT subtitles now to edit and style captions.": "Otomatik transkripsiyon görevleri Aşama 2 için planlandı. Altyazıları düzenlemek ve stillendirmek için mevcut SRT veya VTT dosyalarını şimdi içe aktarın.",
+    "Open Captions": "Altyazıları aç"
   }
 }

@@ -429,7 +429,7 @@ export function ScenarioWorkspace({
     briefSaveRef,
   });
 
-  const { scenario, run, loading, error, busy, ensureRun, mutate, refresh, startNewRun, reload } = runState;
+  const { scenario, run, loading, deferred, error, busy, ensureRun, mutate, refresh, startNewRun, reload } = runState;
 
   const activeStep = useMemo(
     () =>
@@ -1072,7 +1072,18 @@ export function ScenarioWorkspace({
     </div>
   );
 
-  const errorStateNode = error ? (
+  const errorStateNode = deferred ? (
+    <div className="om-scenario-error-panel" role="status" data-deferred-p2="true">
+      <RemixIcon name="route-line" size={28} />
+      <h2 className="om-subtitle">{t('Workflows are coming in Phase 2.')}</h2>
+      <p className="om-muted">{t('Scenario workflows are scheduled for Phase 2 in OpenMotion Cloud.')}</p>
+      <div className="om-scenario-error-actions">
+        <Button variant="secondary" size="sm" onClick={onExplore}>
+          {t('Explore')}
+        </Button>
+      </div>
+    </div>
+  ) : error ? (
     <div className="om-scenario-error-panel" role="alert">
       <RemixIcon name="error-warning-line" size={28} />
       <h2 className="om-subtitle">{t('Could not load workflow')}</h2>
@@ -1273,7 +1284,7 @@ export function ScenarioWorkspace({
                 <p className="om-scenario-card-workflow-subtitle">{t(scenario.subtitle)}</p>
               </div>
 
-              {!loading && !error && (
+              {!loading && !error && !deferred && (
                 <div className="om-scenario-card-tools" role="toolbar" aria-label={t(activeStep.title)}>
                   <Popover
                     keepMounted
@@ -1459,7 +1470,7 @@ export function ScenarioWorkspace({
             )}
           </div>
 
-          {!loading && !error && (
+          {!loading && !error && !deferred && (
             <div className="om-scenario-card-footer">
               <div className="om-scenario-card-meta">
                 <div className="om-scenario-card-meta-group">

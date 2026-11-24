@@ -1,3 +1,5 @@
+import { usePlayerStore } from "../../player/store/playerStore";
+import type { TimelineDropPlacement } from "../../player/components/timelineCallbacks";
 import { useCallback, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { PlayerControls } from "../../player";
@@ -24,6 +26,7 @@ import { togglePreviewFullscreen } from '../../player/lib/previewFullscreen';
 import { useToast } from '../../hooks/useToast';
 import { StudioToastViewport } from '../StudioToastViewport';
 import { useI18n } from '../../i18n/I18n';
+import { useCloudFeatureEnabled } from '../../utils/cloudFeatures';
 
 // Clear the timeline selection when a pointer lands outside the composition
 // frame (clicks *inside* the frame are handled by the DOM-edit overlay).
@@ -44,7 +47,13 @@ function deselectIfPointerOutsideFrame(
   if (outside) onDeselect?.(null);
 }
 
+function canvasPlacement(position: { left: number; top: number }): TimelineDropPlacement {
+  return { start: usePlayerStore.getState().currentTime, track: 0, newTrack: "top", canvasPosition: position };
+}
+
 export interface PreviewPaneProps {
+  onCompositionDrop?: (path: string, placement: TimelineDropPlacement) => void;
+  onAssetDrop?: (assetPath: string, placement: TimelineDropPlacement, duration?: number) => void;
   portrait?: boolean;
   /** Slot for overlays rendered on top of the preview (cursors, highlights, etc.) */
   previewOverlay?: ReactNode;
@@ -61,8 +70,11 @@ export function PreviewPane({
   previewOverlay,
   onSelectTimelineElement,
   onPreviewBlockDrop,
+  onAssetDrop,
+  onCompositionDrop,
 }: PreviewPaneProps) {
   const mvp = useMvpEditor();
+  const reviewCommentsEnabled = useCloudFeatureEnabled('reviewComments');
   const { t } = useI18n(), toast = useToast();
   const previewHeader = useDockHeaderSlot("preview");
   const {
@@ -93,7 +105,12 @@ export function PreviewPane({
     stageRefForDrop.current = ref.current;
   }, []);
 
+  const handleCanvasAssetDrop = useCallback((path: string, duration: number | undefined, position: { left: number; top: number }) =>
+    onAssetDrop?.(path, canvasPlacement(position), duration), [onAssetDrop]);
+  const handleCanvasCompositionDrop = useCallback((path: string, position: { left: number; top: number }) =>
+    onCompositionDrop?.(path, canvasPlacement(position)), [onCompositionDrop]);
   const {
+    captureDrag,
     isDragOver: previewDragOver,
     handleDragEnter: handlePreviewDragEnter,
     handleDragOver: handlePreviewDragOver,
@@ -104,6 +121,8 @@ export function PreviewPane({
     compositionSize: previewCompositionSize,
     stageRef: stageRefForDrop as React.RefObject<HTMLDivElement | null>,
     onBlockDrop: onPreviewBlockDrop,
+    onAssetDrop: onAssetDrop && !timelineDisabled ? handleCanvasAssetDrop : undefined,
+    onCompositionDrop: onCompositionDrop && !timelineDisabled ? handleCanvasCompositionDrop : undefined,
   });
 
   // Preview-only fullscreen: fullscreen targets THIS pane's container, so the
@@ -157,6 +176,7 @@ export function PreviewPane({
             portrait={portrait}
             directUrl={directUrl}
             suppressLoadingOverlay={hasLoadedOnceRef.current}
+            loadingUi="host"
             onStageRef={handleStageRef}
             onCompositionSizeChange={setPreviewCompositionSize}
           />
@@ -168,10 +188,11 @@ export function PreviewPane({
         {!empty && !isFullscreen && <PreviewOverlayProvider>
           <PreviewGuides />
           {previewOverlay}
-          {mvp && <><ReviewAnnotationOverlay /><ReviewComposerOverlay /></>}
+          {mvp && reviewCommentsEnabled && <><ReviewAnnotationOverlay /><ReviewComposerOverlay /></>}
         </PreviewOverlayProvider>}
         {empty && <PreviewEmptyState />}
         {!empty && !isFullscreen && <TimelineHoverPreview />}
+        {captureDrag && !isFullscreen && <div aria-hidden className="absolute inset-0 z-50" data-preview-drop-surface="" />}
         {isFullscreen && <button type="button" data-fullscreen-playback-surface="" className="absolute inset-0 border-0 bg-transparent" aria-label={t('Play or pause preview')} onClick={togglePlay} />}
       </div>
       {/* The MVP transport fills both side edges and the bottom inset. */}
@@ -180,7 +201,7 @@ export function PreviewPane({
           <CompositionBreadcrumb stack={compositionStack} onNavigate={handleNavigateComposition} />
         )}
         <PlayerControls
-          reviewControls={mvp && !isFullscreen ? <ReviewPlayerControls projectId={projectId} disabled={timelineDisabled || compositionLoading} /> : undefined}
+          reviewControls={mvp && reviewCommentsEnabled && !isFullscreen ? <ReviewPlayerControls projectId={projectId} disabled={timelineDisabled || compositionLoading} /> : undefined}
           onTogglePlay={togglePlay}
           onSeek={seek}
           disabled={timelineDisabled}

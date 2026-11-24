@@ -303,11 +303,14 @@ it('prepares link and local-video instructions, retains drafts and distinguishes
   await act(async () => picker.dispatchEvent(new Event('change', { bubbles: true })));
   expect(button('Copy request', recovery()).disabled).toBe(true);
   const upload = Promise.withResolvers<Response>();
-  vi.mocked(fetch).mockReturnValueOnce(upload.promise);
+  vi.mocked(fetch)
+    .mockResolvedValueOnce(Response.json({ uploadId: 'upl-ref', uploadUrl: 'https://s3.example.test/upl-ref', method: 'PUT', headers: { 'Content-Type': 'video/mp4' } }, { status: 201 }))
+    .mockReturnValueOnce(upload.promise)
+    .mockResolvedValueOnce(Response.json({ state: 'committed', asset }));
   await act(async () => picker.dispatchEvent(new Event('change', { bubbles: true })));
   expect(button('Copy request', recovery()).disabled).toBe(true);
-  expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('modality=video'), expect.objectContaining({ body: file }));
-  await act(async () => upload.resolve(Response.json({ asset })));
+  expect(fetch).toHaveBeenLastCalledWith('https://s3.example.test/upl-ref', expect.objectContaining({ method: 'PUT', body: file }));
+  await act(async () => upload.resolve(new Response('', { status: 200 })));
   expect(button('Copy request', recovery()).disabled).toBe(false);
   expect(button('Replace video', recovery())).toBeDefined();
   expect(recovery().textContent).toContain(file.name);
@@ -345,14 +348,17 @@ it('retains the selected video and notes while changing the search or a category
   const picker = recovery().querySelector<HTMLInputElement>('input[type=file]')!;
   Object.defineProperty(picker, 'files', { value: [video] });
   const upload = Promise.withResolvers<Response>();
-  vi.mocked(fetch).mockReturnValueOnce(upload.promise);
+  const asset = { id: 'reference-asset', modality: 'video', currentVersionId: 'original', versions: [{ id: 'original' }] };
+  vi.mocked(fetch)
+    .mockResolvedValueOnce(Response.json({ uploadId: 'upl-2', uploadUrl: 'https://s3.example.test/upl-2', method: 'PUT', headers: { 'Content-Type': 'video/mp4' } }, { status: 201 }))
+    .mockReturnValueOnce(upload.promise)
+    .mockResolvedValueOnce(Response.json({ state: 'committed', asset }));
   await act(async () => picker.dispatchEvent(new Event('change', { bubbles: true })));
 
   searchInput().focus();
   await search('still missing');
   expect(recovery()).toBeNull();
-  const asset = { id: 'reference-asset', modality: 'video', currentVersionId: 'original', versions: [{ id: 'original' }] };
-  await act(async () => upload.resolve(Response.json({ asset })));
+  await act(async () => upload.resolve(new Response('', { status: 200 })));
   expect(events('studio_asset_import_result').at(-1)).toMatchObject({
     outcome: 'success', result_set_id: initialResult.result_set_id,
   });

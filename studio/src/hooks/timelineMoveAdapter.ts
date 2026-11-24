@@ -1,3 +1,4 @@
+import type { TimelinePaintPlan } from "../utils/cloudTimelineEdit";
 import { useCallback } from "react";
 import type { TimelineElement } from "../player";
 import type {
@@ -21,7 +22,7 @@ interface AtomicMoveDeps {
   ) => Promise<void>;
 }
 
-export type TimelineMoveOperation = "timing" | "lane-reorder" | "track-insert";
+export type TimelineMoveOperation = "timing" | "lane-reorder" | "track-insert" | { kind: "laneWithPaint"; paint: TimelinePaintPlan } | { kind: "closeTrackGaps"; track: number; at?: number };
 
 export type TimelineMoveEditsHandler = (
   edits: TimelineAtomicMoveEdit[],
@@ -44,9 +45,9 @@ export function persistTimelineMoveEditsAtomically(
       // vertical gesture (lane-reorder AND track-insert) must persist the track;
       // z is paint order only and is synced separately. Plain horizontal moves
       // ("timing") omit it so they stay eligible for the SDK fast path.
-      track: operation === "timing" ? undefined : updates.track,
+      track: operation === "timing" || (typeof operation === "object" && operation.kind === "closeTrackGaps") ? undefined : updates.track,
     })),
-    { coalesceKey },
+    { coalesceKey, ...(typeof operation === "object" && (operation.kind === "closeTrackGaps" ? { gapEdit: operation } : { paint: operation.paint })) },
   );
 }
 
