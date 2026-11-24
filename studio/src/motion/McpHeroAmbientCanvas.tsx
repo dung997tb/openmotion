@@ -49,7 +49,7 @@ function createPulse(cols: number, rows: number, centerBias = false): GuidePulse
 
 const centeredCoordinate = (index: number) => index * GRID_STEP + GRID_STEP * 0.5;
 const alignedCoordinate = (index: number) => Math.round(centeredCoordinate(index)) + 0.5;
-const colorAt = (channels: string, opacity: number) => `rgb(${channels} / ${opacity})`;
+const colorAt = (color: string, opacity: number) => `color-mix(in srgb, ${color} ${opacity * 100}%, transparent)`;
 
 function drawPulse(ctx: CanvasRenderingContext2D, pulse: GuidePulse, colors: MatrixColors) {
   const lane = alignedCoordinate(pulse.lane);
@@ -60,12 +60,14 @@ function drawPulse(ctx: CanvasRenderingContext2D, pulse: GuidePulse, colors: Mat
   gradient.addColorStop(0, colorAt(colors.pulse, 0));
   gradient.addColorStop(0.72, colorAt(colors.pulse, pulse.horizontal ? 0.22 : 0.20));
   gradient.addColorStop(1, colorAt(colors.glow, 0.04));
+  ctx.globalAlpha = 1;
   ctx.strokeStyle = gradient;
   ctx.beginPath();
   ctx.moveTo(startX, startY);
   ctx.lineTo(endX, endY);
   ctx.stroke();
-  ctx.fillStyle = colorAt(colors.glow, pulse.horizontal ? 0.42 : 0.38);
+  ctx.fillStyle = colors.glow;
+  ctx.globalAlpha = pulse.horizontal ? 0.42 : 0.38;
   ctx.beginPath();
   ctx.arc(endX, endY, 1.5, 0, Math.PI * 2);
   ctx.fill();
@@ -80,8 +82,9 @@ function drawCell(ctx: CanvasRenderingContext2D, cell: GridCell, pulses: GuidePu
     if (distance >= 0 && distance < pulse.length) glow = Math.max(glow, 1 - distance / pulse.length);
   }
   const wave = 0.5 + 0.5 * Math.sin(elapsed * 0.00075 + cell.col * 0.34 + cell.row * 0.26 + cell.phase);
-  const ink = glow > 0.05 ? colorAt(colors.glow, 0.16 + glow * 0.42) : colorAt(colors.glyph, 0.075 + wave * 0.075);
-  ctx.fillStyle = ctx.strokeStyle = ink;
+  const illuminated = glow > 0.05;
+  ctx.fillStyle = ctx.strokeStyle = illuminated ? colors.glow : colors.glyph;
+  ctx.globalAlpha = illuminated ? 0.16 + glow * 0.42 : 0.075 + wave * 0.075;
 
   switch (cell.kind) {
     case 'dot':
@@ -100,7 +103,8 @@ function drawCell(ctx: CanvasRenderingContext2D, cell: GridCell, pulses: GuidePu
     case 'anchor':
       ctx.strokeRect(x - 2.5, y - 2.5, 5, 5);
       if (glow > 0.25) {
-        ctx.fillStyle = colorAt(colors.pulse, glow * 0.45);
+        ctx.fillStyle = colors.pulse;
+        ctx.globalAlpha = glow * 0.45;
         ctx.fillRect(x - 1, y - 1, 2, 2);
       }
       break;
@@ -109,7 +113,8 @@ function drawCell(ctx: CanvasRenderingContext2D, cell: GridCell, pulses: GuidePu
       ctx.arc(x, y, 2.7, 0, Math.PI * 2);
       ctx.stroke();
       if (glow > 0.25) {
-        ctx.fillStyle = colorAt(colors.pulse, glow * 0.45);
+        ctx.fillStyle = colors.pulse;
+        ctx.globalAlpha = glow * 0.45;
         ctx.beginPath();
         ctx.arc(x, y, 1.1, 0, Math.PI * 2);
         ctx.fill();
