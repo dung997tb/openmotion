@@ -1,4 +1,5 @@
 import { submitIsolatedCanvasEdit } from "./submitIsolatedCanvasEdit";
+import type { SdkSessionHandle } from "./useSdkSession";
 import { cloudHistoryForWrite } from "../utils/studioFileHistory";
 import { buildProjectApiPath } from "../utils/projectRouting";
 import { useCallback } from "react";
@@ -58,7 +59,7 @@ export interface UseDomEditCommitsParams {
   /** Resync the in-memory SDK session after a SERVER-side write (NOT the SDK
    * path, whose session is already current) so a later SDK edit doesn't
    * serialize the pre-write doc and revert the server's change. */
-  forceReloadSdkSession?: () => void;
+  forceReloadSdkSession?: SdkSessionHandle["forceReload"];
   /** Stage 7 Step 3c: called before the server-side patch path. */
   onTrySdkPersist?: (
     selection: DomEditSelection,
@@ -169,7 +170,7 @@ export function useDomEditCommits({
 
           const sourceFiles = batches.map((batch) => batch.sourceFile);
           // The server patch and its history entry hold every touched file's queue.
-          const { allMatched, changedPaths, reconcileFromServer, previewApplied, confirmedCanvasVersion } = await serializeStudioFileMutations(
+          const { allMatched, changedPaths, reconcileFromServer, previewApplied, confirmedCanvasVersion, savedVersions } = await serializeStudioFileMutations(
             writeProjectFile,
             sourceFiles,
             async () => {
@@ -182,7 +183,7 @@ export function useDomEditCommits({
                 const path = batches[0]!.sourceFile;
                 const confirmedCanvasVersion = !result.divergent.length && (result.previewApplied || !changed)
                   ? result.versions[path] : undefined;
-                return { allMatched: true, changedPaths: result.changedPaths, reconcileFromServer: result.divergent.length > 0, previewApplied: result.previewApplied, confirmedCanvasVersion };
+                return { allMatched: true, changedPaths: result.changedPaths, reconcileFromServer: result.divergent.length > 0, previewApplied: result.previewApplied, confirmedCanvasVersion, savedVersions: result.versions };
               }
               const atomicResult = await patchElementBatches(pid, batches, history);
               const files = Object.fromEntries(
@@ -219,13 +220,13 @@ export function useDomEditCommits({
                 allMatched:
                   atomicResult.durable && atomicResult.files.every((result) => result.allMatched),
                 changedPaths: Object.keys(files),
-                reconcileFromServer: false, previewApplied: false, confirmedCanvasVersion: undefined,
+                reconcileFromServer: false, previewApplied: false, confirmedCanvasVersion: undefined, savedVersions: undefined,
               };
             },
           );
           const changed = changedPaths.length > 0;
           if (reconcileFromServer) return { durable: true, allMatched, changed };
-          if (changed) forceReloadSdkSession?.();
+          if (changed) forceReloadSdkSession?.(savedVersions ? { projectId: pid, versions: savedVersions } : undefined);
           const durable = allMatched;
           // A z-only reorder already applied its inline styles to the live iframe
           // DOM (and the store) synchronously, so remounting the iframe here only

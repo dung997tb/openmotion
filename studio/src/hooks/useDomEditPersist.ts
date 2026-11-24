@@ -3,6 +3,7 @@ import { observedSourceVersion } from "../utils/confirmedTextSources";
 import { isolatedEditVersion } from "../utils/isolatedEditVersions";
 import type { ProjectEditCommand } from "../../../packages/edit-core/commands";
 import { submitIsolatedCanvasEdit } from "./submitIsolatedCanvasEdit";
+import type { SdkSessionHandle } from "./useSdkSession";
 import { useCallback, useRef } from "react";
 import { findUnsafeDomPatchValues } from "@hyperframes/core/studio-api/finite-mutation";
 import { trackStudioEvent } from "../utils/studioTelemetry";
@@ -44,7 +45,7 @@ export interface UseDomEditPersistParams {
   editHistory: { recordEdit: (entry: RecordEditInput) => Promise<void> };
   projectIdRef: React.MutableRefObject<string | null>;
   reloadPreview: (changedPaths?: string | readonly string[]) => void;
-  forceReloadSdkSession?: () => void;
+  forceReloadSdkSession?: SdkSessionHandle["forceReload"];
   onTrySdkPersist?: (
     selection: DomEditSelection,
     operations: PatchOperation[],
@@ -167,7 +168,7 @@ export function useDomEditPersist({
         const changed = result.changedPaths.includes(targetPath);
         if (changed) await editHistory.recordEdit({ ...history, files: {} });
         if (changed && !result.divergent.length) {
-          forceReloadSdkSession?.();
+          forceReloadSdkSession?.({ projectId: pid, versions: result.versions });
           if (!result.previewApplied) reloadPreview(targetPath);
         }
         return { sourceFile: targetPath, version: result.versions[targetPath], changed };

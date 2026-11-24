@@ -1,4 +1,4 @@
-import { observePendingSourceRead, observeSourceRead } from "../utils/confirmedTextSources";
+import { confirmedSource as savedSource, observePendingSourceRead, observeSourceRead } from "../utils/confirmedTextSources";
 import type { RemoteFileRead } from "./remoteFileReads";
 import { optionalProjectSourceUrl } from "../utils/projectRouting";
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -280,13 +280,10 @@ export interface SdkSessionHandle {
   /** Atomically publish a fully persisted candidate session. */
   publish: PublishSdkSession;
   /**
-   * Force a session reload immediately, bypassing the self-write suppress
-   * window. Call after undo/redo writes the active composition file so the
-   * SDK in-memory document reflects the reverted content. Without it the
-   * window swallows the file-change and the session stays stale; the write
-   * side of that path is covered by usePersistentEditHistory.test.ts.
+   * Reopen after a write made outside the SDK, including undo/redo. A canvas
+   * receipt identifies the changed files and the exact source safe to reuse.
    */
-  forceReload: () => void;
+  forceReload: (receipt?: { projectId: string; versions: Readonly<Record<string, string>> }) => void;
   /**
    * Set when this server answered the composition read with a 404 for the
    * project it was asked to open. In the CLI-embedded host — the only host
@@ -398,7 +395,8 @@ export function useSdkSession(
   projectIdRef.current = projectId;
   const activeCompPathRef = useRef(activeCompPath);
   activeCompPathRef.current = activeCompPath;
-  const externalRead = useRef<RemoteFileRead | undefined>(undefined);
+  const externalRead = useRef<{ read?: RemoteFileRead } | null>(null);
+  const localRead = useRef<RemoteFileRead | undefined>(undefined);
   const [reloadToken, setReloadToken] = useState(0);
   const reloadTokenRef = useRef(reloadToken);
   reloadTokenRef.current = reloadToken;
@@ -438,7 +436,7 @@ export function useSdkSession(
       addExternalFileReloadListener((changedPath, read) => {
         // "." is a project-wide change (a reconnect or a replaced folder): every session reloads.
         if (changedPath === "." || changedPath === activeCompPathRef.current) {
-          externalRead.current = read;
+          externalRead.current = { read };
           setReloadToken((token) => token + 1);
         }
       }),
@@ -447,8 +445,10 @@ export function useSdkSession(
 
   // ── Open / re-open the session ──
   useEffect(() => {
-    const sharedRead = externalRead.current;
-    externalRead.current = undefined;
+    // An external delivery owns the read even when it asks us to refetch with no version hint.
+    const sharedRead = externalRead.current ? externalRead.current.read : localRead.current;
+    externalRead.current = null;
+    localRead.current = undefined;
     const generation = ++generationRef.current;
     let cancelled = false;
 
@@ -569,7 +569,20 @@ export function useSdkSession(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeCompPath, reloadToken]);
 
-  const forceReload = useCallback(() => setReloadToken((t) => t + 1), []);
+  const forceReload = useCallback<SdkSessionHandle["forceReload"]>((receipt) => {
+    const path = activeCompPathRef.current;
+    if (receipt && (receipt.projectId !== projectIdRef.current || !path || !Object.hasOwn(receipt.versions, path))) {
+      return;
+    }
+    localRead.current = receipt
+      ? (projectId, file) => {
+          if (projectId !== receipt.projectId || file !== path) return;
+          const source = savedSource(projectId, file);
+          if (source && source.version === receipt.versions[file]) return Promise.resolve({ ...source, missing: false });
+        }
+      : undefined;
+    setReloadToken(t => t + 1);
+  }, []);
   const publish = useCallback<PublishSdkSession>(({ candidate, expectedSession, targetPath }) => {
     const expectedOwner = sessionOwnersRef.current.get(expectedSession);
     const current = ownedSessionRef.current;

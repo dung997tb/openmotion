@@ -15,7 +15,7 @@ import { useSdkSession, type SdkSessionHandle } from "./useSdkSession";
 import { usePlayerStore } from "../player/store/playerStore";
 import { notifyExternalFileReload } from "./externalFileReloadBus";
 import { createRemoteFileReader } from "./remoteFileReads";
-import { confirmedSource, forgetSource } from "../utils/confirmedTextSources";
+import { confirmedSource, forgetSource, rememberSource } from "../utils/confirmedTextSources";
 import { knownCompositionSource } from "../player/lib/compositionPosterSource";
 
 vi.mock("../utils/studioTelemetry", () => ({ trackStudioEvent: vi.fn() }));
@@ -259,6 +259,39 @@ describe("useSdkSession unreachable project", () => {
     }
     return { captured, HandleProbe };
   }
+
+  it("reuses only the active file's acknowledged source and still checks independent updates", async () => {
+    const projectId = "sdk-local-save";
+    const path = "index.html";
+    const version = (digit: string) => "sha256:" + digit.repeat(64);
+    const read = vi.fn(async () => Response.json({ content: "from server" }, { headers: { ETag: version("a") } }));
+    openComposition.mockImplementation(async () => fakeSession());
+    const { captured, unmount } = await readOutcome(projectId, read);
+    try {
+      rememberSource(projectId, path, { content: "saved here", version: version("b") });
+      const receipt = { projectId, versions: { [path]: version("b") } };
+      await act(async () => captured.handle?.forceReload({ projectId, versions: { "intro.html": version("c") } }));
+      await act(async () => captured.handle?.forceReload({ ...receipt, projectId: "another-project" }));
+      expect(openComposition).toHaveBeenCalledTimes(1);
+      await act(async () => captured.handle?.forceReload(receipt));
+      await flushAsyncEffects();
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(openComposition.mock.calls.at(-1)?.[0]).toBe("saved here");
+      await act(async () => {
+        captured.handle?.forceReload(receipt);
+        notifyExternalFileReload(path);
+      });
+      await flushAsyncEffects();
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(openComposition.mock.calls.at(-1)?.[0]).toBe("from server");
+      await act(async () => captured.handle?.forceReload(receipt));
+      await flushAsyncEffects();
+      expect(read).toHaveBeenCalledTimes(3);
+    } finally {
+      await unmount();
+      forgetSource(projectId, path);
+    }
+  });
 
   const failedRead = (status: number) => async () =>
     ({ ok: false, status, json: async () => ({}) }) as Response;
