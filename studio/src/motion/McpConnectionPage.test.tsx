@@ -290,6 +290,8 @@ it('shows all twelve curated examples, filters by section and previews video, br
     await act(async () => tab(label).click());
     expect(gallery.querySelectorAll('[data-mcp-gallery-card]')).toHaveLength(count);
   }
+  expect([...gallery.querySelectorAll('.om-mcp-demo-kind')].map(label => label.textContent)).toEqual(['Brand Kit', 'Brand Kit']);
+  expect(gallery.querySelector('.om-mcp-demo-duration')).toBeNull();
   await act(async () => button('Preview Apple official Brand Kit').click());
   const brandPreview = document.querySelector('[role=dialog]')!;
   expect(brandPreview.textContent).toContain('Apple official Brand Kit');
@@ -297,7 +299,9 @@ it('shows all twelve curated examples, filters by section and previews video, br
   await act(async () => button('Close').click());
 
   await act(async () => tab('Product & AI launches (4)').click());
-  await act(async () => button('Preview Glean Agents · Enterprise workflow launch').click());
+  const gleanCover = button('Preview Glean Agents · Enterprise workflow launch');
+  expect(gleanCover.querySelector('.om-mcp-demo-duration')?.textContent).toBe('1:01');
+  await act(async () => gleanCover.click());
   const preview = document.querySelector('[role=dialog]')!;
   expect(preview.textContent).toContain('Glean Agents · Enterprise workflow launch');
   expect(preview.querySelector('video')?.getAttribute('src')).toContain('https://r.open-design.ai/files/');

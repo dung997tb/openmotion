@@ -147,9 +147,8 @@
 .om-mcp-category-tabs [role=tab] { flex: none; }
 .om-mcp-demo-card { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .om-mcp-demo-cover { position: relative; width: 100%; aspect-ratio: 16 / 9.5; overflow: hidden; }
-.om-mcp-demo-cover > img, .om-mcp-demo-cover > video, .om-mcp-demo-shade { position: absolute; inset: 0; width: 100%; height: 100%; }
+.om-mcp-demo-cover > img, .om-mcp-demo-cover > video { position: absolute; inset: 0; width: 100%; height: 100%; }
 .om-mcp-demo-cover > img, .om-mcp-demo-cover > video { object-fit: cover; }
-.om-mcp-demo-shade { pointer-events: none; }
 .om-mcp-demo-kind { position: absolute; inset-block-start: 10px; inset-inline-start: 10px; }
 .om-mcp-demo-duration { position: absolute; inset-block-end: 10px; inset-inline-end: 10px; }
 .om-mcp-template-caption { display: flex; flex: 1; flex-direction: column; gap: var(--motion-space-8); padding: 18px 18px 16px; }

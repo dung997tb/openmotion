@@ -97,10 +97,10 @@
   font-weight: var(--motion-weight-semibold);
   box-shadow: var(--motion-shadow-sm);
 }
-[data-motion-studio] .om-mcp-btn-primary:hover { background: var(--motion-action-hover); transform: translateY(-1px); }
+[data-motion-studio] .om-mcp-btn-primary:is(:hover, [data-copied]) {
+  background-color: color-mix(in srgb, var(--motion-action) 94%, var(--motion-on-action));
+}
 [data-motion-studio] .om-mcp-btn-primary[aria-expanded='true'] svg { transform: rotate(180deg); }
-[data-motion-studio] .om-mcp-btn-primary[data-copied] { background: var(--motion-mcp-dock-active); color: var(--motion-strong); }
-[data-motion-studio] .om-mcp-btn-primary[data-copied]:hover { background: var(--motion-mcp-dock-hover); }
 [data-motion-studio] .om-mcp-btn-secondary {
   border-radius: var(--motion-radius-full);
   border: 1px solid var(--motion-mcp-gallery-border);
@@ -265,7 +265,6 @@
 .om-mcp-demo-card:is(:hover, :focus-within) { border-color: var(--motion-mcp-gallery-border-strong); }
 [data-motion-studio] .om-mcp-demo-cover { display: block; padding: 0; height: auto; border-radius: 0; background: var(--motion-canvas); }
 .om-mcp-demo-cover:focus-visible { outline-offset: -3px; }
-.om-mcp-demo-shade { background: linear-gradient(180deg, transparent 50%, var(--motion-overlay) 100%); }
 .om-mcp-demo-kind, .om-mcp-demo-duration { padding: 3px 8px; background: var(--motion-video-overlay); color: var(--motion-overlay-ink); font-size: var(--motion-text-xs); }
 .om-mcp-demo-kind { border-radius: var(--motion-radius-full); border: 1px solid color-mix(in srgb, var(--motion-overlay-ink) 14%, transparent); backdrop-filter: blur(8px); }
 .om-mcp-demo-duration { border-radius: var(--motion-radius-sm); font-family: var(--motion-font-mono); }
@@ -296,6 +295,9 @@
 .om-mcp-pillar-num { font-family: var(--motion-font-mono); font-size: var(--motion-text-xs); color: var(--motion-accent); }
 .om-mcp-pillar h3 { font-size: 18px; font-weight: var(--motion-weight-semibold); color: var(--motion-strong); line-height: 1.35; }
 .om-mcp-pillar p { font-size: var(--motion-text-body); color: var(--motion-muted); line-height: 1.65; }
+@media (hover: hover) {
+  .om-mcp-pillar:hover h3 { color: color-mix(in srgb, var(--motion-strong) 50%, var(--motion-accent)); }
+}
 
 /* Standalone 6-Item FAQ Accordion */
 .om-mcp-faq-intro p { font-size: 14.5px; line-height: 1.65; color: var(--motion-muted); }
@@ -373,6 +375,8 @@
 [data-motion-studio] .om-mcp-contact .om-text-link[data-quiet] { color: var(--motion-muted); }
 
 @media (prefers-reduced-motion: no-preference) {
+  [data-motion-studio] .om-mcp-btn-primary { transition: background-color var(--motion-duration-fast) var(--motion-ease-out); }
+  .om-mcp-pillar h3 { transition: color var(--motion-duration-normal) var(--motion-ease-out); }
   .om-mcp-stage-slide { transition: opacity .7s ease; }
   .om-mcp-stage-slide img { transition: transform 4.5s ease-out; }
   .om-mcp-beat-dot { transition: background .2s, width .2s; }

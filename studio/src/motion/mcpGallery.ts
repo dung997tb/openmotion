@@ -30,7 +30,7 @@ export type McpGalleryCard = {
   id: string;
   category: Exclude<McpGalleryCategory, 'all'>;
   kind: 'template' | 'skill' | 'brand-kit';
-  duration: string;
+  duration?: string;
   image: string;
   video?: string;
   showcaseIframe?: string;
@@ -244,7 +244,6 @@ export const mcpGalleryCards: readonly McpGalleryCard[] = [
     id: 'brandkit-apple',
     category: 'brandkit',
     kind: 'brand-kit',
-    duration: 'Brand Kit',
     brandKitId: 'apple',
     image: brandCatalogFile('apple', 'cover'),
     showcaseIframe: brandCatalogFile('apple', 'showcase'),
@@ -263,7 +262,6 @@ export const mcpGalleryCards: readonly McpGalleryCard[] = [
     id: 'brandkit-clean',
     category: 'brandkit',
     kind: 'brand-kit',
-    duration: 'Brand Kit',
     brandKitId: 'clean',
     image: brandCatalogFile('clean', 'cover'),
     showcaseIframe: brandCatalogFile('clean', 'showcase'),
