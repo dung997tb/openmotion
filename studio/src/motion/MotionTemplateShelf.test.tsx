@@ -39,3 +39,29 @@ test('Motion templates offer a TOP 100 brands category with one work per brand',
   const titles = [...host.querySelectorAll('.om-gallery-card:not([data-new-project]) h3, .om-gallery-card:not([data-new-project]) strong')].map(node => node.textContent);
   expect(titles.join(' ')).not.toContain('plain');
 });
+
+test('Motion templates load the next batch when the shelf end scrolls into view, without a More button', async () => {
+  const many = Array.from({ length: 40 }, (_, index) => template(`t${index}`));
+  catalog.splice(0, catalog.length, ...many);
+  const observers: { callback: IntersectionObserverCallback; node?: Element }[] = [];
+  vi.stubGlobal('IntersectionObserver', class {
+    entry: { callback: IntersectionObserverCallback; node?: Element };
+    constructor(callback: IntersectionObserverCallback) { this.entry = { callback }; observers.push(this.entry); }
+    observe(node: Element) { this.entry.node = node; }
+    disconnect() {}
+    unobserve() {}
+  });
+  const cards = () => host.querySelectorAll('.om-gallery-card:not([data-new-project])').length;
+  await act(async () => root.render(<I18nProvider initialLocale="en"><MotionTemplateShelf root={createRef()} active /></I18nProvider>));
+  expect(cards()).toBe(16);
+  expect(host.textContent).not.toContain('More templates');
+  const scrollToEnd = async () => {
+    const last = observers.at(-1)!;
+    await act(async () => last.callback([{ isIntersecting: true, target: last.node! } as IntersectionObserverEntry], {} as IntersectionObserver));
+  };
+  await scrollToEnd();
+  expect(cards()).toBe(32);
+  await scrollToEnd();
+  expect(cards()).toBe(40);
+  expect(host.querySelector('.om-shelf-sentinel')).toBeNull();
+});
