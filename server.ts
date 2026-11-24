@@ -214,13 +214,12 @@ export async function renderNext(store: WorkspaceStore, runtimeRoot: string, tra
     if (failure.failureStage === 'output' && code === 'ENOENT') failure.failureCode = 'EXPORT_OUTPUT_MISSING';
     await recordDiagnostic(store.directory, { kind: 'export_failed', jobId: job.id, projectId: job.projectId,
       message: error instanceof Error ? error.message : 'Render failed' });
-    // A final-state write can fail after the validated MP4 and per-job record reached disk.
-    if (failure.failureStage !== 'finalize') await rm(store.exportPath(job), { force: true }).catch(() => {});
+    // The per-job record can commit before the latest-job pointer update fails.
     const current = await store.job(job.id);
+    if (current?.state !== 'completed') await rm(store.exportPath(job), { force: true }).catch(() => {});
     if (current && ['running', 'cancelling'].includes(current.state)) {
       try {
-        const finished = await store.finishExport(job.id, job.token!, error instanceof Error ? error.message : '渲染失败', failure);
-        if (finished.state === 'cancelled' && failure.failureStage === 'finalize') await rm(store.exportPath(job), { force: true }).catch(() => {});
+        await store.finishExport(job.id, job.token!, error instanceof Error ? error.message : '渲染失败', failure);
       }
       catch (persistError) {
         const errno = (persistError as NodeJS.ErrnoException)?.code;
