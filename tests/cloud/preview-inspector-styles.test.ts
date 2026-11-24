@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { PREVIEW_INSPECTOR_STYLES } from '../../src/studio/engine/preview-inspector-styles.ts';
+import { findBlockColorRule } from '../../shared/preview-style-draft.ts';
 
 function inspector() {
   let size = '42px';
@@ -85,4 +86,20 @@ it('only paints a CSS color rule whose selector belongs exclusively to the edite
   files = ['intro.html', 'other.html'];
   show('shared', '#cccccc');
   assert.equal(color, '#333333');
+});
+
+it('recognizes the shipped root color selector when the block is previewed on its own', () => {
+  const path = 'compositions/logo-outro.html';
+  const selector = 'html:has(> body > [data-composition-id="logo-outro"]), [data-composition-id="logo-outro"]';
+  const style = { getPropertyValue: (key: string) => key === '--bg-color' ? '#0a0a0f' : '' };
+  const doc = {
+    defaultView: { CSS: { supports: () => true } },
+    styleSheets: [{ ownerNode: { nodeName: 'STYLE' }, cssRules: [{ selectorText: selector, style }] }],
+    querySelectorAll: (query: string) => {
+      assert.equal(query, selector);
+      return [{ closest: () => null }, { closest: () => ({ getAttribute: () => path }) }];
+    },
+  } as unknown as Document;
+  assert.equal(findBlockColorRule(doc, path, '--bg-color', '#123456', path), style);
+  assert.equal(findBlockColorRule(doc, path, '--bg-color', '#123456', 'index.html'), undefined);
 });

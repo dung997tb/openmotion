@@ -1,6 +1,7 @@
 import { createStyleDrafts, findBlockColorRule } from '../../../../shared/preview-style-draft';
 import { createPreviewAdapter } from '../../player/lib/previewAdapter';
 import { confirmedSource } from '../../utils/confirmedTextSources';
+import { compositionPathOfPreviewUrl } from '../../utils/projectCompositionPath';
 
 const showStyleDraft = createStyleDrafts();
 
@@ -9,7 +10,7 @@ export function previewBlockColor(frame: HTMLIFrameElement | null | undefined, s
   const adapter = createPreviewAdapter({ iframe: frame });
   const doc = adapter.document();
   if (doc) {
-    const style = findBlockColorRule(doc, sourceFile, key, value);
+    const style = findBlockColorRule(doc, sourceFile, key, value, compositionPathOfPreviewUrl(doc.URL));
     return style && showStyleDraft(style, key, value);
   }
   const fileVersion = adapter.projectId && confirmedSource(adapter.projectId, sourceFile)?.version;

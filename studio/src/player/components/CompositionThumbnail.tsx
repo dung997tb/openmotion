@@ -16,6 +16,8 @@ import {
 } from "./thumbnailUtils";
 import { useValueAtRest } from "./timelineMotion";
 import { getCachedCloudDisklessMode } from "../../utils/cloudRuntime";
+import { compositionPathOfPreviewUrl } from "../../utils/projectCompositionPath";
+export { compositionPathOfPreviewUrl } from "../../utils/projectCompositionPath";
 import {
   compositionDisplayName,
   loadCloudCompositionPoster,
@@ -112,12 +114,6 @@ export function buildCompositionThumbnailUrl({
     }
   }
   return thumbnailUrl.toString();
-}
-
-/** The composition a preview URL renders: `/preview/comp/<path>`, or the root for `/preview`. */
-export function compositionPathOfPreviewUrl(previewUrl: string): string {
-  const match = /\/preview\/comp\/([^?#]+)/.exec(previewUrl);
-  return match?.[1] ? decodeURIComponent(match[1]) : "index.html";
 }
 
 export function compositionThumbnailRequest(
