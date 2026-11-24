@@ -288,7 +288,7 @@ jobs:
             -c.publish.provider=generic \
             -c.publish.url="${FEED_URL}" \
             -c.publish.channel="${OPENMOTION_RELEASE_CHANNEL}" \
-            "${EXTRA_BUILDER_ARGS[@]}"
+            ${EXTRA_BUILDER_ARGS[@]+"${EXTRA_BUILDER_ARGS[@]}"}
 
           {
             echo "### ${{ matrix.label }} · ${RELEASE_VERSION} (${OPENMOTION_RELEASE_CHANNEL})"
@@ -405,7 +405,9 @@ jobs:
 
           {
             echo "#### Published artifacts"
-            printf '%s\n' "${published_links[@]}"
+            if [ "${#published_links[@]}" -gt 0 ]; then
+              printf '%s\n' "${published_links[@]}"
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
   publish-mac-manifest:
