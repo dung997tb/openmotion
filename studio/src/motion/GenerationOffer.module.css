@@ -156,7 +156,7 @@
   box-sizing: border-box;
   max-inline-size: 100%;
   padding: var(--motion-space-6) var(--motion-space-10);
-  border: 1px solid var(--motion-neutral-n9);
+  border: 1px solid var(--motion-neutral-n10);
   border-radius: var(--motion-radius-step-7);
   background: var(--motion-neutral-n11);
   color: var(--motion-neutral-n4);
