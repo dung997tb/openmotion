@@ -7,6 +7,7 @@ import { PREVIEW_TIMELINE_MANIFEST } from './preview-timeline-manifest.ts';
 import { PREVIEW_LAYERS } from './preview-layers.ts';
 import { PREVIEW_INLINE_TEXT } from './preview-inline-text.ts';
 import { PREVIEW_CANVAS_DRAG } from './preview-canvas-drag.ts';
+import { PREVIEW_TIMELINE_CONTROLS } from './preview-timeline-controls.ts';
 import { PREVIEW_PEER_TIMING } from './preview-peer-timing.ts';
 import type { PreviewLiveEdits } from '../../../shared/preview-timing.ts';
 import { PREVIEW_THUMBNAIL_CAPTURE } from './preview-thumbnail-capture.ts';
@@ -97,6 +98,7 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
   ${PREVIEW_TIMELINE_MANIFEST}
   ${PREVIEW_CANVAS_DRAG}
   ${PREVIEW_INLINE_TEXT}
+  ${PREVIEW_TIMELINE_CONTROLS}
   ${PREVIEW_PEER_TIMING}
   ${PREVIEW_INSPECTOR}
   ${PREVIEW_INSPECTOR_STYLES}
@@ -139,6 +141,10 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
       if(message.type==='peer-timing' || message.type==='peer-presentation'){
         if (!settings.studioOrigin || settings.studioOrigin !== event.origin) return;
         respond(requestId,applyPeerTiming(message)); return;
+      }
+      if(message.type==='timeline-controls'){
+        if(settings.studioOrigin && settings.studioOrigin === event.origin) previewTimelineControls(message);
+        return;
       }
       if(message.type==='handshake'){
         if(message.timelineOnly) post('timeline-state',timeline(true));

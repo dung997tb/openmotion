@@ -26,7 +26,7 @@ function preview(canRebindTiming = true, liveEdits?: PreviewLiveEdits) {
     __hfForceTimelineRebind: () => { hooks.push('rebind'); },
     addEventListener: (event: string, handler: typeof handle) => { if (event === 'message') handle = handler; },
   };
-  runInNewContext(PREVIEW_BRIDGE_SCRIPT, { window, document, URL, CSS: { escape: (s: string) => s }, crypto: { randomUUID: () => 'document-1' },
+  runInNewContext(PREVIEW_BRIDGE_SCRIPT, { window, document, URL, HTMLElement: document.defaultView.HTMLElement, CSS: { escape: (s: string) => s }, crypto: { randomUUID: () => 'document-1' },
     setInterval() {}, location: { href: 'https://preview.test/api/projects/p/preview?pt=grant' } });
   function send(overrides: Record<string, unknown> = {}, origin = 'https://studio.test', source = parent) {
     replies.length = 0;
@@ -271,4 +271,36 @@ it('enables the fast path only for declarative documents with no user startup co
   assert.equal((await build(2, '<img onload="paint()" src="p.png">')).allowed, false);
   assert.equal((await build(2, '<div data-composition-src="scene.html"></div>')).allowed, false);
   assert.equal((await build(2, '', { '.hyperframes/studio-manual-edits.json': '{}' })).allowed, false);
+});
+
+it('advances a net-zero batch without touching playback and rejects its stale receipts', () => {
+  const { send, hooks } = preview();
+  assert.equal(send({ changes: [] }), false);
+  assert.equal(send({ changes: [], sameContent: true }), true);
+  assert.deepEqual(hooks, []);
+  assert.equal(send(), false);
+  assert.equal(send({ before: etag(2), after: etag(3) }), true);
+});
+
+it('displays the latest control while earlier file versions settle, preserving playback', () => {
+  const { send, document, hooks } = preview();
+  const title = document.getElementById('title')!;
+  const project = (enabled: boolean, settled: boolean) => send({
+    type: 'timeline-controls', attr: 'data-hidden',
+    changes: [{ sourceFile: 'index.html', elementId: 'title', enabled, settled }],
+  });
+  project(true, false);
+  assert.equal(title.hasAttribute('data-hidden'), true);
+  assert.deepEqual(hooks, ['seek:4', 'play']);
+  project(false, false);
+  const confirm = (before: number, after: number, from: string | null, to: string | null) => send({
+    before: etag(before), after: etag(after),
+    changes: [{ id: 'title', tag: 'div', attributes: [['data-hidden', from, to]] }],
+  });
+  assert.equal(confirm(1, 2, null, ''), true);
+  assert.equal(title.hasAttribute('data-hidden'), false);
+  project(false, true);
+  assert.equal(confirm(2, 3, '', null), true);
+  project(true, true); // A receipt alone cannot start a gesture in a replacement document.
+  assert.equal(title.hasAttribute('data-hidden'), false);
 });

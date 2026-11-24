@@ -82,7 +82,12 @@ export const PREVIEW_PEER_TIMING = `
         (!ownDrag && (drag || pendingDrags.size)) ||
         (inlineText && !(local && inlineText.id === m.gestureId && inlineText.after !== undefined)) || !p || typeof p.seek !== 'function' ||
         typeof p.getTime !== 'function' || typeof window.__hfForceTimelineRebind !== 'function' ||
-        !Array.isArray(m.changes) || !m.changes.length || m.changes.length > 32) return false;
+        !Array.isArray(m.changes) || m.changes.length > 32) return false;
+    if (!m.changes.length) {
+      if (m.sameContent !== true || m.type !== 'peer-timing' || !timingDocumentId) return false;
+      confirmCanvasVersion(m.path, after);
+      return true;
+    }
     const edits = [], effects = [];
     let removing = false;
     for (const change of m.changes) {
@@ -109,17 +114,17 @@ export const PREVIEW_PEER_TIMING = `
         if (!previewAttributes.has(name) || [from, to].some(value => !canPatchPreviewAttribute(name, value, node.localName))) return false;
         const preserved = name === 'data-duration' || name === 'data-end' ? name.replace('data-','data-hf-authored-') : null;
         const names = preserved && node.hasAttribute(preserved) ? [preserved,name] : [name];
-        const actual = node.getAttribute(names[0]);
+        const control = previewControls.get(node)?.get(names[0]);
+        const actual = control ? control.base : node.getAttribute(names[0]);
         if (actual !== from && !(actual && from && Number(actual) === Number(from))) return false;
-        for (const attr of names) edits.push({node,attr,old:node.getAttribute(attr),to});
+        for (const attr of names) edits.push({node,attr,old:attr === names[0] ? actual : node.getAttribute(attr),to});
       }
     }
     const time = p.getTime(), playing = p.isPlaying?.() === true;
     if (!Number.isFinite(time) || Date.now() >= m.expiresAt) return false;
     function update(key) {
       for (const e of edits) {
-        if (e[key] === null) e.node.removeAttribute(e.attr);
-        else e.node.setAttribute(e.attr,e[key]);
+        applyTimelineReceipt(e.node, e.attr, e[key]);
       }
       for (const effect of effects) effect(key === 'to');
       // Lock is an editor flag. Studio reapplies the local monitor preference on mute.

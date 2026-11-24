@@ -191,7 +191,9 @@ export async function tryApplyPeerChanges(
   if (adapter.sameOrigin || !document || document.token !== adapter.token || !adapter.projectId) return false;
   const { previous, current } = update;
   const releasePresented = capturePresentedTimelineChanges(frame, update.path);
-  const changes = options === "temporary" ? await diffScriptedPreviewStyles(previous.content, current.content) :
+  // Several accepted toggles can bring the file back to the exact source already on screen.
+  const sameContent = !options && document.canRebind && previous.content === current.content;
+  const changes = sameContent ? [] : options === "temporary" ? await diffScriptedPreviewStyles(previous.content, current.content) :
     await diffMountedPreview(previous.content, current.content);
   if (!changes || !isCurrent()) return false;
   const canAdvance = document.canRebind || (document.liveEdits.position && isLivePositionEdit(changes)) ||
@@ -206,7 +208,7 @@ export async function tryApplyPeerChanges(
   try {
     const paint = adapter.request<boolean>(presentation ? "peer-presentation" : "peer-timing", {
       documentId: document.id, path: update.path, before: update.previous.version, after: update.current.version,
-      changes, ...(temporary && { temporary: true }), ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
+      changes, ...(sameContent && { sameContent: true }), ...(temporary && { temporary: true }), ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
     }, timeout);
     // A provisional style can paint in parallel with the authoritative script rebuild.
     if (temporary && options === "keep-visible") {
