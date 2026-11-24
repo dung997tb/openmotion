@@ -108,6 +108,10 @@
   overflow-wrap: anywhere;
 }
 
+.subscriptionCard[data-guide='upgrade'] .subscriptionHeading h2 {
+  letter-spacing: 0.025em;
+}
+
 @media (forced-colors: none) {
   .unlimitedText {
     background-image: var(--motion-black-friday-headline-gradient);
