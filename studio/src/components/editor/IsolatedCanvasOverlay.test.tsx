@@ -8,6 +8,7 @@ import { PREVIEW_BRIDGE_SOURCE, type PreviewBridgeMessage } from "../../player/l
 import { announcePreviewPromoted } from "../../player/sceneSwap";
 
 const state = vi.hoisted(() => ({
+  writeBlockedReason: null as string | null,
   domEditSelection: null as null | { isolatedBounds: { x:number; y:number; width:number; height:number }; isolatedTarget?: { sourceFile:string; elementId:string } },
   previewIframeRef: { current: null as HTMLIFrameElement | null },
   compositionRect: { left: 10, top: 10, width: 200, height: 100 },
@@ -16,7 +17,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("../../contexts/DomEditContext", () => ({ useDomEditActionsContext: () => state, useDomEditSelectionContext: () => state }));
 vi.mock("../../contexts/StudioContext", () => ({
-  useStudioShellContext: () => ({ ...state, projectId: "project-1", writeBlockedReason: null }),
+  useStudioShellContext: () => ({ ...state, projectId: "project-1" }),
 }));
 vi.mock("./PreviewOverlayProvider", () => ({ usePreviewOverlayContext: () => ({ state }) }));
 vi.mock("../../i18n/I18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -42,6 +43,7 @@ beforeEach(() => {
   vi.spyOn(frame, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 200, 100));
   state.previewIframeRef.current = frame;
   state.domEditSelection = null;
+  state.writeBlockedReason = null;
   messages = [];
   state.compositionRect = { left: 10, top: 10, width: 200, height: 100 };
   state.commitDomEditPatchBatches.mockReset().mockResolvedValue({ durable: true, changed: true });
@@ -66,6 +68,19 @@ function pointer(type: string, x: number) {
     bubbles: true, pointerId: 1, isPrimary: true, button: 0, clientX: x, clientY: 60,
   })));
 }
+
+it("allows inspecting another layer while a write conflict blocks dragging and resizing", () => {
+  state.writeBlockedReason = "Resolve the external change";
+  state.domEditSelection = { isolatedBounds: { x: .1, y: .2, width: .4, height: .3 } };
+  act(() => root.render(<IsolatedCanvasOverlay />));
+  expect(canvas.querySelector(".border-studio-accent")).toBeTruthy();
+  expect(canvas.querySelector("[data-resize-corner]")).toBeNull();
+  pointer("pointerdown", 60);
+  pointer("pointermove", 80);
+  pointer("pointerup", 80);
+  expect(messages.map(message => message.type)).toEqual(["layer-select"]);
+  expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
+});
 
 async function reply(phase: string, result: unknown) {
   const request = messages.findLast(message => message.phase === phase)!;

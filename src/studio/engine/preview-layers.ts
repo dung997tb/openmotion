@@ -83,14 +83,19 @@ export const PREVIEW_LAYERS = `
     post('select-element', { inspect: true, layerKey: layerElements.has(key) ? key : undefined, subscription: layerSubscription, selection: detail });
   }
 
+  function resolvePreviewLayer(message) {
+    if (message.key) return message.subscription === layerSubscription && layerElements.get(message.key);
+    const { x, y } = message;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) return null;
+    const element = document.elementFromPoint(x * innerWidth, y * innerHeight)?.closest('[id],[data-hf-id]');
+    return element !== document.body && element !== document.documentElement ? element : null;
+  }
+
   function previewLayerFamily(message) {
-    const atPoint = !message.key && Number.isFinite(message.x) && Number.isFinite(message.y) &&
-      message.x >= 0 && message.x <= 1 && message.y >= 0 && message.y <= 1;
-    const element = atPoint ? document.elementFromPoint(message.x * innerWidth,message.y * innerHeight)?.closest('[id],[data-hf-id]') :
-      message.subscription === layerSubscription && layerElements.get(message.key);
+    const element = resolvePreviewLayer(message);
     if (!element?.isConnected || !element.parentElement || element.matches('html,body,[data-composition-id]:not([data-composition-src])') ||
         element.closest('[data-timeline-locked]')) return null;
-    if (atPoint) reportLayerSelection(element,describe(element));
+    if (!message.key) reportLayerSelection(element,describe(element));
     const target = element.getBoundingClientRect();
     const siblings = Array.from(element.parentElement.children).filter(el => !el.matches('audio,script,style,link,meta,template,noscript'));
     if (siblings.length > ${MAX_LAYER_ROWS}) return null;
@@ -106,8 +111,8 @@ export const PREVIEW_LAYERS = `
   }
 
   function selectPreviewLayer(message) {
-    const element = layerElements.get(message.key);
-    if (message.subscription !== layerSubscription || !element?.isConnected) return false;
+    const element = resolvePreviewLayer(message);
+    if (!element?.isConnected) return false;
     reportLayerSelection(element, describe(element));
     return true;
   }

@@ -125,6 +125,10 @@ export function IsolatedCanvasOverlay() {
     const { clientX: startX, clientY: startY } = event;
     const x = (startX - frame.x) / frame.width, y = (startY - frame.y) / frame.height;
     if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return;
+    if (writeBlockedReason) {
+      adapter.send("layer-select", { x, y });
+      return;
+    }
     if (observedFrame.current !== iframe) {
       observedFrame.current?.removeEventListener("load", cancel);
       observedFrame.current = iframe;
@@ -222,13 +226,13 @@ export function IsolatedCanvasOverlay() {
     });
   }
 
-  if (!select || writeBlockedReason) return null;
+  if (!select) return null;
   return <div className="absolute inset-0 z-10 touch-none pointer-events-auto" aria-label={t("Composition canvas")}
     style={text.editing ? { pointerEvents: "none" } : undefined} onDoubleClick={text.open}
     onContextMenu={event => {
       event.preventDefault();
       const iframe = previewIframeRef.current;
-      if (!iframe || !projectId) return;
+      if (!iframe || !projectId || writeBlockedReason) return;
       const adapter = projectPreviewAdapter(iframe, projectId);
       if (!adapter) return;
       const frame = iframe.getBoundingClientRect();
@@ -243,7 +247,7 @@ export function IsolatedCanvasOverlay() {
       style={{ left: compositionRect.left + box.x * compositionRect.width,
         top: compositionRect.top + box.y * compositionRect.height,
         width: box.width * compositionRect.width, height: box.height * compositionRect.height }}>
-      {corners.map(corner => <span key={corner} data-resize-corner={corner} aria-label={t("Resize layer")}
+      {!writeBlockedReason && corners.map(corner => <span key={corner} data-resize-corner={corner} aria-label={t("Resize layer")}
         className="absolute size-2 rounded-sm border border-studio-accent bg-white pointer-events-auto"
         style={{ left: corner.endsWith("w") ? 0 : "100%", top: corner.startsWith("n") ? 0 : "100%",
           transform: "translate(-50%, -50%)", cursor: corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize" }} />)}
