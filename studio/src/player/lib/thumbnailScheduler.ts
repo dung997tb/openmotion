@@ -36,6 +36,12 @@ export interface ThumbnailRequest {
   rich?: boolean;
   /** For work whose result nobody reads: it is dropped, not cached, once its last lease ends. */
   discardWhenReleased?: boolean;
+  /** Normalized composition path when this request renders or captures a composition. */
+  compositionPath?: string;
+  /** Persisted content edit revision associated with this request. */
+  contentRevision?: number;
+  /** Server-side composition content hash revision associated with this request. */
+  compositionRevision?: string;
   load: (signal: AbortSignal) => Promise<ThumbnailLoadedResult>;
 }
 
@@ -281,6 +287,27 @@ export class ThumbnailScheduler {
       if (entry.leases.size > 0) continue;
       entry.controller?.abort();
       this.deleteEntry(key, entry);
+    }
+  }
+
+  /**
+   * Evict cached entries matching `predicate` within `projectId`.
+   * Unleased entries are deleted and disposed immediately; leased entries are marked
+   * uncached so they are disposed as soon as their last consumer releases them.
+   */
+  invalidateMatching(
+    projectId: string,
+    predicate: (request: ThumbnailRequest) => boolean,
+  ): void {
+    for (const [key, entry] of this.entries) {
+      if (entry.request.projectId !== projectId) continue;
+      if (!predicate(entry.request)) continue;
+      if (entry.leases.size === 0) {
+        entry.controller?.abort();
+        this.deleteEntry(key, entry);
+      } else if (entry.cached) {
+        this.uncache(entry);
+      }
     }
   }
 

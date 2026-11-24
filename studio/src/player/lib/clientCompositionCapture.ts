@@ -8,6 +8,7 @@ import {
 } from "./previewLease";
 import {
   createThumbnailKey,
+  thumbnailScheduler,
   type ThumbnailLoadedResult,
   type ThumbnailPriority,
   type ThumbnailRequest,
@@ -356,12 +357,22 @@ function evictStaleMemoryStripEntries(isStale: (entry: MemoryStripEntry) => bool
   }
 }
 
-function evictStaleProjectRevisions(projectId: string): void {
+function evictStaleProjectRevisions(
+  projectId: string,
+  isPathChanged: (compPath: string) => boolean = () => true,
+): void {
   evictStaleMemoryStripEntries(
     (entry) =>
       entry.projectId === projectId &&
       entry.compRev !== resolveCompositionRevision(projectId, entry.compPath),
   );
+  thumbnailScheduler.invalidateMatching(projectId, (req) => {
+    if (req.kind !== "composition" || !req.compositionPath) return false;
+    if (req.compositionRevision !== undefined) {
+      return req.compositionRevision !== resolveCompositionRevision(projectId, req.compositionPath);
+    }
+    return isPathChanged(req.compositionPath);
+  });
   for (const [key, entry] of sharedCoverCache) {
     if (entry.projectId !== projectId) continue;
     if (entry.compRev === resolveCompositionRevision(projectId, entry.compPath)) continue;
@@ -399,6 +410,10 @@ export function evictStaleCompositionCaptures(
   evictStaleMemoryStripEntries(
     (entry) => entry.projectId === projectId && isStale(entry.compPath, entry.contentRevision),
   );
+  thumbnailScheduler.invalidateMatching(projectId, (req) => {
+    if (req.kind !== "composition" || !req.compositionPath) return false;
+    return isStale(req.compositionPath, req.contentRevision ?? 0);
+  });
   for (const [key, entry] of sharedCoverCache) {
     if (entry.projectId !== projectId || !isStale(entry.compPath, entry.contentRevision)) continue;
     sharedCoverCache.delete(key);
@@ -417,11 +432,13 @@ export function setCachedProjectRevision(
   compositionRevisions?: Readonly<Record<string, string>> | null,
 ): void {
   if (!projectId) return;
+  let projectRevChanged = false;
   let changed = false;
   if (typeof revision === "string" && revision.trim()) {
     const trimmed = revision.trim();
     if (projectRevisionByProjectId.get(projectId) !== trimmed) {
       projectRevisionByProjectId.set(projectId, trimmed);
+      projectRevChanged = true;
       changed = true;
     }
   }
@@ -434,16 +451,29 @@ export function setCachedProjectRevision(
     }
     const prev = compositionRevisionsByProjectId.get(projectId);
     if (normalized.size > 0) {
+      const changedPaths = new Set<string>();
+      for (const [k, v] of normalized) {
+        if (prev?.get(k) !== v) changedPaths.add(k);
+      }
+      if (prev) {
+        for (const k of prev.keys()) {
+          if (!normalized.has(k)) changedPaths.add(k);
+        }
+      }
       const same =
         prev !== undefined &&
         prev.size === normalized.size &&
-        Array.from(normalized.entries()).every(([k, v]) => prev.get(k) === v);
+        changedPaths.size === 0;
       if (!same) {
         compositionRevisionsByProjectId.set(projectId, normalized);
         changed = true;
       }
       if (changed) {
-        evictStaleProjectRevisions(projectId);
+        const hadPrev = prev !== undefined;
+        evictStaleProjectRevisions(projectId, (compPath) => {
+          if (normalized.has(compPath)) return changedPaths.has(compPath);
+          return projectRevChanged || (hadPrev && prev.has(compPath));
+        });
         notifyRevisionListeners(projectId);
       }
       return;
@@ -1680,6 +1710,11 @@ function putMemoryStripCache(
       sharedCoverCache.delete(oldCoverKey);
     }
   }
+  thumbnailScheduler.invalidateMatching(meta.projectId, (req) => {
+    if (req.kind !== "composition" || req.compositionPath !== meta.compPath) return false;
+    if ((req.contentRevision ?? 0) < meta.contentRevision) return true;
+    return isCurrentRev && req.compositionRevision !== undefined && req.compositionRevision !== meta.compRev;
+  });
   memoryStripCache.set(idbKey, entry);
   while (memoryStripCache.size > MEMORY_STRIP_CACHE_MAX) {
     const oldestKey = memoryStripCache.keys().next().value;
@@ -2149,6 +2184,9 @@ export function createClientCompositionCaptureRequest(input: ClientCaptureInput)
     concurrencyBucket: "client-capture",
     priority: input.priority ?? "visible",
     rich: input.rich ?? true,
+    compositionPath: normalizeCompositionPathForGate(input.previewUrl),
+    contentRevision: input.contentRevision,
+    compositionRevision: compRev,
     load: (signal) => runClientCompositionCapture(input, signal),
   };
 }

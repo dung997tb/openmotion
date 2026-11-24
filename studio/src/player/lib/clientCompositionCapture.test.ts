@@ -22,7 +22,7 @@ import {
   withPreviewRedirectSafeFetch,
 } from "./clientCompositionCapture";
 import { bindPreviewLease } from "./previewLease";
-import { ThumbnailScheduler } from "./thumbnailScheduler";
+import { ThumbnailScheduler, thumbnailScheduler } from "./thumbnailScheduler";
 import { usePlayerStore } from "../store/playerStore";
 
 afterEach(() => {
@@ -1293,5 +1293,79 @@ describe("clientCompositionCapture", () => {
     const valB2 = seedClientCompositionCaptureForTest(rev0B, [new Blob(["nb1"]), new Blob(["nb2"])]);
     expect(peekFallbackCompositionCapture({ projectId: "proj-evict", previewUrl: rev0B.previewUrl })).toBe(valB2);
     for (const url of urlsB) expect(activeUrls.has(url)).toBe(false);
+  });
+
+  it("does not pin superseded MemoryStripEntry object URLs or stale poster entries in ThumbnailScheduler across edits", async () => {
+    const activeUrls = new Set<string>();
+    let seq = 0;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      const url = `blob:test/sched-${++seq}`;
+      activeUrls.add(url);
+      return url;
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
+      activeUrls.delete(String(url));
+    });
+
+    const previewUrl = "/api/projects/proj-sched/preview/comp/compositions/choice.html";
+    const rev0 = {
+      previewUrl,
+      projectId: "proj-sched",
+      contentRevision: 0,
+      frameCount: 2,
+    };
+    const val0 = seedClientCompositionCaptureForTest(rev0, [new Blob(["f1"]), new Blob(["f2"])]);
+    const urls0 = val0.kind === "filmstrip" ? [...val0.urls] : [];
+
+    // Acquire rev 0 on the singleton ThumbnailScheduler (matching live CompositionThumbnail).
+    const req0 = createClientCompositionCaptureRequest({ ...rev0, sessionEpoch: 1 });
+    const lease0 = thumbnailScheduler.acquire(req0, () => {});
+    await vi.waitFor(() => {
+      expect(thumbnailScheduler.getSnapshot(req0).status).toBe("ready");
+    });
+
+    // Also acquire an unleased stale composition poster entry for rev 0.
+    const posterDispose = vi.fn();
+    const posterLease = thumbnailScheduler.acquire(
+      {
+        key: "cloud=1&kind=composition&url=choice-rev0",
+        projectId: "proj-sched",
+        sessionEpoch: 1,
+        kind: "composition",
+        priority: "visible",
+        compositionPath: "compositions/choice.html",
+        contentRevision: 0,
+        load: async () => ({
+          value: { kind: "image", url: "blob:test/poster-0", aspect: 16 / 9, representative: "text" },
+          weight: 1024,
+          dispose: posterDispose,
+        }),
+      },
+      () => {},
+    );
+    await vi.waitFor(() => {
+      expect(thumbnailScheduler.getDiagnostics().cacheEntries).toBeGreaterThanOrEqual(2);
+    });
+    posterLease.release();
+
+    // Edit invalidation runs while React still holds lease0 (before switching to rev 1).
+    evictStaleCompositionCaptures("proj-sched", ["compositions/choice.html"], { "compositions/choice.html": 1 });
+    // Unleased stale poster is disposed immediately.
+    expect(posterDispose).toHaveBeenCalledTimes(1);
+    // Still-leased rev 0 capture remains alive until React switches and releases lease0.
+    for (const url of urls0) expect(activeUrls.has(url)).toBe(true);
+
+    // React switches to rev 1 and releases lease0 -> ThumbnailScheduler drops rev 0 immediately (not pinned in LRU).
+    lease0.release();
+    expect(thumbnailScheduler.getSnapshot(req0).status).toBe("idle");
+
+    // Once rev 1 finishes capturing, rev 0's blob URLs are immediately revoked because refCount is now 0.
+    const val1 = seedClientCompositionCaptureForTest(
+      { ...rev0, contentRevision: 1 },
+      [new Blob(["n1"]), new Blob(["n2"])],
+    );
+    expect(val1.kind).toBe("filmstrip");
+    for (const url of urls0) expect(activeUrls.has(url)).toBe(false);
+    thumbnailScheduler.invalidateProject("proj-sched");
   });
 });
