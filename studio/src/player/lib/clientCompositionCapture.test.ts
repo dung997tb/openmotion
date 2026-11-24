@@ -1037,7 +1037,13 @@ describe("clientCompositionCapture", () => {
     setCachedProjectRevision("proj-fv", "proj-rev-1", {
       "compositions/intro.html": '"sha256:intro-v1"|shared:111111111111:222222222222',
       "compositions/outro.html": '"sha256:outro-v1"|shared:111111111111:222222222222',
+      "compositions/dynamic.html": "proj-rev-1",
     });
+
+    // Fail-closed compositions equal to projectRevision keep tracking live session contentRevision bumps.
+    const dynamicUrl = "/api/projects/proj-fv/preview/comp/compositions/dynamic.html";
+    expect(getCompositionCacheKeyRevision("proj-fv", dynamicUrl, 0)).toBe("rev:proj-rev-1|0");
+    expect(getCompositionCacheKeyRevision("proj-fv", dynamicUrl, 3)).toBe("rev:proj-rev-1|3");
 
     const introV1 = seedClientCompositionCaptureForTest(
       { projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 },
@@ -1099,12 +1105,17 @@ describe("clientCompositionCapture", () => {
       peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 }),
     ).toBe(introV1);
 
-    // Shared stylesheet edit invalidates every composition immediately without a reload.
-    updateCachedCompositionRevisions("proj-fv", { "styles/theme.css": '"patch:css-2"' });
+    // Shared stylesheet edit invalidates every composition immediately without a reload,
+    // while keeping fail-closed compositions on `rev:<projectRev>|<contentRevision>`.
+    updateCachedCompositionRevisions("proj-fv", {
+      "styles/theme.css": '"patch:css-2"',
+      "compositions/dynamic.html": '"patch:dyn-2"',
+    });
     expect(
       peekCachedCompositionCapture({ projectId: "proj-fv", previewUrl: introUrl, contentRevision: 0, frameCount: 8 }),
     ).toBeNull();
     expect(getCompositionCacheRevision("proj-fv", outroUrl)).not.toBe('"sha256:outro-v1"|shared:111111111111:222222222222');
+    expect(getCompositionCacheKeyRevision("proj-fv", dynamicUrl, 4)).toBe("rev:proj-rev-1|4");
     unsub();
   });
 

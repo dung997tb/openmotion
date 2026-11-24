@@ -300,61 +300,66 @@ describe('preview-thumbnail-capture embedded bridge script', () => {
     }
   });
 
-  it('computes per-composition cache revisions from each file version plus index <head> and shared assets so timeline body edits never invalidate unchanged scenes', () => {
+  it('computes per-composition cache revisions from each file version plus transitive data-composition-src closure, index <head>, and shared assets', () => {
     const baseIndexHtml =
-      '<!DOCTYPE html><html><head><link rel="stylesheet" href="styles/theme.css"><script>window.__boot=1;</script></head>' +
-      '<body><div data-composition-src="compositions/s1.html" data-start="0" data-duration="5"></div></body></html>';
+      '<!DOCTYPE html><html><head><link rel="stylesheet" href="styles/theme.css"><script src="assets/gsap.min.js"></script><script>window.__boot=1;</script></head>' +
+      '<body><div data-composition-src="compositions/s1.html" data-start="0" data-duration="5"></div>' +
+      '<div data-composition-src="compositions/nested-parent.html" data-start="5" data-duration="5"></div></body></html>';
     const baseFiles = [
       { path: 'index.html', sha256: 'idx-1', blobScope: 'workspace' },
       { path: 'compositions/s1.html', sha256: 's1-aaaaaaaaaaaaaaaa', blobScope: 'workspace' },
       { path: 'compositions/s2.html', sha256: 's2-bbbbbbbbbbbbbbbb', blobScope: 'catalog' },
       { path: 'compositions/nested-parent.html', sha256: 'np-cccccccccccccccc', blobScope: 'workspace' },
+      { path: 'assets/gsap.min.js', sha256: 'gsap-1', blobScope: 'workspace' },
       { path: 'assets/hero.png', sha256: 'img-1', blobScope: 'workspace' },
       { path: 'styles/theme.css', sha256: 'css-1', blobScope: 'workspace' },
       { path: 'motion-project.json', sha256: 'meta-1', blobScope: 'workspace' },
     ];
     const comps = ['index.html', 'compositions/s1.html', 'compositions/s2.html', 'compositions/nested-parent.html'];
     const readText = (p: string): string | null => {
+      if (p === 'index.html') return baseIndexHtml;
       if (p === 'compositions/nested-parent.html') {
-        return '<div data-composition-src="compositions/s2.html"></div><script>/* dynamic */</script>';
+        return '<div data-composition-src="compositions/s2.html"></div><script>const tl = gsap.timeline({ paused: true });</script>';
       }
-      return '<div><script>/* dynamic */</script></div>';
+      return '<div><svg></svg><script>const tl = gsap.timeline({ paused: true }); tl.to("#a", { opacity: 1 });</script></div>';
     };
 
     const rev1 = computeCompositionRevisions(baseFiles, comps, baseIndexHtml, 'proj-rev-1', readText);
-    assert.ok(rev1['index.html']!.startsWith('"sha256:idx-1"|shared:'));
+    assert.ok(rev1['index.html']!.startsWith('"sha256:idx-1"|deps:'));
     assert.ok(rev1['compositions/s1.html']!.startsWith('"sha256:s1-aaaaaaaaaaaaaaaa"|shared:'));
     assert.ok(rev1['compositions/s2.html']!.startsWith('"sha256:s2-bbbbbbbbbbbbbbbb"|shared:'));
     assert.ok(rev1['compositions/nested-parent.html']!.startsWith('"sha256:np-cccccccccccccccc"|deps:'));
 
-    // Editing only s2.html updates s2.html and its nesting parent, while s1.html and index.html stay cached.
+    // Editing only s2.html updates s2.html, its nesting parent, and master index.html (transitive closure), while s1.html stays cached.
     const filesS2Edited = baseFiles.map((f) =>
       f.path === 'compositions/s2.html' ? { ...f, sha256: 'patch-id-2', blobScope: 'patch' } : f,
     );
     const rev2 = computeCompositionRevisions(filesS2Edited, comps, baseIndexHtml, 'proj-rev-2', readText);
     assert.equal(rev2['compositions/s1.html'], rev1['compositions/s1.html']);
-    assert.equal(rev2['index.html'], rev1['index.html']);
+    assert.notEqual(rev2['index.html'], rev1['index.html']);
     assert.ok(rev2['compositions/s2.html']!.startsWith('"patch:patch-id-2"|shared:'));
     assert.notEqual(rev2['compositions/s2.html'], rev1['compositions/s2.html']);
     assert.notEqual(rev2['compositions/nested-parent.html'], rev1['compositions/nested-parent.html']);
 
-    // Editing index.html <body> (moving/trimming/splitting clips, even with scripted <head>) updates ONLY index.html.
+    // Editing index.html <body> (moving/trimming/splitting clips, even with GSAP <script> in <head> and scenes) updates ONLY index.html.
     const movedBodyIndexHtml = baseIndexHtml.replace('data-start="0"', 'data-start="3"');
     const filesIndexBodyEdited = baseFiles.map((f) =>
       f.path === 'index.html' ? { ...f, sha256: 'idx-2', blobScope: 'patch' } : f,
     );
-    const rev3 = computeCompositionRevisions(filesIndexBodyEdited, comps, movedBodyIndexHtml, 'proj-rev-3', readText);
+    const readTextMoved = (p: string) => (p === 'index.html' ? movedBodyIndexHtml : readText(p));
+    const rev3 = computeCompositionRevisions(filesIndexBodyEdited, comps, movedBodyIndexHtml, 'proj-rev-3', readTextMoved);
     assert.equal(rev3['compositions/s1.html'], rev1['compositions/s1.html']);
     assert.equal(rev3['compositions/s2.html'], rev1['compositions/s2.html']);
     assert.equal(rev3['compositions/nested-parent.html'], rev1['compositions/nested-parent.html']);
     assert.notEqual(rev3['index.html'], rev1['index.html']);
-    assert.ok(rev3['index.html']!.startsWith('"patch:idx-2"|shared:'));
+    assert.ok(rev3['index.html']!.startsWith('"patch:idx-2"|deps:'));
 
-    // Editing non-preview metadata leaves every composition cached.
+    // Editing non-preview metadata leaves every composition (including index.html) cached.
     const filesMetaEdited = baseFiles.map((f) =>
       f.path === 'motion-project.json' ? { ...f, sha256: 'meta-2' } : f,
     );
     const revMeta = computeCompositionRevisions(filesMetaEdited, comps, baseIndexHtml, 'proj-rev-meta', readText);
+    assert.equal(revMeta['index.html'], rev1['index.html']);
     assert.equal(revMeta['compositions/s1.html'], rev1['compositions/s1.html']);
     assert.equal(revMeta['compositions/s2.html'], rev1['compositions/s2.html']);
 
@@ -363,6 +368,7 @@ describe('preview-thumbnail-capture embedded bridge script', () => {
       f.path === 'styles/theme.css' ? { ...f, sha256: 'css-2', blobScope: 'patch' } : f,
     );
     const revCss = computeCompositionRevisions(filesCssEdited, comps, baseIndexHtml, 'proj-rev-css', readText);
+    assert.notEqual(revCss['index.html'], rev1['index.html']);
     assert.notEqual(revCss['compositions/s1.html'], rev1['compositions/s1.html']);
     assert.notEqual(revCss['compositions/s2.html'], rev1['compositions/s2.html']);
 
@@ -375,13 +381,104 @@ describe('preview-thumbnail-capture embedded bridge script', () => {
 
     // Editing index.html <head> invalidates every composition cleanly.
     const editedHeadIndexHtml = baseIndexHtml.replace('</head>', '<style>.hero{color:red}</style></head>');
-    const revHead = computeCompositionRevisions(filesIndexBodyEdited, comps, editedHeadIndexHtml, 'proj-rev-head', readText);
+    const readTextEditedHead = (p: string) => (p === 'index.html' ? editedHeadIndexHtml : readText(p));
+    const revHead = computeCompositionRevisions(filesIndexBodyEdited, comps, editedHeadIndexHtml, 'proj-rev-head', readTextEditedHead);
     assert.notEqual(revHead['compositions/s1.html'], rev1['compositions/s1.html']);
     assert.notEqual(revHead['compositions/s2.html'], rev1['compositions/s2.html']);
 
     // Missing composition paths fall back cleanly to projectRevision.
     const revMissing = computeCompositionRevisions(baseFiles, [...comps, 'compositions/missing.html'], baseIndexHtml, 'proj-rev-5', readText);
     assert.equal(revMissing['compositions/missing.html'], 'proj-rev-5');
+  });
+
+  it('fails closed to projectRevision for dynamic runtime HTML fetches, embedded documents, unresolved refs, or unreadable sources while preserving GSAP siblings', () => {
+    const files = [
+      { path: 'index.html', sha256: 'idx-1', blobScope: 'workspace' },
+      { path: 'compositions/child-color.html', sha256: 'child-red', blobScope: 'workspace' },
+      { path: 'compositions/parent-scripted.html', sha256: 'parent-1', blobScope: 'workspace' },
+      { path: 'compositions/nested-dynamic.html', sha256: 'nested-1', blobScope: 'workspace' },
+      { path: 'compositions/unresolved-ref.html', sha256: 'unres-1', blobScope: 'workspace' },
+      { path: 'compositions/iframe-scene.html', sha256: 'iframe-1', blobScope: 'workspace' },
+      { path: 'compositions/gsap-sibling.html', sha256: 'gsap-1', blobScope: 'workspace' },
+    ];
+    const comps = files.map((f) => f.path);
+    const textByPath: Record<string, string> = {
+      'index.html':
+        '<!DOCTYPE html><html><head><script src="assets/gsap.min.js"></script></head>' +
+        '<body><div data-composition-src="compositions/parent-scripted.html"></div></body></html>',
+      'compositions/child-color.html': '<div style="background:red"></div>',
+      'compositions/parent-scripted.html':
+        '<div id="host"></div><script>fetch("compositions/child-color.html").then(r=>r.text());</script>',
+      'compositions/nested-dynamic.html':
+        '<div data-composition-src="compositions/parent-scripted.html"></div>',
+      'compositions/unresolved-ref.html':
+        '<div data-composition-src="compositions/does-not-exist.html"></div>',
+      'compositions/iframe-scene.html':
+        '<iframe src="compositions/child-color.html"></iframe>',
+      'compositions/gsap-sibling.html':
+        '<div><h1>Animated</h1><script>const tl = gsap.timeline({ paused: true }); tl.from("h1", { y: 20 });</script></div>',
+    };
+    const readText = (p: string) => textByPath[p] ?? null;
+
+    const revRed = computeCompositionRevisions(files, comps, textByPath['index.html']!, 'proj-red', readText);
+    assert.equal(revRed['index.html'], 'proj-red');
+    assert.equal(revRed['compositions/parent-scripted.html'], 'proj-red');
+    assert.equal(revRed['compositions/nested-dynamic.html'], 'proj-red');
+    assert.equal(revRed['compositions/unresolved-ref.html'], 'proj-red');
+    assert.equal(revRed['compositions/iframe-scene.html'], 'proj-red');
+    assert.ok(revRed['compositions/gsap-sibling.html']!.startsWith('"sha256:gsap-1"|shared:'));
+
+    // Editing child-color.html invalidates the fetching parent, nested-dynamic, and index.html while leaving gsap-sibling cached.
+    const blueFiles = files.map((f) =>
+      f.path === 'compositions/child-color.html' ? { ...f, sha256: 'child-blue' } : f,
+    );
+    const revBlue = computeCompositionRevisions(blueFiles, comps, textByPath['index.html']!, 'proj-blue', readText);
+    assert.equal(revBlue['compositions/parent-scripted.html'], 'proj-blue');
+    assert.notEqual(revBlue['compositions/parent-scripted.html'], revRed['compositions/parent-scripted.html']);
+    assert.equal(revBlue['compositions/nested-dynamic.html'], 'proj-blue');
+    assert.equal(revBlue['index.html'], 'proj-blue');
+    assert.equal(revBlue['compositions/gsap-sibling.html'], revRed['compositions/gsap-sibling.html']);
+
+    // Dynamic loader in index.html <head> forces every composition to projectRevision.
+    const dynamicHeadIndex =
+      '<html><head><script>fetch("compositions/child-color.html");</script></head><body></body></html>';
+    const revDynamicHead = computeCompositionRevisions(files, comps, dynamicHeadIndex, 'proj-head-dyn', readText);
+    for (const comp of comps) {
+      assert.equal(revDynamicHead[comp], 'proj-head-dyn');
+    }
+
+    // Without readText, fail closed to projectRevision for all compositions.
+    const revNoReader = computeCompositionRevisions(files, comps, textByPath['index.html']!, 'proj-no-reader');
+    for (const comp of comps) {
+      assert.equal(revNoReader[comp], 'proj-no-reader');
+    }
+  });
+
+  it('handles transitive and cyclic data-composition-src references deterministically without hanging', () => {
+    const files = [
+      { path: 'index.html', sha256: 'idx-1', blobScope: 'workspace' },
+      { path: 'compositions/cycle-a.html', sha256: 'ca-1', blobScope: 'workspace' },
+      { path: 'compositions/cycle-b.html', sha256: 'cb-1', blobScope: 'workspace' },
+      { path: 'compositions/other.html', sha256: 'other-1', blobScope: 'workspace' },
+    ];
+    const comps = files.map((f) => f.path);
+    const textByPath: Record<string, string> = {
+      'index.html': '<html><head></head><body><div data-composition-src="compositions/cycle-a.html"></div></body></html>',
+      'compositions/cycle-a.html': '<div data-composition-src="compositions/cycle-b.html"></div>',
+      'compositions/cycle-b.html': '<div data-composition-src="compositions/cycle-a.html"></div>',
+      'compositions/other.html': '<div>Unrelated</div>',
+    };
+    const readText = (p: string) => textByPath[p] ?? null;
+
+    const rev1 = computeCompositionRevisions(files, comps, textByPath['index.html']!, 'proj-1', readText);
+    const editedFiles = files.map((f) =>
+      f.path === 'compositions/cycle-b.html' ? { ...f, sha256: 'cb-2' } : f,
+    );
+    const rev2 = computeCompositionRevisions(editedFiles, comps, textByPath['index.html']!, 'proj-2', readText);
+    assert.notEqual(rev2['compositions/cycle-b.html'], rev1['compositions/cycle-b.html']);
+    assert.notEqual(rev2['compositions/cycle-a.html'], rev1['compositions/cycle-a.html']);
+    assert.notEqual(rev2['index.html'], rev1['index.html']);
+    assert.equal(rev2['compositions/other.html'], rev1['compositions/other.html']);
   });
 
   it('inlines decoded images to data URLs once and memoizes preview-asset fetches across multi-frame captures', async () => {

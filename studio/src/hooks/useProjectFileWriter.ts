@@ -13,13 +13,9 @@ import {
 } from "../utils/studioSaveDiagnostics";
 import { studioExpectedFileVersion, studioWriteHeaders } from "../utils/studioFileVersion";
 import { studioApiFetch } from "../utils/studioApiFetch";
+import { extractIndexHeadMarkup } from "../../../shared/preview-impact";
 import { trackStudioProjectSave } from "../utils/studioSaveState";
 import { updateCachedCompositionRevisions } from "../player/lib/clientCompositionCapture";
-
-function extractIndexHead(html: string | null | undefined): string {
-  if (!html) return "";
-  return /<head[^>]*>([\s\S]*?)<\/head>/i.exec(html)?.[1] ?? "";
-}
 
 export interface UseProjectFileWriterOptions {
   projectId: string | null;
@@ -89,7 +85,7 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
         if (saved) {
           fileVersions.set(path, saved.versions[path]);
           const indexHeadChanged =
-            path === "index.html" && extractIndexHead(source.content) !== extractIndexHead(content);
+            path === "index.html" && extractIndexHeadMarkup(source.content) !== extractIndexHeadMarkup(content);
           updateCachedCompositionRevisions(
             projectId,
             saved.versions,
@@ -159,7 +155,7 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
               const indexHeadChanged =
                 path === "index.html" &&
                 source != null &&
-                extractIndexHead(source.content) !== extractIndexHead(content);
+                extractIndexHeadMarkup(source.content) !== extractIndexHeadMarkup(content);
               updateCachedCompositionRevisions(
                 writeProjectId,
                 { [path]: currentVersion },
@@ -188,7 +184,7 @@ export function useProjectFileWriter({ projectId, onSavedContent }: UseProjectFi
           const indexHeadChanged =
             path === "index.html" &&
             source != null &&
-            extractIndexHead(source.content) !== extractIndexHead(content);
+            extractIndexHeadMarkup(source.content) !== extractIndexHeadMarkup(content);
           updateCachedCompositionRevisions(
             writeProjectId,
             { [path]: version },

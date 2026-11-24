@@ -4,6 +4,7 @@ import { decodedUrlPath } from '@hyperframes/parsers/asset-paths';
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { FONT_EXT } from '../../../shared/asset-names.ts';
+import { extractIndexHeadMarkup, NON_PREVIEW_FILES } from '../../../shared/preview-impact.ts';
 import { uploadTickets } from '../../db/schema/blobs-assets.ts';
 import { jobs } from '../../db/schema/jobs.ts';
 import type { FontMetadataEntry } from '../../services/asset-names-service.ts';
@@ -13,7 +14,7 @@ import {
   type StudioVariables,
 } from '../context.ts';
 import { infoInMemory } from '../engine/inspect.ts';
-import { formatFileVersion } from '../etag.ts';
+import { formatFileVersion, hashIndexHeadMarkup } from '../etag.ts';
 import {
   listVirtualCompositions,
   resolveVirtualPath,
@@ -21,15 +22,31 @@ import {
 } from '../virtual-project-store.ts';
 import { classifyPreviewProxyTarget } from '../../workers/media-ingest.ts';
 
-const NON_PREVIEW_SHARED_FILES = new Set(['motion-project.json', 'motion-assets.json', 'LICENSE', 'NOTICE.md']);
+// Detect inline runtime patterns that can load another HTML composition outside
+// static `data-composition-src` attributes (e.g. `fetch("compositions/child.html")`,
+// `XMLHttpRequest`, dynamic `import()`, or embedded `<iframe>`/`<object>`/`<embed>`).
+// Standard GSAP / Canvas / SVG animation `<script>` blocks and vendored `<script src>`
+// tags (whose files are already hashed into `sharedTag`) remain safely cacheable.
+const DYNAMIC_EMBED_TAG_RE = /<(?:iframe|object|embed)\b/i;
+const SCRIPT_BLOCK_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+const DYNAMIC_SCRIPT_LOAD_RE =
+  /\b(?:fetch|XMLHttpRequest|EventSource|WebSocket)\b|\bimport\s*\(|\.html?\b/i;
+const DYNAMIC_HANDLER_RE =
+  /\bon[a-z]+\s*=\s*(?:"[^"]*(?:fetch|XMLHttpRequest|import\s*\(|\.html?\b)[^"]*"|'[^']*(?:fetch|XMLHttpRequest|import\s*\(|\.html?\b)[^']*')/i;
 
-export function extractIndexHeadMarkup(indexHtml: string | null | undefined): string {
-  if (!indexHtml) return '';
-  return /<head[^>]*>([\s\S]*?)<\/head>/i.exec(indexHtml)?.[1] ?? '';
-}
-
-export function hashIndexHeadMarkup(indexHtml: string | null | undefined): string {
-  return createHash('sha256').update(extractIndexHeadMarkup(indexHtml)).digest('hex').slice(0, 12);
+function hasDynamicCompositionInputs(html: string): boolean {
+  if (DYNAMIC_EMBED_TAG_RE.test(html)) return true;
+  if (DYNAMIC_HANDLER_RE.test(html)) return true;
+  SCRIPT_BLOCK_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SCRIPT_BLOCK_RE.exec(html)) !== null) {
+    const attrs = match[1] ?? '';
+    const body = match[2] ?? '';
+    if (/\.html?\b/i.test(attrs) || (body && DYNAMIC_SCRIPT_LOAD_RE.test(body))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function resolveNestedCompositionRef(
@@ -48,24 +65,35 @@ function resolveNestedCompositionRef(
   return null;
 }
 
+/**
+ * Collect the transitive `data-composition-src` dependency closure for `rootComp`.
+ * Returns `null` (fail closed to `projectRevision`) when sources cannot be read,
+ * a `data-composition-src` reference cannot be resolved in the project file list,
+ * or markup contains dynamic document/runtime loading (e.g. `fetch(...)`, `import()`,
+ * `XMLHttpRequest`, or `<iframe>`).
+ */
 function collectNestedCompositionDeps(
   rootComp: string,
   byPath: ReadonlyMap<string, string>,
   readText?: (filePath: string) => string | null,
-): string[] {
-  if (!readText) return [];
+): string[] | null {
+  if (!readText) return null;
   const visited = new Set<string>([rootComp]);
   const queue: string[] = [rootComp];
   const deps: string[] = [];
   while (queue.length > 0) {
     const current = queue.shift()!;
     const html = readText(current);
-    if (!html || !/data-composition-src/i.test(html)) continue;
+    if (html === null) return null;
+    if (hasDynamicCompositionInputs(html)) return null;
+    if (!/data-composition-src/i.test(html)) continue;
     for (const tag of scanHtmlOpeningTags(html)) {
       const attr = tag.attributes.find((a) => a.name.toLowerCase() === 'data-composition-src');
-      if (!attr || attr.kind !== 'value') continue;
+      if (!attr) continue;
+      if (attr.kind !== 'value') return null;
       const target = resolveNestedCompositionRef(current, decodeAuthoredAttribute(attr.value), byPath);
-      if (!target || visited.has(target)) continue;
+      if (!target) return null;
+      if (visited.has(target)) continue;
       visited.add(target);
       deps.push(target);
       queue.push(target);
@@ -76,13 +104,16 @@ function collectNestedCompositionDeps(
 
 /**
  * Compute per-composition cache revisions combining each composition file's own
- * persisted content version (`formatFileVersion(blobScope, sha256)`) with a shared
- * render tag covering `index.html`'s `<head>` (ignoring `<body>` clip timing edits)
- * and non-composition shared project files (CSS, images, fonts, scripts).
+ * persisted content version (`formatFileVersion(blobScope, sha256)`) with its
+ * transitive `data-composition-src` closure (`|deps:`) and a shared render tag
+ * covering `index.html`'s `<head>` (ignoring `<body>` clip timing edits) and
+ * non-composition shared project files (CSS, images, fonts, scripts).
  *
  * Moving, trimming, or splitting clips in `index.html <body>` and editing sibling
  * compositions preserve untouched scenes' exact revision tokens across live edits
- * and page reloads, while shared CSS/asset/`<head>` edits invalidate cleanly.
+ * and page reloads, while shared CSS/asset/`<head>` edits invalidate cleanly and
+ * unreadable, unresolved, or dynamically-fetching compositions fail closed to
+ * `projectRevision`.
  */
 export function computeCompositionRevisions(
   fileList: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly blobScope?: string }>,
@@ -91,6 +122,8 @@ export function computeCompositionRevisions(
   projectRevision = '',
   readText?: (filePath: string) => string | null,
 ): Record<string, string> {
+  const indexHead = extractIndexHeadMarkup(indexHtml);
+  const headHasDynamicLoads = hasDynamicCompositionInputs(indexHead);
   const indexHeadHash = hashIndexHeadMarkup(indexHtml);
   const compSet = new Set(compositions);
   const byPath = new Map<string, string>();
@@ -103,7 +136,7 @@ export function computeCompositionRevisions(
         : 'workspace';
     const version = formatFileVersion(scope, file.sha256);
     byPath.set(file.path, version);
-    if (file.path !== 'index.html' && !compSet.has(file.path) && !NON_PREVIEW_SHARED_FILES.has(file.path)) {
+    if (file.path !== 'index.html' && !compSet.has(file.path) && !NON_PREVIEW_FILES.has(file.path)) {
       sharedHash.update(file.path);
       sharedHash.update(':');
       sharedHash.update(version);
@@ -111,14 +144,29 @@ export function computeCompositionRevisions(
     }
   }
   const sharedTag = `${indexHeadHash}:${sharedHash.digest('hex').slice(0, 12)}`;
+  const readCompositionText = readText
+    ? (filePath: string) => {
+        const text = readText(filePath);
+        if (text !== null) return text;
+        return filePath === 'index.html' ? indexHtml : null;
+      }
+    : undefined;
   const revisions: Record<string, string> = {};
   for (const comp of compositions) {
+    if (headHasDynamicLoads) {
+      revisions[comp] = projectRevision;
+      continue;
+    }
     const ownVersion = byPath.get(comp);
     if (!ownVersion) {
       revisions[comp] = projectRevision;
       continue;
     }
-    const nestedDeps = comp === 'index.html' ? [] : collectNestedCompositionDeps(comp, byPath, readText);
+    const nestedDeps = collectNestedCompositionDeps(comp, byPath, readCompositionText);
+    if (nestedDeps === null) {
+      revisions[comp] = projectRevision;
+      continue;
+    }
     if (nestedDeps.length === 0) {
       revisions[comp] = `${ownVersion}|shared:${sharedTag}`;
       continue;

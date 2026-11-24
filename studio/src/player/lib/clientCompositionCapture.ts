@@ -1,3 +1,4 @@
+import { NON_PREVIEW_FILES } from "../../../../shared/preview-impact";
 import { usePlayerStore } from "../store/playerStore";
 import { thumbnailRevisionOf } from "../store/thumbnailSlice";
 import {
@@ -125,7 +126,6 @@ let liveSharedDepSeq = 0;
 
 const SHARED_REV_MARKER = "|shared:";
 const DEPS_REV_MARKER = "|deps:";
-const NON_PREVIEW_SHARED_FILES = new Set(["motion-project.json", "motion-assets.json", "LICENSE", "NOTICE.md"]);
 
 function splitSharedRev(rev: string): { base: string; shared: string } {
   const idx = rev.indexOf(SHARED_REV_MARKER);
@@ -576,8 +576,12 @@ export function updateCachedCompositionRevisions(
   const isPreviewSharedNonHtml = (rawPath: string): boolean => {
     const key = normalizeCompositionPathForGate(rawPath);
     if (!key || key === "." || HTML_FILE_RE.test(key)) return false;
-    return !NON_PREVIEW_SHARED_FILES.has(key);
+    return !NON_PREVIEW_FILES.has(key);
   };
+
+  const projectRev = projectRevisionByProjectId.get(projectId) ?? "";
+  const isFailClosedRev = (rev: string | undefined): boolean =>
+    Boolean(rev && projectRev && rev === projectRev);
 
   let nonHtmlSharedChanged = false;
   if (fileVersions) {
@@ -621,6 +625,7 @@ export function updateCachedCompositionRevisions(
     projectSharedTagByProjectId.set(projectId, activeSharedTag);
     if (perComp) {
       for (const [compKey, existingRev] of perComp) {
+        if (isFailClosedRev(existingRev)) continue;
         const { base } = splitSharedRev(existingRev);
         const rewritten = joinSharedRev(base, activeSharedTag);
         if (rewritten !== existingRev) {
@@ -646,6 +651,10 @@ export function updateCachedCompositionRevisions(
           compositionRevisionsByProjectId.set(projectId, perComp);
         }
         const existingRev = perComp.get(key);
+        if (isFailClosedRev(existingRev)) {
+          if (key !== "index.html") editedSubComps.add(key);
+          continue;
+        }
         const existingDepsIdx = existingRev ? splitSharedRev(existingRev).base.indexOf(DEPS_REV_MARKER) : -1;
         const existingDepsSuffix =
           existingRev && existingDepsIdx >= 0 ? splitSharedRev(existingRev).base.slice(existingDepsIdx) : "";
@@ -726,13 +735,18 @@ function resolveCompositionRevision(
   projectId: string,
   compPathOrUrl: string,
 ): { rev: string; hasFileVersion: boolean } {
+  const projectRev = projectRevisionByProjectId.get(projectId) ?? "";
   const perComp = compositionRevisionsByProjectId.get(projectId);
   if (perComp) {
     const normalized = normalizeCompositionPathForGate(compPathOrUrl);
     const exact = perComp.get(normalized);
-    if (exact) return { rev: exact, hasFileVersion: true };
+    if (exact) {
+      // Fail-closed compositions equal to `projectRevision` must keep tracking live
+      // session `contentRevision` bumps so edits invalidate them before reload.
+      return { rev: exact, hasFileVersion: !projectRev || exact !== projectRev };
+    }
   }
-  return { rev: projectRevisionByProjectId.get(projectId) ?? "", hasFileVersion: false };
+  return { rev: projectRev, hasFileVersion: false };
 }
 
 export function canCaptureCompositionInBrowser(): boolean {

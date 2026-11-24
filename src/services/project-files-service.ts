@@ -8,7 +8,6 @@ import type { AuthContext } from '../contracts/auth.ts';
 import { CloudError } from '../contracts/errors.ts';
 import type { ProjectEvent } from '../contracts/events.ts';
 import { htmlFileVersions } from './event-file-versions.ts';
-import { hashIndexHeadMarkup } from '../studio/routes/projects.ts';
 import type { BlobMetadata, BlobScope, PresignGetOptions, StoragePort } from '../contracts/storage.ts';
 import { applyWorkspaceBlobRefDeltas, withBlobGcRetry, type BlobRefDelta } from '../db/cas.ts';
 import type { Database, DbExecutor } from '../db/client.ts';
@@ -40,6 +39,7 @@ import {
   DELETED_VERSION,
   formatFileVersion,
   getMimeType,
+  hashIndexHeadMarkup,
   sha256Hex,
 } from '../studio/etag.ts';
 import {

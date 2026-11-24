@@ -1360,13 +1360,13 @@ describe("external file change coordinator", () => {
 
     it("propagates persisted HTML fileVersions, indexHeadHash, and shared CSS/asset invalidation from SSE into clientCompositionCapture", async () => {
       setCachedProjectRevision("project-a", "proj-rev-1", {
-        "index.html": '"sha256:idx-1"|shared:111111111111:222222222222',
+        "index.html": '"sha256:idx-1"|deps:dddddddddddd|shared:111111111111:222222222222',
         "compositions/intro.html": '"sha256:intro-1"|shared:111111111111:222222222222',
         "compositions/outro.html": '"sha256:outro-1"|shared:111111111111:222222222222',
       });
       await mountCoordinator();
 
-      // Own write echo for index.html <body> (same indexHeadHash) updates only index.html while preserving |shared:.
+      // Own write echo for index.html <body> (same indexHeadHash) updates only index.html while preserving |deps: and |shared:.
       markStudioWriteToken("tok-timeline-move");
       await act(async () =>
         handler?.({
@@ -1379,11 +1379,11 @@ describe("external file change coordinator", () => {
           fileTreeChanged: false,
         }),
       );
-      expect(getCompositionCacheRevision("project-a", "index.html")).toBe('"patch:idx-2"|shared:111111111111:222222222222');
+      expect(getCompositionCacheRevision("project-a", "index.html")).toBe('"patch:idx-2"|deps:dddddddddddd|shared:111111111111:222222222222');
       expect(getCompositionCacheRevision("project-a", "compositions/intro.html")).toBe('"sha256:intro-1"|shared:111111111111:222222222222');
       expect(getCompositionCacheRevision("project-a", "compositions/outro.html")).toBe('"sha256:outro-1"|shared:111111111111:222222222222');
 
-      // External edit / undo for compositions/intro.html updates only intro.html and keeps the exact shared suffix.
+      // External edit / undo for compositions/intro.html updates intro.html and rotates index.html's |deps: while keeping outro.html warm.
       await act(async () =>
         handler?.({
           projectId: "project-a",
@@ -1395,6 +1395,7 @@ describe("external file change coordinator", () => {
       );
       expect(getCompositionCacheRevision("project-a", "compositions/intro.html")).toBe('"patch:intro-2"|shared:111111111111:222222222222');
       expect(getCompositionCacheRevision("project-a", "compositions/outro.html")).toBe('"sha256:outro-1"|shared:111111111111:222222222222');
+      expect(getCompositionCacheRevision("project-a", "index.html")).not.toBe('"patch:idx-2"|deps:dddddddddddd|shared:111111111111:222222222222');
 
       // Editing index.html <head> rotates indexHeadHash across every composition immediately.
       await act(async () =>

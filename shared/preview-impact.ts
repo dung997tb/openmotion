@@ -37,7 +37,18 @@ const PREVIEW_AFFECTING_EXT = new Set([
   '.frag',
 ]);
 
-const NON_PREVIEW_FILES = new Set(['motion-project.json', 'motion-assets.json', 'LICENSE', 'NOTICE.md']);
+export const NON_PREVIEW_FILES: ReadonlySet<string> = new Set([
+  'motion-project.json',
+  'motion-assets.json',
+  'LICENSE',
+  'NOTICE.md',
+]);
+
+/** Extract the inner `<head>...</head>` markup from `index.html` (empty string when absent). */
+export function extractIndexHeadMarkup(indexHtml: string | null | undefined): string {
+  if (!indexHtml) return '';
+  return /<head[^>]*>([\s\S]*?)<\/head>/i.exec(indexHtml)?.[1] ?? '';
+}
 
 export interface PreviewImpact {
   affectsPreview: boolean;

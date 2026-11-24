@@ -21,8 +21,12 @@ import { projects } from '../db/schema/projects.ts';
 import { projectChannel } from '../infra/redis.ts';
 import { workspaceBlobKey } from '../infra/storage.ts';
 import { computeProjectRevision, isSha256Hex, isTextProjectPath, isUuid } from '../../shared/project-validation.ts';
-import { computePreviewImpact, createWriteToken, formatFileVersion } from '../studio/etag.ts';
-import { hashIndexHeadMarkup } from '../studio/routes/projects.ts';
+import {
+  computePreviewImpact,
+  createWriteToken,
+  formatFileVersion,
+  hashIndexHeadMarkup,
+} from '../studio/etag.ts';
 import { htmlFileVersions } from './event-file-versions.ts';
 import {
   DEFAULT_HISTORY_COALESCE_WINDOW_MS,
