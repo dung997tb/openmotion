@@ -46,3 +46,17 @@ it('falls back for wholesale rewrites and very dense line tokenization', () => {
   const dense = '<i/>\n'.repeat(30000);
   assert.equal(createTextPatch('a\n' + dense + 'b', 'c\n' + dense + 'd'), null);
 });
+
+it('sends a localized 300 KiB edit in a multi-megabyte file as a patch', () => {
+  const before = 'a'.repeat(5 * 1024 * 1024);
+  const offset = 2 * 1024 * 1024;
+  const replacement = 'b'.repeat(300 * 1024);
+  for (const removed of [0, replacement.length]) {
+    const after = before.slice(0, offset) + replacement + before.slice(offset + removed);
+    const patch = createTextPatch(before, after);
+    assert.ok(patch);
+    assert.equal(patch.length, 1);
+    assert.ok(Buffer.byteLength(JSON.stringify(patch)) < 301 * 1024);
+    assert.equal(applyTextPatch(before, patch), after);
+  }
+});
