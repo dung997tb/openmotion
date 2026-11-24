@@ -13,6 +13,7 @@ import { GITHUB_REPOSITORY } from './githubRepository';
 import { notifyProvidersChanged } from './useProviderDirectory';
 import { activeAccountOffer, MULTIMODAL_CAPABILITIES } from './accountOffer';
 import { SettingsError, SettingsLoading } from './settingsPrimitives';
+import { useShownStudioTheme } from '../utils/studioTheme';
 // Same watercolor as the OpenDesign console plan card (AMR seats-plan-background), so both surfaces match.
 import planCardBackground from './scene-art/plan-card-background.webp';
 
@@ -221,22 +222,40 @@ function formatUsd(value: string | null | undefined) {
 /** Plan card and pay-as-you-go credits, laid out like the OpenDesign console dashboard. */
 function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary; upgradable: boolean; open: (element: SubscriptionElement) => void }) {
   const { t, locale } = useI18n(), usage = account.usage!;
+  // Light mode matches the OpenDesign console plan card; dark mode keeps the Studio card.
+  const console = useShownStudioTheme() === 'light';
   const planName = !account.plan || account.plan === 'free' ? t('Free plan') : account.plan.charAt(0).toUpperCase() + account.plan.slice(1);
   const periodEnd = usage.periodEnd && Number.isFinite(Date.parse(usage.periodEnd)) ? new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(usage.periodEnd)) : undefined;
-  return <section className="om-card om-plan-usage">
-    <div className="om-plan-usage-head" style={{ backgroundImage: `linear-gradient(#ffffff45, #ffffff45), url(${planCardBackground})` }}>
-      <div className="om-plan-usage-identity">
-        <h2>{planName}</h2>
-        <p>{periodEnd && <span>{t('Current period ends {date}', { date: periodEnd })}</span>}
-          <Button variant="plain" className="om-plan-usage-link" onClick={() => open('open_console')}>{t('Go to console')}</Button></p>
+  const period = periodEnd && t('Current period ends {date}', { date: periodEnd });
+  const upgrade = upgradable && (console
+    ? <Button variant="plain" className="om-plan-usage-upgrade" onClick={() => open('view_plans')}><RemixIcon name="sparkling-fill" size={14} />{t('Upgrade')}</Button>
+    : <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('view_plans')}><RemixIcon name="sparkling-line" size={16} />{t('Upgrade')}</Button>);
+  return <section className="om-card om-plan-usage" data-look={console ? 'console' : 'studio'}>
+    {console
+      ? <div className="om-plan-usage-head" style={{ backgroundImage: `linear-gradient(#ffffff45, #ffffff45), url(${planCardBackground})` }}>
+        <div className="om-plan-usage-identity">
+          <h2>{planName}</h2>
+          <p>{period && <span>{period}</span>}<Button variant="plain" className="om-plan-usage-link" onClick={() => open('open_console')}>{t('Go to console')}</Button></p>
+        </div>
+        {upgrade}
       </div>
-      {upgradable && <Button variant="plain" className="om-plan-usage-upgrade" onClick={() => open('view_plans')}><RemixIcon name="sparkling-fill" size={14} />{t('Upgrade')}</Button>}
-    </div>
+      : <div className="om-plan-usage-head">
+        <div className="om-plan-usage-identity">
+          <h2>{planName}</h2>
+          {period && <p>{period}</p>}
+        </div>
+        <div className="om-settings-actions">
+          <Button variant="ghost" className="om-button h-auto om-plan-usage-console" onClick={() => open('open_console')}>{t('Go to console')}<RemixIcon name="external-link-line" size={15} /></Button>
+          {upgrade}
+        </div>
+      </div>}
     <div className="om-plan-usage-quotas">
       <div className="om-plan-usage-quota" data-quota="pay-as-you-go">
         <div className="om-settings-row"><h3 className="om-subtitle">{t('Pay-as-you-go credits')}</h3>{usage.autoRecharge !== undefined && <span className="om-badge">{t(usage.autoRecharge ? 'Auto top-up on' : 'Auto top-up off')}</span>}</div>
         <div className="om-plan-usage-figure"><strong>{formatUsd(usage.payAsYouGoUsd)}</strong>
-          <Button variant="plain" className="om-plan-usage-recharge" onClick={() => open('recharge')}>{t('Top up')}</Button></div>
+          {console
+            ? <Button variant="plain" className="om-plan-usage-recharge" onClick={() => open('recharge')}>{t('Top up')}</Button>
+            : <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('recharge')}>{t('Top up')}<RemixIcon name="external-link-line" size={15} /></Button>}</div>
       </div>
     </div>
   </section>;
