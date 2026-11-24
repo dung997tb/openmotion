@@ -164,10 +164,10 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
     if (!activeCaseId || !hub?.cases) return;
     const found = hub.cases.find(item => item.id === activeCaseId);
     if (found) {
-      setLightboxPrompt(t(found.prompt));
+      setLightboxPrompt(locale === 'zh-CN' && found.promptZh ? found.promptZh : t(found.prompt));
       setCopiedPrompt(false);
     }
-  }, [activeCaseId, hub, t]);
+  }, [activeCaseId, hub, locale, t]);
   useEffect(() => {
     if (!activeCaseId || !hub?.cases) return;
     const pool = hub.cases.filter(item => selectedTag === 'all' || item.tag === selectedTag);
@@ -258,7 +258,7 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
   };
 
   const launchShowcaseRemix = (item: HubShowcaseCase, promptOverride?: string) => {
-    const prompt = (promptOverride ?? t(item.prompt)).trim();
+    const prompt = (promptOverride ?? (locale === 'zh-CN' && item.promptZh ? item.promptZh : t(item.prompt))).trim();
     const aspect = aspectRatioLabel(item.aspectRatio);
     const modality = item.destination.scene.modality;
     const draft: AssetDraft = {
