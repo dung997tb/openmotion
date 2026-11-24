@@ -9,10 +9,12 @@ import { useStudioShellContext, useStudioPlaybackContext } from '../contexts/Stu
 import { captionTrackCode, captionTrackText, useCaptionWorkspace, type CaptionMode } from './captionWorkspace';
 import { useCaptionTracks } from './useCaptionTracks';
 import { useCaptionSurfaceActive } from './useCaptionSurfaceActive';
+import { useTranscriptServiceAvailable } from './useTranscriptServiceAvailable';
 
 export function TimelineCaptionsMenu() {
   const { t } = useI18n();
   const visible = useCaptionSurfaceActive('timeline');
+  const transcriptServiceAvailable = useTranscriptServiceAvailable();
   const { projectId, activeCompPath } = useStudioShellContext();
   const { timelineElements, refreshKey } = useStudioPlaybackContext();
   const { tracks, loading, failed, refresh, change, toggle, disabled } = useCaptionTracks(visible, refreshKey);
@@ -31,7 +33,7 @@ export function TimelineCaptionsMenu() {
         <IconButton aria-label={t(track.settings.visible ? 'Hide {track}' : 'Show {track}', { track: label(track) })} disabled={disabled || track.locked} aria-pressed={track.settings.visible} icon={<RemixIcon name={track.settings.visible ? 'eye-line' : 'eye-off-line'} size={14} />} onClick={() => void change(track.id, { visible: !track.settings.visible })} />
       </div>)}
       <div className="flex flex-col gap-1 border-t border-border pt-2">
-        <Button size="sm" variant="ghost" className="justify-start" onClick={() => go('auto')}><RemixIcon name="closed-captioning-line" size={14} />{t('Auto captions')}</Button>
+        {transcriptServiceAvailable && <Button size="sm" variant="ghost" className="justify-start" onClick={() => go('auto')}><RemixIcon name="closed-captioning-line" size={14} />{t('Auto captions')}</Button>}
         <Button size="sm" variant="ghost" className="justify-start" onClick={() => go('manual')}><RemixIcon name="text" size={14} />{t('Add captions')}</Button>
       </div>
     </div>

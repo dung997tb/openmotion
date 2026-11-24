@@ -6,12 +6,12 @@ import { useWorkspaceChrome } from './WorkspaceChromeContext';
 import { preloadWorkspacePage, type LazyPageKey } from '../router/lazyPages';
 
 export function WorkspaceResourceActions({ onBrandKit, brandKitOpen = false, closeMenu }: {
-  onBrandKit: () => void; brandKitOpen?: boolean; closeMenu?: () => void;
+  onBrandKit?: () => void; brandKitOpen?: boolean; closeMenu?: () => void;
 }) {
   const { t } = useI18n();
   const { openAssets, assetsOpen } = useWorkspaceChrome();
   const actions: Array<{ label: string; icon: string; active: boolean; open: () => void; preload: LazyPageKey }> = [
-    { label: t('Brand Kit'), icon: brandKitOpen ? 'palette-fill' : 'palette-line', active: brandKitOpen, open: onBrandKit, preload: 'brandKit' },
+    ...(onBrandKit ? [{ label: t('Brand Kit'), icon: brandKitOpen ? 'palette-fill' : 'palette-line', active: brandKitOpen, open: onBrandKit, preload: 'brandKit' as const }] : []),
     { label: t('Workspace assets'), icon: assetsOpen ? 'folder-open-fill' : 'folder-line', active: assetsOpen, open: openAssets, preload: 'assets' },
   ];
   return actions.map(({ label, icon, active, open, preload }) => {

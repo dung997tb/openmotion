@@ -1,7 +1,7 @@
-import { MVP_PANEL_IDS } from "./dock/panelRegistry";
+import { MVP_PANEL_IDS, PANEL_IDS } from "./dock/panelRegistry";
 import { failPendingAssetPreviews } from "../player/store/pendingAssetDrops";
 import { useI18n } from "../i18n/I18n";
-import { memo, useCallback, type ReactNode } from "react";
+import { memo, useCallback, useMemo, type ReactNode } from "react";
 import { matchesKey } from "../player/components/studioShortcuts";
 import { PreviewPane } from "./nle/PreviewPane";
 import { TimelinePane } from "./nle/TimelinePane";
@@ -25,6 +25,7 @@ import type { TimelineDropPlacement } from "../player/components/timelineCallbac
 import type { TimelineProps } from "../player/components/TimelineTypes";
 import { Dock } from "./dock/Dock";
 import { useStudioHost } from "../motion/StudioHost";
+import { useCloudFeatureEnabled } from "../utils/cloudFeatures";
 
 type RenderClipContent = (
   element: TimelineElement,
@@ -294,6 +295,13 @@ function EditorShellBody({
   const { t } = useI18n();
   const { compositionStack, updateCompositionStack, containerRef } = useNLEContext();
   const host = useStudioHost();
+  const asrEnabled = useCloudFeatureEnabled("asr");
+  const reviewCommentsEnabled = useCloudFeatureEnabled("reviewComments");
+  const dockPanels = useMemo(() => {
+    const base = host?.mvpEditor ? MVP_PANEL_IDS : PANEL_IDS;
+    if (asrEnabled && reviewCommentsEnabled) return host?.mvpEditor ? MVP_PANEL_IDS : undefined;
+    return base.filter(id => (asrEnabled || id !== "transcript") && (reviewCommentsEnabled || id !== "comments"));
+  }, [host?.mvpEditor, asrEnabled, reviewCommentsEnabled]);
   // The workspace sidebar and conversation are outside this editor's geometry.
   // A mounted editor hidden by settings has zero width. Keep that signal so the
   // dock suspends fitting instead of treating the whole window as editor space.
@@ -328,7 +336,7 @@ function EditorShellBody({
       <Dock.Root
         projectId={projectId}
         dockWidth={dockWidth}
-        panels={host?.mvpEditor ? MVP_PANEL_IDS : undefined}
+        panels={dockPanels}
         storageKey={host?.mvpEditor ? "motion.mvp.dock.v1" : undefined}
         fixedLayout={host?.mvpEditor}
         initialCompactLayout={host?.mvpEditor}
