@@ -57,11 +57,11 @@
   color: var(--motion-mcp-dock-ink);
   font-weight: var(--motion-weight-semibold);
 }
-.om-mcp-client-indicator {
+.om-mcp-tab-indicator {
   border-radius: var(--motion-radius-full);
   background: var(--motion-mcp-dock-active);
 }
-[data-motion-studio] .om-mcp-client-dock:has(.om-mcp-client-indicator:not([hidden])) .om-mcp-client-tab[aria-selected=true] {
+[data-motion-studio] :is(.om-mcp-client-dock, .om-mcp-carousel-tabs):has(.om-mcp-tab-indicator:not([hidden])) [role=tab][aria-selected=true] {
   background: transparent;
 }
 [data-motion-studio] .om-mcp-client-ico { color: var(--motion-mcp-dock-ink); }
@@ -196,7 +196,7 @@
   font-weight: var(--motion-weight-medium);
 }
 [data-motion-studio] .om-mcp-carousel-tab:hover { color: var(--motion-strong); background: var(--motion-mcp-dock-hover); }
-[data-motion-studio] .om-mcp-carousel-tab[data-active] {
+[data-motion-studio] .om-mcp-carousel-tab[aria-selected=true] {
   color: var(--motion-strong);
   font-weight: var(--motion-weight-semibold);
   background: var(--motion-mcp-dock-active);
@@ -237,7 +237,10 @@
   font-weight: var(--motion-weight-semibold);
   box-shadow: var(--motion-shadow-md);
 }
-[data-motion-studio] .om-mcp-carousel-primary:hover { background: var(--motion-mcp-stage-action-hover); transform: translateY(-1px); }
+[data-motion-studio] .om-mcp-carousel-primary:not([data-copied]):hover {
+  background: var(--motion-mcp-stage-action-hover);
+  color: var(--motion-mcp-stage-on-action);
+}
 [data-motion-studio] .om-mcp-carousel-primary[data-copied] { background: var(--motion-brand); color: var(--motion-mcp-stage-on-action); }
 [data-motion-studio] .om-mcp-carousel-nav {
   border-radius: var(--motion-radius-full);
@@ -387,10 +390,17 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .om-mcp-client-dock:not(:has(.om-mcp-client-tab:focus-visible)) .om-mcp-client-indicator {
+  :is(.om-mcp-client-dock, .om-mcp-carousel-tabs):not(:has([role=tab]:focus-visible)) .om-mcp-tab-indicator {
     transition: transform var(--motion-duration-normal) var(--motion-ease-out), width var(--motion-duration-normal) var(--motion-ease-out);
   }
-  [data-motion-studio] .om-mcp-btn-primary { transition: background-color var(--motion-duration-fast) var(--motion-ease-out); }
+  [data-motion-studio] :is(.om-mcp-btn-primary, .om-mcp-carousel-primary) { transition: background-color var(--motion-duration-fast) var(--motion-ease-out); }
+  .om-mcp-manual-reveal:not([hidden]) {
+    display: flow-root;
+    overflow: clip;
+    height: var(--collapsible-panel-height);
+    transition: height var(--motion-duration-normal) var(--motion-ease-out), opacity var(--motion-duration-fast) var(--motion-ease-out);
+  }
+  .om-mcp-manual-reveal:is([data-starting-style], [data-ending-style]) { height: 0; opacity: 0; }
   .om-mcp-pillar h3 { transition: color var(--motion-duration-normal) var(--motion-ease-out); }
   [data-motion-studio] .om-mcp-stage-steps:not(:has(.om-mcp-stage-step:focus-visible)) .om-mcp-stage-step {
     transition: background-color var(--motion-duration-normal) var(--motion-ease-out);

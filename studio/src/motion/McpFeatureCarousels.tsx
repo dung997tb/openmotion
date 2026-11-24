@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { useEffect, useRef, useState } from 'react';
-import { Tab, TabPanel, Tabs, TabsList } from '../components/ui/Tabs';
+import { Tab, TabPanel, Tabs, TabsIndicator, TabsList } from '../components/ui/Tabs';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { McpCopyFallback } from './McpCopyFallback';
@@ -92,10 +92,11 @@ function FeatureModuleCarousel({
 
       <TabsList className="om-mcp-carousel-tabs bg-transparent p-0" aria-label={moduleTitle}>
         {slides.map(slide => (
-          <Tab key={slide.id} value={slide.id} className="om-mcp-carousel-tab" data-active={slide.id === current.id || undefined}>
+          <Tab key={slide.id} value={slide.id} className="om-mcp-carousel-tab">
             <span>{locale === 'zh-CN' ? slide.content['zh-CN'].tabLabel : t(slide.content.en.tabLabel)}</span>
           </Tab>
         ))}
+        <TabsIndicator className="om-mcp-tab-indicator" aria-hidden="true" />
       </TabsList>
 
       <TabPanel value={current.id} className="om-mcp-carousel-viewport">

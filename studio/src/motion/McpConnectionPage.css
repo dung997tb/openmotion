@@ -35,7 +35,7 @@
 .om-mcp-client-viewport { overflow-x: auto; max-width: 100%; }
 .om-mcp-client-dock { position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 4px; padding: 4px; width: max-content; }
 .om-mcp-client-tab { position: relative; z-index: 1; height: 36px; padding-inline: 13px; display: inline-flex; align-items: center; gap: 7px; flex: none; white-space: nowrap; }
-.om-mcp-client-indicator {
+.om-mcp-tab-indicator {
   position: absolute;
   inset: 0 auto auto 0;
   width: var(--active-tab-width);
@@ -113,8 +113,8 @@
 .om-mcp-carousel-modules { display: flex; flex-direction: column; gap: 100px; }
 .om-mcp-carousel-module { scroll-margin-top: 84px; display: flex; flex-direction: column; align-items: center; }
 .om-mcp-carousel-head { text-align: center; margin-bottom: 20px; }
-.om-mcp-carousel-tabs { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
-.om-mcp-carousel-tab { display: inline-flex; align-items: center; height: 38px; padding-inline: 15px; white-space: nowrap; }
+.om-mcp-carousel-tabs { position: relative; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+.om-mcp-carousel-tab { position: relative; z-index: 1; display: inline-flex; align-items: center; height: 38px; padding-inline: 15px; white-space: nowrap; }
 .om-mcp-carousel-viewport {
   position: relative;
   width: 100cqi;

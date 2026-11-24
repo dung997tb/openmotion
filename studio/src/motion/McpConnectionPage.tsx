@@ -1,5 +1,6 @@
+import { Collapsible } from '@base-ui/react/collapsible';
 import { Button } from 'open-design-ui/button';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { manualConnection, setupGuideUrl, setupPrompt, transcriptExamplePrompt, type IntegrationInfo } from '../../../shared/integration';
 import { reviewCommentsPrompt } from '../../../shared/review-comments';
 import { findScenario, scenarioAgentPrompt } from '../../../shared/scenarios';
@@ -98,6 +99,7 @@ export function McpConnectionPage({
   const client = clients.find(item => item.id === clientId) ?? clients[0];
   const clientKey = client.id as tracking.McpClient;
   const manualOpen = setupMode === 'manual';
+  const manualPanelId = useId();
   const desktop = client.id === 'desktop';
   const agent = t(client.name);
   const feedback = setupResult?.clientId === client.id ? setupResult : null;
@@ -352,7 +354,7 @@ export function McpConnectionPage({
                   <span>{t(item.name)}</span>
                 </Tab>
               ))}
-              <TabsIndicator className="om-mcp-client-indicator" aria-hidden="true" />
+              <TabsIndicator className="om-mcp-tab-indicator" aria-hidden="true" />
             </TabsList>
           </HorizontalRail>
         </div>
@@ -401,6 +403,7 @@ export function McpConnectionPage({
                     className="om-mcp-btn-primary"
                     aria-label={primaryCtaLabel}
                     aria-expanded={desktop ? manualOpen : undefined}
+                    aria-controls={desktop ? manualPanelId : undefined}
                     data-copied={setupCopied || undefined}
                     onClick={() => void handlePrimarySetup()}
                   >
@@ -412,6 +415,7 @@ export function McpConnectionPage({
                       variant="plain"
                       className="om-mcp-btn-secondary"
                       aria-expanded={manualOpen}
+                      aria-controls={manualPanelId}
                       onClick={handleToggleManual}
                     >
                       {t('Manual setup')}
@@ -432,57 +436,59 @@ export function McpConnectionPage({
                   </div>
                 )}
 
-                {manualOpen && (
-                  <div className="om-mcp-manual-pop">
-                    {failed ? (
-                      <SettingsError retry={retry} />
-                    ) : !info ? (
-                      <SettingsLoading />
-                    ) : (
-                      <McpManualConfiguration
-                        key={client.id}
-                        host={client.host}
-                        value={manual}
-                        onCopy={value => copy(value, { kind: 'manual_config' })}
-                      >
-                        <a
-                          className="om-mcp-manual-link"
-                          href={`/connect/config?host=${client.host}`}
-                          download
-                          onClick={() => click('mcp_setup', 'download_config', { setup_method: 'manual' })}
+                <Collapsible.Root open={manualOpen}>
+                  <Collapsible.Panel id={manualPanelId} className="om-mcp-manual-reveal" inert={!manualOpen}>
+                    <div className="om-mcp-manual-pop">
+                      {failed ? (
+                        <SettingsError retry={retry} />
+                      ) : !info ? (
+                        <SettingsLoading />
+                      ) : (
+                        <McpManualConfiguration
+                          key={client.id}
+                          host={client.host}
+                          value={manual}
+                          onCopy={value => copy(value, { kind: 'manual_config' })}
                         >
-                          {t('Download configuration')}
-                        </a>
-                        <a
-                          className="om-mcp-manual-link"
-                          href={setupGuideUrl(info)}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={() => click('mcp_setup', 'connection_guide', { setup_method: 'manual' })}
-                        >
-                          <span>{t('Connection guide')}</span>
-                          <RemixIcon name="arrow-right-up-line" size={14} />
-                        </a>
-                      </McpManualConfiguration>
-                    )}
+                          <a
+                            className="om-mcp-manual-link"
+                            href={`/connect/config?host=${client.host}`}
+                            download
+                            onClick={() => click('mcp_setup', 'download_config', { setup_method: 'manual' })}
+                          >
+                            {t('Download configuration')}
+                          </a>
+                          <a
+                            className="om-mcp-manual-link"
+                            href={setupGuideUrl(info)}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={() => click('mcp_setup', 'connection_guide', { setup_method: 'manual' })}
+                          >
+                            <span>{t('Connection guide')}</span>
+                            <RemixIcon name="arrow-right-up-line" size={14} />
+                          </a>
+                        </McpManualConfiguration>
+                      )}
 
-                    {client.host === 'deepseek' && (
-                      <div className="om-mcp-manual-note">
-                        <span>{t('Optional: embed the Studio editor right inside DeepSeek Harness with the standalone host plugin (remove the plain MCP entry above first).')}</span>
-                        <a href={DSH_PLUGIN_URL} target="_blank" rel="noreferrer">
-                          <span>{t('DSH workspace plugin')}</span>
-                          <RemixIcon name="arrow-right-up-line" size={14} />
-                        </a>
-                      </div>
-                    )}
+                      {client.host === 'deepseek' && (
+                        <div className="om-mcp-manual-note">
+                          <span>{t('Optional: embed the Studio editor right inside DeepSeek Harness with the standalone host plugin (remove the plain MCP entry above first).')}</span>
+                          <a href={DSH_PLUGIN_URL} target="_blank" rel="noreferrer">
+                            <span>{t('DSH workspace plugin')}</span>
+                            <RemixIcon name="arrow-right-up-line" size={14} />
+                          </a>
+                        </div>
+                      )}
 
-                    {client.id === 'desktop' && (
-                      <div className="om-mcp-manual-note">
-                        <span>{t('Note: Claude Desktop has no local terminal access — keep your local OpenDesign service running before merging this JSON.')}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      {client.id === 'desktop' && (
+                        <div className="om-mcp-manual-note">
+                          <span>{t('Note: Claude Desktop has no local terminal access — keep your local OpenDesign service running before merging this JSON.')}</span>
+                        </div>
+                      )}
+                    </div>
+                  </Collapsible.Panel>
+                </Collapsible.Root>
               </>
             )}
           </section>
