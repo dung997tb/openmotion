@@ -4502,6 +4502,15 @@
   object-fit: cover;
 }
 
+/* Portrait people shots: crop from the upper part so the whole face stays in the card. */
+.om-studio-output-art .om-scenario-thumb img,
+.om-studio-output-art > img,
+.om-studio-output-item .om-scenario-thumb img,
+.om-studio-output-post-media img {
+  object-fit: cover;
+  object-position: 50% 18%;
+}
+
 .om-studio-output[data-output-state="waiting"] .om-studio-output-art > img {
   opacity: 0.55;
   filter: grayscale(0.4);
