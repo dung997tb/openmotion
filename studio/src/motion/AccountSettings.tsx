@@ -51,12 +51,6 @@ export function SignInGuide({ action }: { action: ReactNode }) {
 
 type UpgradeGuideProps = { plan: 'free' | 'go'; subscription: ReturnType<typeof useSubscriptionOpener> };
 
-const featuredModels = [
-  { id: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst' },
-  { id: 'doubao-seedance-2-5-260628', name: 'Seedance 2.5' },
-  { id: 'elevenlabs-v3', name: 'ElevenLabs V3' },
-] as const;
-
 const subscriptionImageModels = [
   { id: 'gpt-image-2', name: 'GPT image 2.0' },
   { id: 'nano-banana-2', name: 'Nano banana 2' },
@@ -64,49 +58,32 @@ const subscriptionImageModels = [
   { id: 'seedream-5.5', name: 'Seedream5.5' },
 ] as const;
 
-function SubscriptionUpgradeTitle() {
-  const { t } = useI18n();
-  const [before, after] = t('{offer} on select models').split('{offer}');
-  return <>{before}<span className={offerStyles.unlimitedText}>{t('7 days of unlimited use')}</span>{after}</>;
-}
-
-function SubscriptionUpgradeBenefits() {
-  const { t } = useI18n();
-  return <>
-    <p className={offerStyles.modelSummary}>
-      {subscriptionImageModels.map(({ id, name }, index) => (
-        <span className={offerStyles.modelItem} key={id}>
-          <ModelAvatar modelId={id} name={name} />{name}
-          {index < subscriptionImageModels.length - 1 && <span className={offerStyles.modelSeparator} aria-hidden="true">｜</span>}
-        </span>
-      ))}
-    </p>
-    <ul className={offerStyles.dealTags} aria-label={t('Subscription offers')}>
-      <li>{t('Go Max annual from')} <strong>{t('$100/mo')}</strong></li>
-      <li>Claude / GPT <strong>{t('up to 20% off')}</strong></li>
-    </ul>
-  </>;
-}
-
 function SubscriptionGuide({ kind, children }: { kind: 'sign-in' | 'upgrade'; children: ReactNode }) {
   const { t } = useI18n();
   const headingId = useId();
+  const signedOut = kind === 'sign-in';
+  const title = signedOut ? t('Sign in for {offer} on select models') : t('{offer} on select models');
+  const [before, after] = title.split('{offer}');
   return <section className={offerStyles.subscriptionCard} data-guide={kind} aria-labelledby={headingId}>
     <div className={offerStyles.subscriptionHeading}>
-      <h2 id={headingId}>{kind === 'sign-in' ? t('Sign in to unlock popular AI models') : <SubscriptionUpgradeTitle />}</h2>
-      {kind === 'sign-in' && <span className="om-badge">{t('Plus and above')}</span>}
+      <h2 id={headingId}>{before}<span className={offerStyles.unlimitedText}>{t('7 days of unlimited use')}</span>{after}</h2>
+      {signedOut && <span className={offerStyles.dealTag}>
+        {t('Plus and above').split(/(Plus)/).map(part => part === 'Plus' ? <strong key={part}>{part}</strong> : part)}
+      </span>}
     </div>
     <div className={offerStyles.benefits}>
-      {kind === 'upgrade' ? <SubscriptionUpgradeBenefits /> : <>
-        <div className={offerStyles.offerLine}>
-          <p>{t('Black Friday’s lowest prices of the year! 7 days of unlimited use')}</p>
-          <GuideOffer />
-        </div>
-        <ul className={offerStyles.models} aria-label={t('Models')}>
-          {featuredModels.map(({ id, name }) => <li key={id}><ModelAvatar modelId={id} name={name} />{name}</li>)}
-          <li className={offerStyles.moreModels} aria-label={t('More')}>...</li>
-        </ul>
-      </>}
+      <p className={offerStyles.modelSummary}>
+        {subscriptionImageModels.map(({ id, name }, index) => (
+          <span className={offerStyles.modelItem} key={id}>
+            <ModelAvatar modelId={id} name={name} />{name}
+            {index < subscriptionImageModels.length - 1 && <span className={offerStyles.modelSeparator} aria-hidden="true">｜</span>}
+          </span>
+        ))}
+      </p>
+      {kind === 'upgrade' && <ul className={offerStyles.dealTags} aria-label={t('Subscription offers')}>
+        <li className={offerStyles.dealTag}>{t('Go Max annual from')} <strong>{t('$100/mo')}</strong></li>
+        <li className={offerStyles.dealTag}>Claude / GPT <strong>{t('up to 20% off')}</strong></li>
+      </ul>}
     </div>
     <div className={`om-settings-actions ${offerStyles.upgradeAction}`}>
       {children}

@@ -189,13 +189,15 @@ it.each(['free', 'go'])('offers an upgrade above the connected account for the %
 it.each(['account', 'subscription'] as const)('shows the localized sign-in offer on the %s page', async section => {
   const page = await open({ state: 'signed-out' }, 'zh-CN', section);
   const guide = page.querySelector<HTMLElement>('[data-guide="sign-in"]')!;
-  expect(guide.querySelector('h2')?.textContent).toBe('登录解锁热门大模型');
-  expect(guide.querySelector('.om-badge')?.textContent).toBe('Plus 及以上');
+  expect(guide.querySelector('h2')?.textContent).toBe('登录后精选模型7天无限用');
+  expect(guide.querySelector('h2 span')?.textContent).toBe('7天无限用');
+  expect(guide.querySelector('h2 + span')?.textContent).toBe('Plus 及以上');
+  expect(guide.querySelector('h2 + span strong')?.textContent).toBe('Plus');
   expect(actions(guide)).toEqual(['立即登录']);
-  expect(guide.querySelector('.om-account-offer')?.textContent).toBe('多模态 $14/月起');
-  expect([...guide.querySelectorAll('li')].map(item => item.textContent)).toEqual([
-    'GPT Image 2.6 Sunburst', 'Seedance 2.5', 'ElevenLabs V3', '...',
-  ]);
+  expect(guide.querySelector('p')?.textContent).toBe('GPT image 2.0｜Nano banana 2｜Seedream5.0｜Seedream5.5');
+  expect([...guide.querySelectorAll('p [data-brand="true"]')].map(icon => icon.getAttribute('data-provider')))
+    .toEqual(['openai', 'nano-banana', 'bytedance', 'bytedance']);
+  expect(guide.querySelector('ul, .om-account-offer')).toBeNull();
   expect(page.querySelectorAll('.om-account-metrics .om-card')).toHaveLength(section === 'subscription' ? 2 : 0);
   expect(page.querySelector('[data-guide="upgrade"]')).toBeNull();
 });
@@ -203,9 +205,9 @@ it.each(['account', 'subscription'] as const)('shows the localized sign-in offer
 it('starts login from the signed-out subscription offer and switches to upgrade after Free sign-in', async () => {
   const page = await open({ state: 'signed-out' }, 'en', 'subscription');
   const guide = page.querySelector<HTMLElement>('[data-guide="sign-in"]')!;
-  expect(guide.querySelector('h2')?.textContent).toBe('Sign in to unlock popular AI models');
-  expect(guide.querySelector('.om-badge')?.textContent).toBe('Plus and above');
-  expect(guide.querySelector('.om-account-offer')?.textContent).toBe('Multimodal from $14/mo');
+  expect(guide.querySelector('h2')?.textContent).toBe('Sign in for 7 days of unlimited use on select models');
+  expect(guide.querySelector('h2 + span')?.textContent).toBe('Plus and above');
+  expect(guide.querySelector('ul, .om-account-offer')).toBeNull();
   expect(actions(guide)).toEqual(['Sign in now']);
   expect(page.querySelectorAll('.om-account-metrics .om-card')).toHaveLength(2);
 

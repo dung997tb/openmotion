@@ -87,12 +87,8 @@
   grid-template-columns: minmax(0, 1fr) fit-content(45%);
   align-content: center;
   gap: var(--motion-space-12) var(--motion-space-16);
-  padding: var(--motion-space-24) clamp(var(--motion-space-16), 3%, var(--motion-space-24));
-  background-image: linear-gradient(90deg, var(--motion-black-friday-night) 4%, transparent 90%), var(--offer-art);
-}
-
-.subscriptionCard[data-guide='upgrade'] {
   padding: var(--motion-space-32) clamp(var(--motion-space-20), 5%, var(--motion-space-32));
+  background-image: linear-gradient(90deg, var(--motion-black-friday-night) 4%, transparent 90%), var(--offer-art);
 }
 
 .subscriptionHeading {
@@ -105,16 +101,12 @@
 
 .subscriptionHeading h2 {
   margin: 0;
-  font-size: var(--motion-text-step-22);
+  font-size: var(--motion-text-section);
+  letter-spacing: 0.025em;
   font-weight: var(--motion-weight-semibold);
   line-height: var(--motion-leading-tight);
   text-wrap: balance;
   overflow-wrap: anywhere;
-}
-
-.subscriptionCard[data-guide='upgrade'] .subscriptionHeading h2 {
-  font-size: var(--motion-text-section);
-  letter-spacing: 0.025em;
 }
 
 @media (forced-colors: none) {
@@ -132,23 +124,10 @@
   gap: var(--motion-space-12);
 }
 
-.offerLine {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--motion-space-4) var(--motion-space-8);
-}
-
-.offerLine p,
 .modelSummary {
   margin: 0;
   color: var(--motion-neutral-n4);
-  font-size: var(--motion-text-md);
   line-height: var(--motion-leading-body);
-}
-
-.modelSummary {
-  --model-avatar-size: var(--motion-space-14);
   font-size: var(--motion-text-sm);
   display: flex;
   flex-wrap: wrap;
@@ -172,7 +151,7 @@
   list-style: none;
 }
 
-.dealTags li {
+.dealTag {
   box-sizing: border-box;
   max-inline-size: 100%;
   padding: var(--motion-space-6) var(--motion-space-10);
@@ -186,38 +165,19 @@
   overflow-wrap: anywhere;
 }
 
-.dealTags strong {
+.subscriptionHeading .dealTag {
+  padding: var(--motion-space-4) var(--motion-space-8);
+  font-size: var(--motion-text-xs);
+}
+
+.dealTag strong {
   color: var(--motion-black-friday-peach);
   font-weight: var(--motion-weight-bold);
 }
 
-.models {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--motion-space-6);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.models li {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--motion-space-6);
-  padding: var(--motion-space-4) var(--motion-space-10) var(--motion-space-4) var(--motion-space-6);
-  border-radius: var(--motion-radius-full);
-  background: var(--motion-neutral-n11);
-  font-size: var(--motion-text-sm);
-  font-weight: var(--motion-weight-medium);
-}
-
-.models .moreModels {
-  padding-inline: var(--motion-space-10);
-}
-
-.subscriptionCard :is(.models, .modelSummary) :global(.om-provider-avatar) {
-  width: var(--model-avatar-size, var(--motion-space-16));
-  height: var(--model-avatar-size, var(--motion-space-16));
+.subscriptionCard .modelSummary :global(.om-provider-avatar) {
+  width: var(--motion-space-14);
+  height: var(--motion-space-14);
   border: 0;
   border-radius: var(--motion-radius-sm);
 }
@@ -228,12 +188,6 @@
 }
 
 .subscriptionCard .upgradeAction > :is(button, a) {
-  min-height: var(--motion-space-40);
-  padding-inline: var(--motion-space-16);
-  font-size: var(--motion-text-md);
-}
-
-.subscriptionCard[data-guide='upgrade'] .upgradeAction > :is(button, a) {
   min-block-size: var(--motion-space-44);
   justify-content: center;
   gap: var(--motion-space-6);
@@ -241,9 +195,15 @@
   font-size: var(--motion-text-body);
 }
 
-.subscriptionCard[data-guide='upgrade'] .upgradeAction > button svg {
+.subscriptionCard .upgradeAction > button svg {
   width: var(--motion-icon);
   height: var(--motion-icon);
+}
+
+@container subscription-offer (width > 32rem) {
+  .subscriptionCard[data-guide='sign-in'] .unlimitedText:lang(en) {
+    display: inline-block;
+  }
 }
 
 @container subscription-offer (max-width: 32rem) {
@@ -252,11 +212,6 @@
   .modelSeparator { display: none; }
   .upgradeAction { grid-row: 1; }
   .subscriptionCard .upgradeAction > :is(button, a) {
-    gap: var(--motion-space-6);
-    padding-inline: var(--motion-space-10);
-    font-size: var(--motion-text-sm);
-  }
-  .subscriptionCard[data-guide='upgrade'] .upgradeAction > :is(button, a) {
     padding-inline: var(--motion-space-10);
   }
 }
