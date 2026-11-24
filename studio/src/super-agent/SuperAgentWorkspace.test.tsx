@@ -3695,7 +3695,7 @@ it('SuperAgentWorkspace shows task project directory in header and opens changed
   expect(container.textContent).toContain('.hud { color: red; }');
 });
 
-function setupDesignStudioMocks() {
+function setupDesignStudioMocks({ assetLoadFailures = 0 } = {}) {
   const createdChats: any[] = [];
   const turnBodies: any[] = [];
   let chatCounter = 0;
@@ -3803,6 +3803,14 @@ function setupDesignStudioMocks() {
       versionId: 'v1',
       previewUrl: '/motion-api/assets/asset-poster-1/versions/v1/media',
     },
+    {
+      id: 'asset-clip-1',
+      kind: 'asset',
+      title: 'Product Video',
+      modality: 'video',
+      versionId: 'v1',
+      previewUrl: '/motion-api/assets/asset-clip-1/versions/v1/file',
+    },
   ];
 
   const json = (body: unknown, status = 200) =>
@@ -3866,6 +3874,10 @@ function setupDesignStudioMocks() {
     if (url.startsWith(`${SUPER_AGENT_API}/resources`)) {
       const parsed = new URL(url, 'http://localhost');
       const kind = parsed.searchParams.get('kind');
+      if (kind === 'asset' && assetLoadFailures > 0) {
+        assetLoadFailures -= 1;
+        return json({ error: 'Resource fetch failed' }, 503);
+      }
       const items = kind === 'design-template'
         ? designItems
         : kind === 'design-project'
@@ -3927,7 +3939,7 @@ function setupDesignStudioMocks() {
 }
 
 it('enters Design Studio from starter card with all 8 modules, floating option pills, synchronized showcase tabs, and search filtering', async () => {
-  setupDesignStudioMocks();
+  setupDesignStudioMocks({ assetLoadFailures: 1 });
   const flushMore = async () => {
     await flush();
     await flush();
@@ -3985,6 +3997,33 @@ it('enters Design Studio from starter card with all 8 modules, floating option p
     expect(topBar.textContent).toContain('Reference');
     expect(topBar.textContent).toContain('Brand Kit');
     expect(container.querySelector('.om-sa-showcase-tabs')?.textContent).toContain('All image scenes');
+
+    const imageTabs = [...container.querySelectorAll<HTMLButtonElement>('.om-sa-showcase-tab')];
+    const brandTab = imageTabs.find(tab => tab.textContent?.startsWith('Brand Kits'))!;
+    const assetTab = imageTabs.find(tab => tab.textContent?.startsWith('Workspace Assets'))!;
+    const badge = (tab: HTMLButtonElement) => tab.querySelector('.om-sa-tab-count')?.textContent;
+    expect(badge(brandTab)).toBe('1');
+    expect(badge(assetTab)).toBeUndefined();
+    await act(async () => assetTab.click());
+    const imageGrid = container.querySelector('.om-sa-showcase-grid')!;
+    expect(imageGrid.textContent).toContain('Could not load workspace resources');
+    const retry = [...imageGrid.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Retry')!;
+    await act(async () => retry.click());
+    await flushMore();
+    expect(badge(assetTab)).toBe('1');
+    expect(imageGrid.textContent).toContain('Product Hero Poster');
+    expect(imageGrid.textContent).not.toContain('Product Video');
+
+    const imageSearch = container.querySelector<HTMLInputElement>('input[aria-label="Filter templates…"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(imageSearch, 'Vercel');
+      imageSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(badge(assetTab)).toBe('0');
+    expect(badge(brandTab)).toBe('1');
+    expect(imageGrid.textContent).toContain('No matching resources found');
+    await act(async () => brandTab.click());
+    expect(imageGrid.textContent).toContain('Vercel');
 
     // Switching to Prototype switches top bar to HTML Design pills & filters to Prototype templates (?thumb=1)
     const protoCard = [...container.querySelectorAll('.om-sa-design-module-card')].find(
@@ -6417,6 +6456,15 @@ it('exposes Motion graphics as a primary entry, moves Create audio into Explore 
   expect(container.querySelector('.om-sa-composer-top-bar')?.textContent).toContain('AI Video');
   expect(container.querySelector('.om-sa-showcase-tabs')?.textContent).toContain('All video');
   expect(container.querySelector('.om-sa-showcase-tabs')?.textContent).not.toContain('TOP 100 brands');
+
+  const assetTab = [...container.querySelectorAll<HTMLButtonElement>('.om-sa-showcase-tab')].find(
+    tab => tab.textContent?.startsWith('Workspace Assets'),
+  )!;
+  await act(async () => assetTab.click());
+  const videoCard = container.querySelector('.om-sa-showcase-grid .om-sa-showcase-card')!;
+  expect(videoCard.textContent).toContain('Product Video');
+  expect(videoCard.querySelector('[data-modality="video"] [data-thumbnail-loading]')).toBeTruthy();
+  expect(videoCard.querySelector('video')).toBeNull();
 });
 
 it('embeds Motion Studio Editor in Super Agent without remounting on revision updates and supports selection attach + open-file', async () => {
