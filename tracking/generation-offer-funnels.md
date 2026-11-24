@@ -1,13 +1,15 @@
-# Image and video account-card funnels
+# Sign-in and upgrade card funnels
 
-Group by `studio_id`, `scene_id` and `offer_kind`. For example, background removal is
-`design / remove-background` and camera control is `cinema / video-camera-control`.
+Group image and video cards by `studio_id`, `scene_id` and `offer_kind` (for example,
+`design / remove-background`). Settings cards use `page_name=settings`, `area=account`
+and `settings_section=account|subscription`. Each section visit has its own ID.
+If sign-in reveals an upgrade card within the same visit, each kind qualifies separately.
 Count distinct OpenMotion installations within each group. Signed-out viewers have no
 confirmed account identity. One person using two installations can appear twice.
 
 | Stage | Event | Unit and source |
 | --- | --- | --- |
-| Card seen | OpenMotion `surface_view`, `area=asset_create`, `element=card` | Half of the card visible continuously for one second in the foreground. Once per card kind and scene visit. Changing the model or toggling providers in the same visit keeps its ID. |
+| Card seen | OpenMotion `surface_view`, `element=card`, `area=asset_create` for generators or `area=account` for settings | Half of the card visible continuously for one second in the foreground. Once per card kind and entry visit. Changing the model or toggling providers in the same visit keeps its ID. |
 | Button clicked | OpenMotion `ui_click`, same area and visit | `element=sign_in` or `view_plans`. Both events carry `offer_kind=sign_in\|upgrade` and `offer_visit_id`. Each activation gets a fresh `entry_id`. A quick click can precede a qualified exposure. |
 | Sign-in succeeded | OpenMotion `account_sign_in_result`, `outcome=success` | Join the login click's `entry_id` to the connector's completed result on the same installation. |
 | Subscription paid | AMR `billing_payment_result`, `result=success` | Join the upgrade click's `entry_id` to a positive, initial or upgrade subscription payment. The system-browser handoff and the fallback URL carry the same ID as `od_entry_id`. |
@@ -28,15 +30,18 @@ range fixed and extend the result and payment ranges through the desired cutoff.
 
 ```sql
 SELECT event, toUnixTimestamp64Milli(timestamp) AS ts, distinct_id AS installation,
-       properties.studio_id AS studio, properties.scene_id AS scene,
+       if(properties.page_name = 'settings', 'settings', properties.studio_id) AS surface,
+       if(properties.page_name = 'settings', properties.settings_section, properties.scene_id) AS entry_point,
        properties.offer_kind AS card, properties.offer_visit_id AS visit,
        properties.entry_id AS entry
 FROM events
 WHERE properties.product = 'openmotion' AND properties.env = 'production'
   AND empty(toString(coalesce(properties.test_run_id, '')))
   AND timestamp >= now() - INTERVAL 7 DAY
-  AND ((event IN ('surface_view','ui_click') AND properties.page_name = 'creative_studio'
-        AND properties.area = 'asset_create' AND properties.offer_kind IN ('sign_in','upgrade')
+  AND ((event IN ('surface_view','ui_click') AND properties.offer_kind IN ('sign_in','upgrade')
+        AND ((properties.page_name = 'creative_studio' AND properties.area = 'asset_create')
+          OR (properties.page_name = 'settings' AND properties.area = 'account'
+              AND properties.settings_section IN ('account','subscription')))
         AND ((event = 'surface_view' AND properties.element = 'card')
           OR (event = 'ui_click' AND ((properties.element = 'sign_in' AND properties.offer_kind = 'sign_in')
                                   OR (properties.element = 'view_plans' AND properties.offer_kind = 'upgrade')))))
@@ -73,10 +78,10 @@ entry only. Missing payment attribution stays outside the conversion count.
 .headers on
 .mode column
 WITH seen AS (
-  SELECT installation, studio, scene, card, visit, min(CAST(ts AS INTEGER)) AS first_seen
-  FROM motion WHERE event = 'surface_view' GROUP BY installation, studio, scene, card, visit
+  SELECT installation, surface, entry_point, card, visit, min(CAST(ts AS INTEGER)) AS first_seen
+  FROM motion WHERE event = 'surface_view' GROUP BY installation, surface, entry_point, card, visit
 ), clicks AS (
-  SELECT installation, studio, scene, card, visit, entry, CAST(ts AS INTEGER) AS clicked
+  SELECT installation, surface, entry_point, card, visit, entry, CAST(ts AS INTEGER) AS clicked
   FROM motion WHERE event = 'ui_click' AND entry <> ''
 ), results AS (
   SELECT 'sign_in' AS card, installation, entry, CAST(ts AS INTEGER) AS completed
@@ -84,24 +89,24 @@ WITH seen AS (
   UNION ALL
   SELECT 'upgrade', NULL, entry, CAST(ts AS INTEGER) FROM paid WHERE entry <> ''
 ), entries AS (
-  SELECT studio, scene, card FROM seen UNION SELECT studio, scene, card FROM clicks
+  SELECT surface, entry_point, card FROM seen UNION SELECT surface, entry_point, card FROM clicks
 ), visits AS (
   SELECT s.*, c.clicked, r.completed
-  FROM seen s LEFT JOIN clicks c USING (installation, studio, scene, card, visit)
+  FROM seen s LEFT JOIN clicks c USING (installation, surface, entry_point, card, visit)
   LEFT JOIN results r ON r.card = c.card AND r.entry = c.entry AND r.completed >= c.clicked
                      AND (r.installation IS NULL OR r.installation = c.installation)
 )
-SELECT e.studio, e.scene, e.card,
+SELECT e.surface, e.entry_point, e.card,
        (SELECT count(DISTINCT c.installation) FROM clicks c
-        WHERE c.studio=e.studio AND c.scene=e.scene AND c.card=e.card) AS all_clickers,
+        WHERE c.surface=e.surface AND c.entry_point=e.entry_point AND c.card=e.card) AS all_clickers,
        count(DISTINCT v.installation) AS exposed,
        count(DISTINCT CASE WHEN v.clicked >= v.first_seen THEN v.installation END) AS clicked_after_view,
        count(DISTINCT CASE WHEN v.clicked >= v.first_seen AND v.completed IS NOT NULL THEN v.installation END) AS succeeded
-FROM entries e LEFT JOIN visits v USING (studio, scene, card)
-GROUP BY e.studio, e.scene, e.card ORDER BY e.studio, e.scene, e.card;
+FROM entries e LEFT JOIN visits v USING (surface, entry_point, card)
+GROUP BY e.surface, e.entry_point, e.card ORDER BY e.surface, e.entry_point, e.card;
 ```
 
 Exclude free grants, zero-amount invoices, wallet recharges and renewals. Returning
 to Studio or loading a new plan balance does not confirm a purchase. An upgrade
 initiated elsewhere or a receipt without the click's entry ID cannot be attributed
-to this card. Keep account settings and header Pricing outside both funnels.
+to this card. Manage subscription, retry controls and header Pricing are separate actions. A fallback browser link continues the original upgrade click.

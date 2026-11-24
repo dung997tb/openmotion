@@ -4,8 +4,9 @@ import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { validProperties, uuid } from '../../../tracking/core';
 import { studioEvents } from '../../../tracking/events';
+import { AccountSettings } from './AccountSettings';
 import { mediaEditorDestination } from './creativeStudios';
-import { createOfferVisit, type OfferKind } from './exploreTracking';
+import { createOfferVisit, type OfferKind } from './offerTracking';
 import { gatewayRequest } from './gatewayClient';
 import { GenerationSignInNotice, GenerationUpgradeNotice } from './ProviderSetupNotice';
 import { loadReportingTransport } from './reporting';
@@ -37,7 +38,7 @@ it('qualifies each guide once per scene visit and links each real button click t
     let previousVisit = '';
     for (const sceneId of ['remove-background', 'video-camera-control', 'video-multi-shot'] as const) {
       const destination = mediaEditorDestination(sceneId);
-      const visit = createOfferVisit(destination.studio.id, sceneId);
+      const visit = createOfferVisit({ studio: destination.studio.id, scene: sceneId });
       expect(visit.fields.offer_visit_id).not.toBe(previousVisit);
       previousVisit = visit.fields.offer_visit_id;
       const renderCard = (kind: OfferKind) => act(async () => root.render(kind === 'sign_in'
@@ -80,5 +81,70 @@ it('qualifies each guide once per scene visit and links each real button click t
   } finally {
     await act(async () => root.unmount()); container.remove();
     visibility.mockRestore(); vi.unstubAllGlobals(); vi.useRealTimers();
+  }
+});
+
+it('attributes settings impressions and handoffs to the section and counts each card once per visit', async () => {
+  const container = document.body.appendChild(document.createElement('div'));
+  const root = createRoot(container);
+  const visits = new Set<string>();
+  const entries = new Set<string>();
+  vi.useFakeTimers();
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(private callback: (entries: Partial<IntersectionObserverEntry>[]) => void) {}
+    observe(target: Element) { this.callback([{ target, isIntersecting: true, intersectionRatio: 0.5 }]); }
+    disconnect() {}
+  });
+  const gateway = vi.mocked(gatewayRequest);
+  let signedIn = false;
+  gateway.mockImplementation(async path => path.endsWith('/subscription') ? { opened: true }
+    : signedIn ? { state: 'signed-in', plan: 'free' } : { state: 'signed-out' });
+  await loadReportingTransport();
+  try {
+    for (const section of ['account', 'subscription', 'account'] as const) {
+      signedIn = false;
+      const events = vi.mocked(trackMotion);
+      events.mockClear();
+      const render = () => act(async () => root.render(<AccountSettings key={section}
+        subscription={section === 'subscription'} openProviders={() => {}} />));
+      await render();
+      let sectionVisit: string | undefined;
+      for (const kind of ['sign_in', 'upgrade'] as const) {
+        if (kind === 'upgrade') {
+          signedIn = true;
+          await act(async () => window.dispatchEvent(new Event('motion:account-changed')));
+        }
+        const button = container.querySelector<HTMLButtonElement>(`[data-generation-offer="${kind}"] button`)!;
+        const fields = { page_name: 'settings', area: 'account', settings_section: section, offer_kind: kind };
+        act(() => vi.advanceTimersByTime(999));
+        expect(events.mock.calls).toEqual([]);
+        act(() => vi.advanceTimersByTime(1));
+        await render();
+        act(() => vi.advanceTimersByTime(1000));
+        expect(events.mock.calls).toEqual([['surface_view', { ...fields, element: 'card', offer_visit_id: expect.stringMatching(uuid) }]]);
+        const visit = (events.mock.calls[0][1] as { offer_visit_id: string }).offer_visit_id;
+        if (sectionVisit) expect(visit).toBe(sectionVisit);
+        else { expect(visits.has(visit)).toBe(false); visits.add(visit); sectionVisit = visit; }
+        for (let i = 0; i < 2; i++) {
+          await act(async () => button.click());
+          const [event, payload] = events.mock.calls[i + 1];
+          expect(event).toBe('ui_click');
+          expect(payload).toEqual({ ...fields, element: kind === 'sign_in' ? 'sign_in' : 'view_plans', offer_visit_id: visit, entry_id: expect.stringMatching(uuid) });
+          const entryId = (payload as { entry_id: string }).entry_id;
+          expect(entries.has(entryId)).toBe(false);
+          entries.add(entryId);
+          expect(gateway).toHaveBeenCalledWith(kind === 'sign_in' ? 'settings/account/login' : 'settings/account/subscription', 'POST', { entryId });
+        }
+        expect(events.mock.calls).toHaveLength(3);
+        for (const [event, payload] of events.mock.calls) expect(validProperties(studioEvents, event, payload)).toBe(true);
+        expect(validProperties(studioEvents, 'surface_view', { ...events.mock.calls[0][1], settings_section: 'private text' })).toBe(false);
+        events.mockClear();
+      }
+    }
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   }
 });

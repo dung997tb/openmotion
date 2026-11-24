@@ -34,26 +34,6 @@ export function reportCreativeClick(page: CreativePage, area: CreativeArea, elem
   send('ui_click', { page_name: page, area, element, ...targetFields(target) });
 }
 
-export type OfferKind = NonNullable<Click['offer_kind']>;
-export function createOfferVisit(studio: string, scene: string) {
-  return { fields: { ...slugField('studio_id', studio), ...slugField('scene_id', scene), offer_visit_id: newTrackingId() },
-    seen: new Set<OfferKind>() };
-}
-export type OfferVisit = ReturnType<typeof createOfferVisit>;
-
-export function reportOfferView(visit: OfferVisit, kind: OfferKind) {
-  if (visit.seen.has(kind)) return;
-  visit.seen.add(kind);
-  send('surface_view', { page_name: 'creative_studio', area: 'asset_create', element: 'card', ...visit.fields, offer_kind: kind });
-}
-
-export function reportOfferClick(visit: OfferVisit, kind: OfferKind, destination: StudioDestination) {
-  const entryId = newTrackingId();
-  send('ui_click', { page_name: 'creative_studio', area: 'asset_create', element: kind === 'sign_in' ? 'sign_in' : 'view_plans',
-    ...modelFields(destination.model), ...visit.fields, offer_kind: kind, entry_id: entryId });
-  return entryId;
-}
-
 type ViewPage = Extract<CreativePage, 'explore' | 'creative_studio' | 'model_overview'>;
 export function reportCreativePageView(page: ViewPage, hasProject: boolean, target: CreativeTarget & { landing?: boolean } = {}) {
   const { studio, scene, model, community, medium, landing } = target;

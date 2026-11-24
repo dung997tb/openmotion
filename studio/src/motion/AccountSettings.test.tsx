@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
+import { uuid } from '../../../tracking/core';
 import type { AccountSummary } from '../../../shared/provider-directory';
 import { I18nProvider, type Locale } from '../i18n/I18n';
 import { AccountSettings } from './AccountSettings';
@@ -98,7 +99,7 @@ it('refreshes Go on checkout return and updates providers only after the plan ch
   await act(async () => window.dispatchEvent(new Event('focus')));
   expect(hooks.request).not.toHaveBeenCalled();
   await act(async () => button(page, 'Upgrade to Plus')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', {});
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { entryId: expect.stringMatching(uuid) });
   hooks.account = { ...original as AccountSummary, plan: 'plus', balance: '4.00' };
   await act(async () => {
     window.dispatchEvent(new Event('focus'));
@@ -164,7 +165,7 @@ it.each(['free', 'go'])('offers an upgrade above the connected account for the %
   expect(actions(page)).toEqual(['Sign in now']);
   expect(offer()).toBeNull();
   await act(async () => button(page, 'Sign in now')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', {});
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', { entryId: expect.stringMatching(uuid) });
 
   hooks.account = { state: 'signed-in', plan, balance: '12.00' };
   await act(async () => window.dispatchEvent(new Event('motion:account-changed')));
@@ -180,7 +181,7 @@ it.each(['free', 'go'])('offers an upgrade above the connected account for the %
   expect(upgrade.textContent).toBe('Upgrade to Plus');
   hooks.request.mockImplementation(async (route: string) => route === 'settings/account/subscription' ? { opened: true } : hooks.account);
   await act(async () => upgrade.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', {});
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/subscription', 'POST', { entryId: expect.stringMatching(uuid) });
   hooks.account = { state: 'signed-in', plan: 'plus' };
   await act(async () => window.dispatchEvent(new Event('focus')));
   expect(offer()).toBeNull();
@@ -213,7 +214,7 @@ it('starts login from the signed-out subscription offer and switches to upgrade 
 
   hooks.account = { state: 'authorizing', authorizationUrl: activation };
   await act(async () => button(guide, 'Sign in now')!.click());
-  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', {});
+  expect(hooks.request).toHaveBeenCalledWith('settings/account/login', 'POST', { entryId: expect.stringMatching(uuid) });
   expect(page.querySelector('[data-guide]')).toBeNull();
   expect(button(page, 'Cancel')).toBeTruthy();
 

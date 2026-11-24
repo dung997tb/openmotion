@@ -29,8 +29,8 @@ export function useSubscriptionOpener(onClick: (action: SubscriptionAction) => s
     };
   }, [onReturn]);
 
-  async function openSubscription(element: SubscriptionAction) {
-    const entryId = onClick(element);
+  async function openSubscription(element: SubscriptionAction, cardEntryId?: string) {
+    const entryId = cardEntryId ?? onClick(element);
     setSubscriptionUrl(undefined);
     const cancelCheckoutReturn = markCheckoutReturn();
     try {

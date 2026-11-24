@@ -30,7 +30,7 @@ import { Select } from '../components/ui/Select';
 import { attachableReferenceLimit, creationModels } from './creationModels';
 import { isOpenDesignProvider, modelFamilyLabel, providerDisplayName } from './imageMenuModels';
 import { registeredProvider } from '../../../shared/provider-registry';
-import { createOfferVisit } from './exploreTracking';
+import { createOfferVisit } from './offerTracking';
 import { ProviderSetupNotice, GenerationSignInNotice, GenerationUpgradeNotice } from './ProviderSetupNotice';
 
 export interface AssetDraft { modality: Modality; prompt: string; capabilityOptions?: Record<string, string>; relight?: RelightChoices; videoChoices?: Record<string, string>; shotPreferences?: { aspect: string; duration?: number }; preferredModel?: string; model?: string; parameters?: Record<string, unknown>; target?: { asset: LibraryAsset; versionId: string }; references: { reference: AssetReference; name: string }[] }
@@ -50,7 +50,7 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
   const offerWorkspace = imageWorkspace || studio?.destination.studio.id === 'cinema';
   const offerStudio = active && offerWorkspace ? studio?.destination.studio.id : undefined;
   const sceneId = scene?.id;
-  const offerVisit = useMemo(() => offerStudio && sceneId ? createOfferVisit(offerStudio, sceneId) : undefined, [offerStudio, sceneId]);
+  const offerVisit = useMemo(() => offerStudio && sceneId ? createOfferVisit({ studio: offerStudio, scene: sceneId }) : undefined, [offerStudio, sceneId]);
   const videoLanding = Boolean(studio?.destination.landing && scene?.modality === 'video');
   const mediaWorkspace = imageWorkspace || videoLanding;
   const formAppearance = mediaWorkspace ? 'boxed' : 'standard';

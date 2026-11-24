@@ -4,7 +4,7 @@ import * as tracking from './pageTracking';
 import type { StudioDestination } from './creativeStudios';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
 import { Tooltip } from "../components/ui/Tooltip";
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AccountSummary } from '../../../shared/provider-directory';
 import { RemixIcon } from '../icons/RemixIcons';
 import { useI18n } from '../i18n/I18n';
@@ -14,6 +14,7 @@ import { useSubscriptionOpener } from './useSubscriptionOpener';
 import { gatewayRequest } from './gatewayClient';
 import { GITHUB_REPOSITORY } from './githubRepository';
 import { notifyProvidersChanged } from './useProviderDirectory';
+import { createOfferVisit, reportOfferClick, useOfferImpression, type OfferVisit } from './offerTracking';
 import { AccountOfferBadge } from './AccountOfferBadge';
 import { MultimodalUpgradeButton } from './MultimodalOfferCard';
 import { activeAccountOffer, MULTIMODAL_CAPABILITIES } from './accountOffer';
@@ -58,13 +59,15 @@ const subscriptionImageModels = [
   { id: 'seedream-5.5', name: 'Seedream5.5' },
 ] as const;
 
-function SubscriptionGuide({ kind, children }: { kind: 'sign-in' | 'upgrade'; children: ReactNode }) {
+function SubscriptionGuide({ kind, visit, children }: { kind: 'sign-in' | 'upgrade'; visit: OfferVisit; children: ReactNode }) {
   const { t } = useI18n();
   const headingId = useId();
   const signedOut = kind === 'sign-in';
+  const offerKind = signedOut ? 'sign_in' : 'upgrade';
+  const card = useOfferImpression(visit, offerKind);
   const title = signedOut ? t('Sign in for {offer} on select models') : t('{offer} on select models');
   const [before, after] = title.split('{offer}');
-  return <section className={offerStyles.subscriptionCard} data-guide={kind} aria-labelledby={headingId}>
+  return <section ref={card} data-generation-offer={offerKind} className={offerStyles.subscriptionCard} data-guide={kind} aria-labelledby={headingId}>
     <div className={offerStyles.subscriptionHeading}>
       <h2 id={headingId}>{before}<span className={offerStyles.unlimitedText}>{t('7 days of unlimited use')}</span>{after}</h2>
       {signedOut && <span className={offerStyles.dealTag}>
@@ -204,6 +207,7 @@ export function AccountStatus({ account, busy, action, showToast, renderSignIn }
 
 export function AccountSettings({ subscription = false, openProviders }: { subscription?: boolean; openProviders: () => void }) {
   const { t } = useI18n(), toast = useToast(), { state, busy, action, subscription: subscriptionOpener, refreshBilling } = useAccountSignIn('account', toast.showToast);
+  const visit = useMemo(() => createOfferVisit({ settingsSection: subscription ? 'subscription' : 'account' }), [subscription]);
   const [refreshing, setRefreshing] = useState(false);
   const signedIn = state.account?.state === 'signed-in';
   async function refreshUsage() {
@@ -222,12 +226,12 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
         <h1 className="om-title">{subscription ? t('Subscription & usage') : named ? name : email || t('Your OpenDesign account')}</h1>
         <p className="om-muted">{(subscription || named) && email ? email : t('Your creative workspace, connected.')}</p>
       </div>
-      {plan && <SubscriptionGuide kind="upgrade">
-        <MultimodalUpgradeButton subscription={subscriptionOpener} label={t('Upgrade to Plus', undefined, 'subscription offer')} />
+      {plan && <SubscriptionGuide kind="upgrade" visit={visit}>
+        <MultimodalUpgradeButton visit={visit} subscription={subscriptionOpener} label={t('Upgrade to Plus', undefined, 'subscription offer')} />
       </SubscriptionGuide>}
       {(!subscription || !signedIn) && <AccountStatus account={account} busy={busy} action={action} showToast={toast.showToast}
-        renderSignIn={() => <SubscriptionGuide kind="sign-in">
-          <Button variant="plain" title={t('Sign in with OpenDesign')} disabled={busy} onClick={() => void action('login')}>
+        renderSignIn={() => <SubscriptionGuide kind="sign-in" visit={visit}>
+          <Button variant="plain" title={t('Sign in with OpenDesign')} disabled={busy} onClick={() => void action('login', reportOfferClick(visit, 'sign_in'))}>
             {t('Sign in now')}<RemixIcon name="arrow-right-up-line" size={12} />
           </Button>
         </SubscriptionGuide>} />}

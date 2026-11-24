@@ -6,7 +6,8 @@ import type { ReactNode } from 'react';
 import { MultimodalOfferCard, MultimodalUpgradeCard } from './MultimodalOfferCard';
 import { useI18n } from '../i18n/I18n';
 import type { StudioDestination } from './creativeStudios';
-import { destinationTarget, reportCreativeClick, reportOfferClick, type OfferKind, type OfferVisit } from './exploreTracking';
+import { destinationTarget, reportCreativeClick } from './exploreTracking';
+import { reportOfferClick, type OfferKind, type OfferVisit } from './offerTracking';
 import { gatewayRequest } from './gatewayClient';
 import { notifyProvidersChanged } from './useProviderDirectory';
 import { useSubscriptionOpener } from './useSubscriptionOpener';
@@ -39,7 +40,7 @@ export function GenerationUpgradeNotice({ destination, onError, onUpgrade, visit
   const subscription = useSubscriptionOpener(
     element => {
       onUpgrade();
-      if (visit) return reportOfferClick(visit, 'upgrade', destination);
+      if (visit) return reportOfferClick(visit, 'upgrade', destination.model);
       reportCreativeClick('creative_studio', 'asset_create', element, destinationTarget(destination));
     },
     onError,
@@ -69,7 +70,7 @@ export function GenerationSignInNotice({ destination, onSignIn, visit }: { visit
   return <>
     {state.account ? <AccountStatus account={state.account} busy={busy} showToast={toast.showToast} renderSignIn={() => signInCard(() => {
         onSignIn();
-        void action('login', visit && reportOfferClick(visit, 'sign_in', destination));
+        void action('login', visit && reportOfferClick(visit, 'sign_in', destination.model));
       })}
       action={name => { if (name === 'login') onSignIn(); return action(name); }} />
       : signInCard(() => void state.refresh())}
