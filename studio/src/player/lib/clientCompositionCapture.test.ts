@@ -1368,4 +1368,53 @@ describe("clientCompositionCapture", () => {
     for (const url of urls0) expect(activeUrls.has(url)).toBe(false);
     thumbnailScheduler.invalidateProject("proj-sched");
   });
+
+  it("does not cache an in-flight capture whose revision was invalidated before acceptResult ran", async () => {
+    const activeUrls = new Set<string>();
+    let seq = 0;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      const url = `blob:test/inflight-${++seq}`;
+      activeUrls.add(url);
+      return url;
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
+      activeUrls.delete(String(url));
+    });
+
+    const previewUrl = "/api/projects/proj-inflight/preview/comp/compositions/choice.html";
+    const rev0 = {
+      previewUrl,
+      projectId: "proj-inflight",
+      contentRevision: 0,
+      frameCount: 2,
+    };
+    const val0 = seedClientCompositionCaptureForTest(rev0, [new Blob(["i1"]), new Blob(["i2"])]);
+    const urls0 = val0.kind === "filmstrip" ? [...val0.urls] : [];
+
+    // Acquire rev 0 on the singleton scheduler: synchronously it is still in "loading" state
+    // because load() resolves on a microtask.
+    const req0 = createClientCompositionCaptureRequest({ ...rev0, sessionEpoch: 1 });
+    const lease0 = thumbnailScheduler.acquire(req0, () => {});
+    expect(thumbnailScheduler.getSnapshot(req0).status).toBe("loading");
+
+    // Trigger edit invalidation BEFORE rev 0 resolves into acceptResult().
+    evictStaleCompositionCaptures("proj-inflight", ["compositions/choice.html"], { "compositions/choice.html": 1 });
+
+    // Let rev 0's microtask settle while React still holds lease0.
+    await vi.waitFor(() => {
+      expect(thumbnailScheduler.getSnapshot(req0).status).toBe("ready");
+    });
+
+    // Releasing lease0 must drop rev 0 immediately instead of keeping it cached in ThumbnailScheduler.
+    lease0.release();
+    expect(thumbnailScheduler.getSnapshot(req0).status).toBe("idle");
+
+    // When rev 1 lands, rev 0's object URLs are revoked immediately (refCount reached 0).
+    seedClientCompositionCaptureForTest(
+      { ...rev0, contentRevision: 1 },
+      [new Blob(["r1"]), new Blob(["r2"])],
+    );
+    for (const url of urls0) expect(activeUrls.has(url)).toBe(false);
+    thumbnailScheduler.invalidateProject("proj-inflight");
+  });
 });

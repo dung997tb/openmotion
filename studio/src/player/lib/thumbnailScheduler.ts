@@ -82,6 +82,7 @@ interface ThumbnailEntry {
   dispose?: () => void;
   disposed: boolean;
   cached: boolean;
+  discardWhenReleased: boolean;
   lastAccess: number;
   snapshot: ThumbnailSnapshot;
   /** Aborted by the preview-reload hold, to run again once the hold lifts. */
@@ -185,6 +186,7 @@ export class ThumbnailScheduler {
         weight: 0,
         disposed: false,
         cached: false,
+        discardWhenReleased: Boolean(request.discardWhenReleased),
         lastAccess: this.nextSequence++,
         snapshot: Object.freeze({ status: "queued" }),
         preempted: false,
@@ -221,6 +223,8 @@ export class ThumbnailScheduler {
             current.controller?.abort();
             this.deleteEntry(scopedKey, current);
           } else if (current.state === "ready" && !current.cached) {
+            this.deleteEntry(scopedKey, current);
+          } else if (current.state === "error" && current.discardWhenReleased) {
             this.deleteEntry(scopedKey, current);
           }
         }
@@ -292,8 +296,9 @@ export class ThumbnailScheduler {
 
   /**
    * Evict cached entries matching `predicate` within `projectId`.
-   * Unleased entries are deleted and disposed immediately; leased entries are marked
-   * uncached so they are disposed as soon as their last consumer releases them.
+   * Unleased entries are deleted and disposed immediately; leased entries (including queued
+   * and in-flight loads) are marked `discardWhenReleased` and uncached so they are never
+   * retained after their last consumer releases them.
    */
   invalidateMatching(
     projectId: string,
@@ -302,6 +307,7 @@ export class ThumbnailScheduler {
     for (const [key, entry] of this.entries) {
       if (entry.request.projectId !== projectId) continue;
       if (!predicate(entry.request)) continue;
+      entry.discardWhenReleased = true;
       if (entry.leases.size === 0) {
         entry.controller?.abort();
         this.deleteEntry(key, entry);
@@ -450,7 +456,7 @@ export class ThumbnailScheduler {
     const byteBudget = isWaveform
       ? this.budgets.waveformCacheBytes
       : this.budgets.thumbnailCacheBytes;
-    entry.cached = !entry.request.discardWhenReleased && entry.weight <= byteBudget;
+    entry.cached = !entry.discardWhenReleased && entry.weight <= byteBudget;
     if (!entry.cached) return;
     if (isWaveform) this.waveformCacheBytes += entry.weight;
     else this.cacheBytes += entry.weight;
