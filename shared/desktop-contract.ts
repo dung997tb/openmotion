@@ -106,6 +106,7 @@ export const HOST_CAPABILITIES = {
   DIAGNOSTICS: 'diagnostics',
   ACCOUNT: 'account',
   SIGNED_CONFIG: 'signedConfig',
+  TELEMETRY: 'telemetry',
   ATOM_DETECT: 'atom.detect',
   ATOM_EXEC: 'atom.exec',
   ATOM_INSTALL_COMPONENT: 'atom.installComponent',
@@ -121,6 +122,7 @@ export const HOST_CAPABILITY_VERSIONS: Record<HostCapabilityName, string> = {
   [HOST_CAPABILITIES.DIAGNOSTICS]: '1.0.0',
   [HOST_CAPABILITIES.ACCOUNT]: '1.0.0',
   [HOST_CAPABILITIES.SIGNED_CONFIG]: '1.0.0',
+  [HOST_CAPABILITIES.TELEMETRY]: '1.0.0',
   [HOST_CAPABILITIES.ATOM_DETECT]: '1.0.0',
   [HOST_CAPABILITIES.ATOM_EXEC]: '1.0.0',
   [HOST_CAPABILITIES.ATOM_INSTALL_COMPONENT]: '1.0.0',
@@ -158,6 +160,7 @@ export type HostConfirmationRequest = {
  */
 export type DetectedAgentCli = {
   agentId: string;
+  displayName?: string;
   installed: boolean;
   binaryPath?: string;
   version?: string;
@@ -165,6 +168,10 @@ export type DetectedAgentCli = {
   mcpUrl?: string;
   mcpConflict?: boolean;
   configPath?: string;
+  /** How Studio should connect this agent: via built-in CLI (`atom.exec`) or declarative config (`atom.config.write`). */
+  connectMode?: 'cli' | 'config';
+  /** Declarative `atom.config` ruleId when `connectMode === 'config'` (or fallback config rule). */
+  configRuleId?: string;
 };
 
 export type DetectedEngineStatus = {
@@ -279,7 +286,7 @@ export type AtomConfigWriteParams = {
   value: {
     serverName: string;
     url: string;
-    transport?: 'http' | 'streamable-http';
+    transport?: 'http' | 'streamable-http' | 'remote';
   };
   conflictPolicy?: 'abort' | 'replace';
 };

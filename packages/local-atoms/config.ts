@@ -41,7 +41,11 @@ import {
   type HostInvokeResult,
   type HostReleaseChannel,
 } from '../../shared/desktop-contract.ts';
-import type { SignedAgentConfigRule, SignedConfigPayload } from '../../shared/signed-config.ts';
+import {
+  isAllowedMcpConfigRelativePath,
+  type SignedAgentConfigRule,
+  type SignedConfigPayload,
+} from '../../shared/signed-config.ts';
 import { assertFeatureAllowsResource, type FeatureConfirmationGate } from './confirmation.ts';
 import type { SerialMutationQueue } from './serial-queue.ts';
 
@@ -230,7 +234,7 @@ export function parseJsonMcpEntry(
 export function upsertJsonMcpEntry(
   rawText: string | null,
   sectionPath: string,
-  value: { serverName: string; url: string; transport?: 'http' | 'streamable-http' },
+  value: { serverName: string; url: string; transport?: 'http' | 'streamable-http' | 'remote' },
   conflictPolicy: 'abort' | 'replace',
 ):
   | { ok: true; content: string; changed: boolean }
@@ -604,7 +608,7 @@ export function parseTomlMcpEntry(
 export function upsertTomlMcpEntry(
   rawText: string | null,
   sectionPath: string,
-  value: { serverName: string; url: string; transport?: 'http' | 'streamable-http' },
+  value: { serverName: string; url: string; transport?: 'http' | 'streamable-http' | 'remote' },
   conflictPolicy: 'abort' | 'replace',
 ):
   | { ok: true; content: string; changed: boolean }
@@ -1011,6 +1015,12 @@ export class ConfigAtom {
     if (rule.fileFormat !== 'json' && rule.fileFormat !== 'toml') {
       return hostErr('POLICY_DENIED', `Unsupported config file format: "${String(rule.fileFormat)}"`, { ruleId });
     }
+    if (!isAllowedMcpConfigRelativePath(rule.homeRelativePath, rule.fileFormat)) {
+      return hostErr('POLICY_DENIED', `Disallowed config file path: "${rule.homeRelativePath}"`, {
+        ruleId,
+        homeRelativePath: rule.homeRelativePath,
+      });
+    }
     const pathCheck = resolveSafeHomePath(this.homeDir, rule.homeRelativePath);
     if (!pathCheck.ok) {
       return hostErr('POLICY_DENIED', pathCheck.reason, { ruleId, homeRelativePath: rule.homeRelativePath });
@@ -1024,7 +1034,7 @@ export class ConfigAtom {
     configPath: string;
     serverName: string;
     url: string;
-    transport?: 'http' | 'streamable-http';
+    transport?: 'http' | 'streamable-http' | 'remote';
     conflictPolicy: 'abort' | 'replace';
   }> {
     if (!params || typeof params !== 'object') {
@@ -1090,10 +1100,14 @@ export class ConfigAtom {
     if (
       params.value.transport !== undefined &&
       params.value.transport !== 'http' &&
-      params.value.transport !== 'streamable-http'
+      params.value.transport !== 'streamable-http' &&
+      params.value.transport !== 'remote'
     ) {
       return hostErr('INVALID_PARAMS', `Unsupported MCP transport: "${String(params.value.transport)}"`);
     }
+
+    const effectiveTransport =
+      params.value.transport ?? (rule.entryFormat === 'opencode_remote' ? 'remote' : undefined);
 
     const conflictPolicy = params.conflictPolicy ?? 'abort';
     if (conflictPolicy !== 'abort' && conflictPolicy !== 'replace') {
@@ -1106,7 +1120,7 @@ export class ConfigAtom {
       configPath,
       serverName: serverCheck.value,
       url: urlCheck.value,
-      transport: params.value.transport,
+      transport: effectiveTransport,
       conflictPolicy,
     });
   }

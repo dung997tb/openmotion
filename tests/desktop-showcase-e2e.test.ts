@@ -806,6 +806,63 @@ process.exit(0);
       assert.equal(detect2.data.agents.find(a => a.agentId === 'claude')?.mcpConflict, false);
     }
 
+    // 3f. Declarative multi-agent ecosystem (Cursor + OpenCode): detected via home config dir
+    //     WITHOUT PATH CLI binaries, configured via `atom.config.write` (standard http vs opencode remote),
+    //     and malformed params rejected by unified Zod schema layer!
+    mkdirSync(path.join(homeDir, '.cursor'), { recursive: true });
+    mkdirSync(path.join(homeDir, '.config', 'opencode'), { recursive: true });
+
+    const detectDeclarative = await runtime.invoke(HOST_CAPABILITIES.ATOM_DETECT, 'scan');
+    assert.equal(detectDeclarative.ok, true);
+    if (detectDeclarative.ok) {
+      const agents = (detectDeclarative.data as { agents: Array<{ agentId: string; installed: boolean; connectMode?: string; configRuleId?: string }> }).agents;
+      const cursor = agents.find(a => a.agentId === 'cursor');
+      const opencode = agents.find(a => a.agentId === 'opencode');
+      assert.equal(cursor?.installed, true);
+      assert.equal(cursor?.connectMode, 'config');
+      assert.equal(cursor?.configRuleId, 'cursor_mcp');
+      assert.equal(opencode?.installed, true);
+      assert.equal(opencode?.connectMode, 'config');
+      assert.equal(opencode?.configRuleId, 'opencode_mcp');
+    }
+
+    // Unified Zod schema rejects unknown fields on runtime.invoke BEFORE reaching atom logic
+    const badSchemaWrite = await runtime.invoke(HOST_CAPABILITIES.ATOM_CONFIG, 'write', {
+      featureId: 'mcp_connect',
+      ruleId: 'cursor_mcp',
+      fieldType: 'remote_mcp_entry',
+      value: { serverName: 'openmotion', url: 'https://studio.open-design.ai/mcp' },
+      unexpectedExtraField: 'evil',
+    });
+    assert.equal(badSchemaWrite.ok, false);
+    if (!badSchemaWrite.ok) assert.equal(badSchemaWrite.error.code, 'INVALID_PARAMS');
+
+    const cursorWrite = await runtime.invoke(HOST_CAPABILITIES.ATOM_CONFIG, 'write', {
+      featureId: 'mcp_connect',
+      ruleId: 'cursor_mcp',
+      fieldType: 'remote_mcp_entry',
+      value: { serverName: 'openmotion', url: 'https://studio.open-design.ai/mcp' },
+    });
+    assert.equal(cursorWrite.ok, true);
+    const cursorJson = JSON.parse(readFileSync(path.join(homeDir, '.cursor', 'mcp.json'), 'utf8'));
+    assert.deepEqual(cursorJson.mcpServers.openmotion, {
+      type: 'http',
+      url: 'https://studio.open-design.ai/mcp',
+    });
+
+    const opencodeWrite = await runtime.invoke(HOST_CAPABILITIES.ATOM_CONFIG, 'write', {
+      featureId: 'mcp_connect',
+      ruleId: 'opencode_mcp',
+      fieldType: 'remote_mcp_entry',
+      value: { serverName: 'openmotion', url: 'https://studio.open-design.ai/mcp' },
+    });
+    assert.equal(opencodeWrite.ok, true);
+    const opencodeJson = JSON.parse(readFileSync(path.join(homeDir, '.config', 'opencode', 'opencode.json'), 'utf8'));
+    assert.deepEqual(opencodeJson.mcp.openmotion, {
+      type: 'remote',
+      url: 'https://studio.open-design.ai/mcp',
+    });
+
     // -----------------------------------------------------------------------
     // Step 4: Murmur reuse + Apple codesign requirement + unified install path
     // -----------------------------------------------------------------------

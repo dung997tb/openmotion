@@ -675,4 +675,93 @@ describe('DesktopConnectPanel', () => {
     await flushMicrotasks();
     expect(installMock).toHaveBeenCalledTimes(1);
   });
+
+  it('renders detected declarative Agents (Cursor / OpenCode) and connects them via atom.config.write + telemetry', async () => {
+    let cursorConfigured = false;
+    const configWriteCalls: Array<Record<string, unknown>> = [];
+    const telemetryCalls: Array<Record<string, unknown>> = [];
+    const { bridge } = createDesktopBridgeMock({
+      detectResult: () => ({
+        platform: 'darwin',
+        arch: 'arm64',
+        agents: [
+          { agentId: 'codex', installed: false, mcpConfigured: false, connectMode: 'cli' },
+          { agentId: 'claude', installed: false, mcpConfigured: false, connectMode: 'cli' },
+          {
+            agentId: 'cursor',
+            displayName: 'Cursor',
+            installed: true,
+            mcpConfigured: cursorConfigured,
+            mcpUrl: cursorConfigured ? 'https://motion.open-design.ai/mcp' : undefined,
+            connectMode: 'config',
+            configRuleId: 'cursor_mcp',
+          },
+          {
+            agentId: 'windsurf',
+            displayName: 'Windsurf',
+            installed: false,
+            mcpConfigured: false,
+            connectMode: 'config',
+            configRuleId: 'windsurf_mcp',
+          },
+        ],
+        engine: { installed: false, running: false, port: 0, providerKind: 'none' },
+        detectedAt: '2026-11-23T08:00:00Z',
+      }),
+    });
+    const origCapabilities = bridge.capabilities.bind(bridge);
+    bridge.capabilities = async () => [
+      ...(await origCapabilities()),
+      { name: HOST_CAPABILITIES.ATOM_CONFIG, version: '1.0.0', status: 'available', methods: ['read', 'write'] },
+      { name: HOST_CAPABILITIES.TELEMETRY, version: '1.0.0', status: 'available', methods: ['recordEvent'] },
+    ];
+    const origInvoke = bridge.invoke.bind(bridge);
+    bridge.invoke = (async (capability: string, method: string, params?: Record<string, unknown>) => {
+      if (capability === HOST_CAPABILITIES.ATOM_CONFIG && method === 'write') {
+        configWriteCalls.push(params ?? {});
+        cursorConfigured = true;
+        return hostOk({
+          ruleId: 'cursor_mcp',
+          configPath: '/Users/test/.cursor/mcp.json',
+          changed: true,
+        });
+      }
+      if (capability === HOST_CAPABILITIES.TELEMETRY && method === 'recordEvent') {
+        telemetryCalls.push(params ?? {});
+        return hostOk({ recorded: true });
+      }
+      return origInvoke(capability, method, params);
+    }) as typeof bridge.invoke;
+    window.__OPENMOTION_HOST__ = bridge;
+
+    await mount({ mcpUrl: 'https://motion.open-design.ai/mcp' });
+    await flushMicrotasks();
+
+    // Installed Cursor is rendered; uninstalled Windsurf stays hidden to avoid clutter
+    expect(document.querySelector('[data-agent-id="cursor"]')).not.toBeNull();
+    expect(document.querySelector('[data-agent-id="windsurf"]')).toBeNull();
+
+    const connectCursorBtn = findButton('Connect Cursor')!;
+    expect(connectCursorBtn).toBeDefined();
+    await act(async () => connectCursorBtn.click());
+    await flushMicrotasks();
+
+    expect(configWriteCalls).toHaveLength(1);
+    expect(configWriteCalls[0]).toMatchObject({
+      featureId: 'mcp_connect',
+      ruleId: 'cursor_mcp',
+      fieldType: 'remote_mcp_entry',
+      conflictPolicy: 'abort',
+    });
+    expect(document.querySelector('[data-agent-id="cursor"]')?.getAttribute('data-connection-state')).toBe(
+      'configured',
+    );
+    expect(telemetryCalls).toHaveLength(1);
+    expect(telemetryCalls[0]).toMatchObject({
+      category: 'agent.connect',
+      outcome: 'ok',
+      agentId: 'cursor',
+      connectMode: 'config',
+    });
+  });
 });

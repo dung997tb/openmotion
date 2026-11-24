@@ -47,16 +47,32 @@ type ConnectedAppEvidence = {
   lastUsedAt?: string | null;
 };
 
-type AuthorizedAgentsState = Record<DesktopConnectAgentId, boolean>;
+type AuthorizedAgentsState = Partial<Record<DesktopConnectAgentId, boolean>>;
 type AgentAuthorizationStatus = {
   authorized: AuthorizedAgentsState;
   tokenWithoutCall: AuthorizedAgentsState;
 };
 
-const EMPTY_AUTHORIZED_AGENTS: AuthorizedAgentsState = { codex: false, claude: false };
+const KNOWN_OAUTH_AGENT_PATTERNS: ReadonlyArray<{ id: DesktopConnectAgentId; match: (lower: string) => boolean }> = [
+  { id: 'codex', match: lower => lower.includes('codex') },
+  { id: 'claude', match: lower => lower.includes('claude') },
+  { id: 'cursor', match: lower => lower.includes('cursor') },
+  { id: 'windsurf', match: lower => lower.includes('windsurf') || lower.includes('codeium') },
+  { id: 'opencode', match: lower => lower.includes('opencode') },
+  { id: 'antigravity', match: lower => lower.includes('antigravity') || lower.includes('agy') },
+];
+
+const EMPTY_AUTHORIZED_AGENTS: AuthorizedAgentsState = {
+  codex: false,
+  claude: false,
+  cursor: false,
+  windsurf: false,
+  opencode: false,
+  antigravity: false,
+};
 const EMPTY_AGENT_AUTH_STATUS: AgentAuthorizationStatus = {
-  authorized: { codex: false, claude: false },
-  tokenWithoutCall: { codex: false, claude: false },
+  authorized: { ...EMPTY_AUTHORIZED_AGENTS },
+  tokenWithoutCall: { ...EMPTY_AUTHORIZED_AGENTS },
 };
 
 function isValidUsageTimestamp(value: unknown): boolean {
@@ -70,8 +86,8 @@ function deriveAgentAuthorizationStatus(
   connections: readonly ConnectedAppEvidence[] | undefined,
   workspaceId?: string,
 ): AgentAuthorizationStatus {
-  const authorized: AuthorizedAgentsState = { codex: false, claude: false };
-  const tokenIssued: AuthorizedAgentsState = { codex: false, claude: false };
+  const authorized: AuthorizedAgentsState = { ...EMPTY_AUTHORIZED_AGENTS };
+  const tokenIssued: AuthorizedAgentsState = { ...EMPTY_AUTHORIZED_AGENTS };
   if (!Array.isArray(connections)) {
     return { authorized, tokenWithoutCall: { ...EMPTY_AUTHORIZED_AGENTS } };
   }
@@ -83,22 +99,18 @@ function deriveAgentAuthorizationStatus(
 
     const hasUsedTool = isValidUsageTimestamp(item.lastUsedAt);
     const name = typeof item.clientName === 'string' ? item.clientName.toLowerCase() : '';
-    if (name.includes('codex')) {
-      if (hasUsedTool) authorized.codex = true;
-      else tokenIssued.codex = true;
-    }
-    if (name.includes('claude')) {
-      if (hasUsedTool) authorized.claude = true;
-      else tokenIssued.claude = true;
+    for (const pattern of KNOWN_OAUTH_AGENT_PATTERNS) {
+      if (pattern.match(name)) {
+        if (hasUsedTool) authorized[pattern.id] = true;
+        else tokenIssued[pattern.id] = true;
+      }
     }
   }
-  return {
-    authorized,
-    tokenWithoutCall: {
-      codex: tokenIssued.codex && !authorized.codex,
-      claude: tokenIssued.claude && !authorized.claude,
-    },
-  };
+  const tokenWithoutCall: AuthorizedAgentsState = {};
+  for (const pattern of KNOWN_OAUTH_AGENT_PATTERNS) {
+    tokenWithoutCall[pattern.id] = Boolean(tokenIssued[pattern.id] && !authorized[pattern.id]);
+  }
+  return { authorized, tokenWithoutCall };
 }
 
 export function McpConnectionPage({

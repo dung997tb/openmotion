@@ -52,12 +52,16 @@ export type SignedAgentConfigRule = {
   fieldType: BuiltinConfigFieldType;
   /** Key path inside the file (e.g. "mcpServers" or "mcp_servers"). */
   sectionPath: string;
+  /** Optional entry shape for remote MCP entries (default 'standard' -> { type: 'http', url }; 'opencode_remote' -> { type: 'remote', url }). */
+  entryFormat?: 'standard' | 'opencode_remote';
 };
 
 export type SignedAgentProbeRule = {
   agentId: string;
   displayName: string;
   binaryName: string;
+  /** Optional home-relative directory indicating a GUI/config-first Agent is installed even without a PATH CLI binary (e.g. ".cursor"). */
+  detectHomeDir?: string;
   versionTemplateId?: string;
   mcpAddTemplateId?: string;
   mcpRemoveTemplateId?: string;
@@ -145,6 +149,58 @@ export type SignedConfigValidationIssue = {
   message: string;
 };
 
+const FORBIDDEN_SENSITIVE_HOME_ROOTS = new Set([
+  '.ssh',
+  '.gnupg',
+  '.aws',
+  '.kube',
+  '.docker',
+  '.git',
+  '.npmrc',
+  '.netrc',
+  '.bashrc',
+  '.bash_profile',
+  '.zshrc',
+  '.zprofile',
+  '.profile',
+  '.env',
+  '.gitconfig',
+]);
+
+function isSafeHomeRelativeSubpath(rawPath: string): boolean {
+  if (!rawPath || typeof rawPath !== 'string') return false;
+  if (
+    rawPath.startsWith('/') ||
+    rawPath.startsWith('\\') ||
+    rawPath.includes('..') ||
+    rawPath.includes('\0') ||
+    /^[a-zA-Z]:/.test(rawPath)
+  ) {
+    return false;
+  }
+  const segments = rawPath.split(/[\\/]+/).filter(Boolean);
+  if (segments.length === 0) return false;
+  if (segments.some(seg => seg === '.' || seg === '..')) return false;
+  const firstSegment = segments[0]!.toLowerCase();
+  if (FORBIDDEN_SENSITIVE_HOME_ROOTS.has(firstSegment)) return false;
+  return true;
+}
+
+/**
+ * Built-in shell bound ensuring declarative MCP config rules can only write
+ * `.json` or `.toml` files under non-sensitive home-relative paths.
+ */
+export function isAllowedMcpConfigRelativePath(
+  relativePath: string,
+  fileFormat?: 'json' | 'toml',
+): boolean {
+  if (!isSafeHomeRelativeSubpath(relativePath)) return false;
+  const lower = relativePath.toLowerCase();
+  if (fileFormat === 'json') return lower.endsWith('.json');
+  if (fileFormat === 'toml') return lower.endsWith('.toml');
+  return lower.endsWith('.json') || lower.endsWith('.toml');
+}
+
 /**
  * Validates that a SignedConfigPayload strictly stays within the shell's
  * built-in security rules (domain scope, publisher list, field types,
@@ -187,6 +243,12 @@ export function validateSignedConfigPayloadBounds(
   }
 
   for (const [key, agent] of Object.entries(payload.agents ?? {})) {
+    if (agent.detectHomeDir !== undefined && !isSafeHomeRelativeSubpath(agent.detectHomeDir)) {
+      issues.push({
+        path: `agents.${key}.detectHomeDir`,
+        message: `Agent detectHomeDir must be a safe home-relative path: ${agent.detectHomeDir}`,
+      });
+    }
     for (const field of ['versionTemplateId', 'mcpAddTemplateId', 'mcpRemoveTemplateId'] as const) {
       const tplId = agent[field];
       if (tplId !== undefined && !BUILTIN_TEMPLATE_MAP.has(tplId)) {
@@ -205,16 +267,10 @@ export function validateSignedConfigPayloadBounds(
         message: `Unsupported config field type: ${String(rule.fieldType)}`,
       });
     }
-    if (
-      !rule.homeRelativePath ||
-      rule.homeRelativePath.startsWith('/') ||
-      rule.homeRelativePath.startsWith('\\') ||
-      rule.homeRelativePath.includes('..') ||
-      /^[a-zA-Z]:/.test(rule.homeRelativePath)
-    ) {
+    if (!isAllowedMcpConfigRelativePath(rule.homeRelativePath, rule.fileFormat)) {
       issues.push({
         path: `configRules.${key}.homeRelativePath`,
-        message: `Config path must be a safe home-relative path: ${rule.homeRelativePath}`,
+        message: `Config path must be a safe home-relative .json/.toml path: ${rule.homeRelativePath}`,
       });
     }
   }

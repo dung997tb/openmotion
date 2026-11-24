@@ -112,7 +112,14 @@ test('bundled default config passes bounds validation for all channels and marks
   assert.equal(stable.features?.mcp_connect?.version, '1.0.0');
   assert.ok(stable.features?.mcp_connect?.commandTemplateIds?.includes('codex.mcp.add_remote'));
   assert.ok(stable.features?.mcp_connect?.commandTemplateIds?.includes('claude.mcp.add_remote'));
-  assert.deepEqual(stable.features?.mcp_connect?.configRuleIds, ['codex_mcp', 'claude_mcp']);
+  assert.deepEqual(stable.features?.mcp_connect?.configRuleIds, [
+    'codex_mcp',
+    'claude_mcp',
+    'cursor_mcp',
+    'windsurf_mcp',
+    'opencode_mcp',
+    'antigravity_mcp',
+  ]);
 
   const testPayload = createBundledDefaultConfigPayload('test');
   assert.deepEqual(validateSignedConfigPayloadBounds(testPayload, { channel: 'test' }), []);

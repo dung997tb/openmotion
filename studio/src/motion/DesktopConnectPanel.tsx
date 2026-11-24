@@ -3,6 +3,7 @@ import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import {
   HOST_CAPABILITIES,
+  type AtomConfigWriteResult,
   type AtomDetectResult,
   type AtomExecResult,
   type DetectedAgentCli,
@@ -33,7 +34,14 @@ import {
   subscribeLocalConnectBridge,
 } from '../utils/localConnectBridge';
 
-export type DesktopConnectAgentId = 'codex' | 'claude';
+export type DesktopConnectAgentId =
+  | 'codex'
+  | 'claude'
+  | 'cursor'
+  | 'windsurf'
+  | 'opencode'
+  | 'antigravity'
+  | (string & {});
 
 export type DesktopConnectAgentConnectionState =
   | 'not-installed'
@@ -73,8 +81,10 @@ type AgentMeta = {
   id: DesktopConnectAgentId;
   label: string;
   providerIconId: string;
-  templateId: 'codex.mcp.add_remote' | 'claude.mcp.add_remote';
-  buildFallbackCommand: (serverName: string, mcpUrl: string) => string;
+  connectMode: 'cli' | 'config';
+  templateId?: 'codex.mcp.add_remote' | 'claude.mcp.add_remote';
+  configRuleId?: string;
+  buildFallbackCommand?: (serverName: string, mcpUrl: string) => string;
 };
 
 type AgentConflictState = {
@@ -114,6 +124,7 @@ const SUPPORTED_AGENTS: readonly AgentMeta[] = [
     id: 'codex',
     label: 'Codex',
     providerIconId: 'codex',
+    connectMode: 'cli',
     templateId: 'codex.mcp.add_remote',
     buildFallbackCommand: (serverName, mcpUrl) =>
       `codex mcp add ${serverName} --url ${mcpUrl}`,
@@ -122,11 +133,19 @@ const SUPPORTED_AGENTS: readonly AgentMeta[] = [
     id: 'claude',
     label: 'Claude Code',
     providerIconId: 'claude-code',
+    connectMode: 'cli',
     templateId: 'claude.mcp.add_remote',
     buildFallbackCommand: (serverName, mcpUrl) =>
       `claude mcp add --scope user --transport http ${serverName} ${mcpUrl}`,
   },
 ] as const;
+
+const KNOWN_DECLARATIVE_AGENT_ICONS: Record<string, string> = {
+  cursor: 'cursor-agent',
+  windsurf: 'windsurf',
+  opencode: 'opencode',
+  antigravity: 'google',
+};
 
 function isAgentAuthorized(
   evidence: DesktopConnectPanelProps['hasAuthorizedConnection'],
@@ -214,6 +233,8 @@ export function DesktopConnectPanel({
 
   const canDetect = Boolean(host.bridge && host.has(HOST_CAPABILITIES.ATOM_DETECT, '1.0.0'));
   const canExec = Boolean(host.bridge && host.has(HOST_CAPABILITIES.ATOM_EXEC, '1.0.0'));
+  const canConfigWrite = Boolean(host.bridge && host.has(HOST_CAPABILITIES.ATOM_CONFIG, '1.0.0'));
+  const canRecordTelemetry = Boolean(host.bridge && host.has(HOST_CAPABILITIES.TELEMETRY, '1.0.0'));
   const canCheckUpdates = Boolean(host.hostKind === 'desktop' && host.has(HOST_CAPABILITIES.UPDATER, '1.0.0'));
   const canReadSignedConfig = Boolean(host.bridge && host.has(HOST_CAPABILITIES.SIGNED_CONFIG, '1.0.0'));
   const localConnectStatus = host.hostKind === 'connect-script' ? getLocalConnectStatus() : null;
@@ -363,7 +384,11 @@ export function DesktopConnectPanel({
 
   const connectAgent = useCallback(
     async (meta: AgentMeta, conflictPolicy: 'abort' | 'replace' = 'abort') => {
-      if (!host.bridge || !canExec) {
+      const canRunThisAgent =
+        meta.connectMode === 'config'
+          ? Boolean(host.bridge && canConfigWrite && meta.configRuleId)
+          : Boolean(host.bridge && canExec && meta.templateId);
+      if (!host.bridge || !canRunThisAgent) {
         toast.showToast(t('One-click setup is unavailable for this connection.'), 'error', 'feedback');
         return;
       }
@@ -377,42 +402,80 @@ export function DesktopConnectPanel({
         );
         return;
       }
+      const startedAt = Date.now();
+      const emitTelemetry = (
+        outcome: 'ok' | 'conflict' | 'user_denied' | 'version_too_old' | 'error',
+        errorCode?: string,
+      ) => {
+        if (!canRecordTelemetry || !host.bridge) return;
+        void host.bridge
+          .invoke(HOST_CAPABILITIES.TELEMETRY, 'recordEvent', {
+            category: 'agent.connect',
+            outcome,
+            durationMs: Date.now() - startedAt,
+            agentId: meta.id,
+            connectMode: meta.connectMode,
+            ...(errorCode ? { errorCode } : {}),
+          })
+          .catch(() => {});
+      };
+
       setConnectingAgent(meta.id);
       try {
-        const params = {
-          featureId: 'mcp_connect',
-          templateId: meta.templateId,
-          args: {
-            serverName: resolvedServerName,
-          },
-          conflictPolicy,
-        };
-        const primaryMethod = resolveCapabilityMethod(
-          host.capabilities,
-          HOST_CAPABILITIES.ATOM_EXEC,
-          ['run', 'exec'],
-        );
-        let result = await invokeHostAtom<AtomExecResult>(
-          HOST_CAPABILITIES.ATOM_EXEC,
-          primaryMethod,
-          params,
-          { bridge: host.bridge },
-        );
-        if (
-          !result.ok &&
-          result.error.code === 'UNSUPPORTED' &&
-          result.error.details?.reason !== 'SHELL_VERSION_TOO_OLD' &&
-          primaryMethod === 'run'
-        ) {
+        let result: Awaited<ReturnType<typeof invokeHostAtom<AtomExecResult | AtomConfigWriteResult>>>;
+        if (meta.connectMode === 'config' && meta.configRuleId) {
+          result = await invokeHostAtom<AtomConfigWriteResult>(
+            HOST_CAPABILITIES.ATOM_CONFIG,
+            'write',
+            {
+              featureId: 'mcp_connect',
+              ruleId: meta.configRuleId,
+              fieldType: 'remote_mcp_entry',
+              value: {
+                serverName: resolvedServerName,
+                url: resolvedMcpUrl,
+              },
+              conflictPolicy,
+            },
+            { bridge: host.bridge },
+          );
+        } else {
+          const params = {
+            featureId: 'mcp_connect',
+            templateId: meta.templateId!,
+            args: {
+              serverName: resolvedServerName,
+            },
+            conflictPolicy,
+          };
+          const primaryMethod = resolveCapabilityMethod(
+            host.capabilities,
+            HOST_CAPABILITIES.ATOM_EXEC,
+            ['run', 'exec'],
+          );
           result = await invokeHostAtom<AtomExecResult>(
             HOST_CAPABILITIES.ATOM_EXEC,
-            'exec',
+            primaryMethod,
             params,
             { bridge: host.bridge },
           );
+          if (
+            !result.ok &&
+            result.error.code === 'UNSUPPORTED' &&
+            result.error.details?.reason !== 'SHELL_VERSION_TOO_OLD' &&
+            primaryMethod === 'run'
+          ) {
+            result = await invokeHostAtom<AtomExecResult>(
+              HOST_CAPABILITIES.ATOM_EXEC,
+              'exec',
+              params,
+              { bridge: host.bridge },
+            );
+          }
         }
 
         if (result.ok) {
+          emitTelemetry('ok');
           setWrittenAgents(previous => ({ ...previous, [meta.id]: true }));
           setConflicts(previous => {
             const next = { ...previous };
@@ -440,6 +503,7 @@ export function DesktopConnectPanel({
           host.info?.shellVersion,
         );
         if (upgrade) {
+          emitTelemetry('version_too_old', result.error.code);
           setRuntimeUpgradeRequired(upgrade);
           toast.showToast(
             t('Update the OpenDesign desktop app to v{version} or newer to use one-click setup.', {
@@ -452,6 +516,7 @@ export function DesktopConnectPanel({
         }
 
         if (result.error.code === 'CONFLICT') {
+          emitTelemetry('conflict', result.error.code);
           const detected = detection?.agents.find(item => item.agentId === meta.id);
           const existingUrl =
             typeof result.error.details?.existingUrl === 'string'
@@ -485,10 +550,12 @@ export function DesktopConnectPanel({
         }
 
         if (result.error.code === 'USER_DENIED') {
+          emitTelemetry('user_denied', result.error.code);
           toast.showToast(t('Connection canceled.'), 'info', 'feedback');
           return;
         }
 
+        emitTelemetry('error', result.error.code);
         toast.showToast(result.error.message || t('Could not write MCP configuration.'), 'error', 'feedback');
       } finally {
         setConnectingAgent(null);
@@ -499,9 +566,12 @@ export function DesktopConnectPanel({
       host.capabilities,
       host.info?.shellVersion,
       canExec,
+      canConfigWrite,
+      canRecordTelemetry,
       actionsDisabledByVersion,
       shellUpgradeRequired?.requiredVersion,
       resolvedServerName,
+      resolvedMcpUrl,
       detection,
       onConfigured,
       runDetection,
@@ -593,6 +663,25 @@ export function DesktopConnectPanel({
       map.set(agent.agentId, agent);
     }
     return map;
+  }, [detection]);
+
+  const visibleHostAgents = useMemo<AgentMeta[]>(() => {
+    const list: AgentMeta[] = [...SUPPORTED_AGENTS];
+    const seen = new Set<string>(list.map(item => item.id));
+    for (const agent of detection?.agents ?? []) {
+      if (seen.has(agent.agentId)) continue;
+      if (!agent.installed && !agent.mcpConfigured) continue;
+      if (agent.connectMode !== 'config' || !agent.configRuleId) continue;
+      seen.add(agent.agentId);
+      list.push({
+        id: agent.agentId,
+        label: agent.displayName || agent.agentId,
+        providerIconId: KNOWN_DECLARATIVE_AGENT_ICONS[agent.agentId] ?? 'mcp',
+        connectMode: 'config',
+        configRuleId: agent.configRuleId,
+      });
+    }
+    return list;
   }, [detection]);
 
   return (
@@ -777,7 +866,7 @@ export function DesktopConnectPanel({
             </div>
           ) : (
             <div style={{ width: '100%', display: 'grid' }}>
-              {SUPPORTED_AGENTS.map((meta, index) => {
+              {visibleHostAgents.map((meta, index) => {
                 const detected = detectedMap.get(meta.id);
                 const conflict = conflicts[meta.id];
                 const conflictKept = Boolean(keptConflicts[meta.id]);
@@ -792,6 +881,7 @@ export function DesktopConnectPanel({
                 });
                 const existingUrl = conflict?.existingUrl ?? detected?.mcpUrl;
                 const busy = connectingAgent === meta.id;
+                const canConnectMeta = meta.connectMode === 'config' ? canConfigWrite : canExec;
 
                 return (
                   <div
@@ -804,7 +894,7 @@ export function DesktopConnectPanel({
                       paddingBlock: 'var(--motion-space-14)',
                       borderTop: index > 0 ? '1px solid var(--motion-border-subtle)' : undefined,
                       paddingTop: index === 0 ? 0 : 'var(--motion-space-14)',
-                      paddingBottom: index === SUPPORTED_AGENTS.length - 1 ? 0 : 'var(--motion-space-14)',
+                      paddingBottom: index === visibleHostAgents.length - 1 ? 0 : 'var(--motion-space-14)',
                     }}
                   >
                     <div className="om-settings-row" style={{ flexWrap: 'wrap', gap: 'var(--motion-space-12)' }}>
@@ -860,7 +950,7 @@ export function DesktopConnectPanel({
                             variant="primary"
                             size="sm"
                             loading={busy}
-                            disabled={!canExec || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
+                            disabled={!canConnectMeta || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
                             onClick={() => void connectAgent(meta, 'abort')}
                             icon={<RemixIcon name="plug-line" size={14} />}
                           >
@@ -886,7 +976,7 @@ export function DesktopConnectPanel({
                               variant="ghost"
                               size="sm"
                               loading={busy}
-                              disabled={!canExec || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
+                              disabled={!canConnectMeta || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
                               onClick={() => void connectAgent(meta, 'abort')}
                             >
                               {t('Re-apply config')}
@@ -899,7 +989,7 @@ export function DesktopConnectPanel({
                             variant="ghost"
                             size="sm"
                             loading={busy}
-                            disabled={!canExec || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
+                            disabled={!canConnectMeta || actionsDisabledByVersion || (connectingAgent !== null && !busy)}
                             onClick={() => void connectAgent(meta, 'abort')}
                           >
                             {t('Re-apply config')}
@@ -1121,8 +1211,8 @@ function FallbackCommandList({
   const { t } = useI18n();
   return (
     <div style={{ display: 'grid', gap: 'var(--motion-space-10)', width: '100%' }}>
-      {SUPPORTED_AGENTS.map(meta => {
-        const command = meta.buildFallbackCommand(serverName, mcpUrl);
+      {SUPPORTED_AGENTS.filter(meta => Boolean(meta.buildFallbackCommand)).map(meta => {
+        const command = meta.buildFallbackCommand!(serverName, mcpUrl);
         return (
           <div
             key={meta.id}

@@ -88,7 +88,11 @@ export type DetectAtomDeps = {
 
 type AgentProbeSpec = {
   agentId: string;
+  displayName?: string;
   binaryName: string;
+  detectHomeDir?: string;
+  connectMode: 'cli' | 'config';
+  configRuleId?: string;
   configSpec?: {
     homeRelativePath: string;
     fileFormat: 'json' | 'toml';
@@ -99,7 +103,10 @@ type AgentProbeSpec = {
 const DEFAULT_AGENT_SPECS: readonly AgentProbeSpec[] = [
   {
     agentId: 'codex',
+    displayName: 'Codex',
     binaryName: 'codex',
+    connectMode: 'cli',
+    configRuleId: 'codex_mcp',
     configSpec: {
       homeRelativePath: '.codex/config.toml',
       fileFormat: 'toml',
@@ -108,7 +115,10 @@ const DEFAULT_AGENT_SPECS: readonly AgentProbeSpec[] = [
   },
   {
     agentId: 'claude',
+    displayName: 'Claude Code',
     binaryName: 'claude',
+    connectMode: 'cli',
+    configRuleId: 'claude_mcp',
     configSpec: {
       homeRelativePath: '.claude.json',
       fileFormat: 'json',
@@ -343,7 +353,11 @@ export class DetectAtom {
       const configRule = agent.configRuleId ? signedConfig.configRules?.[agent.configRuleId] : undefined;
       byId.set(agent.agentId, {
         agentId: agent.agentId,
+        displayName: agent.displayName ?? existing?.displayName,
         binaryName: agent.binaryName,
+        detectHomeDir: agent.detectHomeDir ?? existing?.detectHomeDir,
+        connectMode: agent.mcpAddTemplateId ? 'cli' : configRule ? 'config' : existing?.connectMode ?? 'cli',
+        configRuleId: configRule?.ruleId ?? agent.configRuleId ?? existing?.configRuleId,
         configSpec: configRule
           ? {
               homeRelativePath: configRule.homeRelativePath,
@@ -406,15 +420,26 @@ export class DetectAtom {
       }
     }
 
+    let detectDirExists = false;
+    if (!binaryPath && spec.detectHomeDir) {
+      const safeDetectDir = resolveSafeHomePath(this.homeDir, spec.detectHomeDir);
+      if (safeDetectDir.ok && existsSync(safeDetectDir.resolvedPath)) {
+        detectDirExists = true;
+      }
+    }
+
     return {
       agentId: spec.agentId,
-      installed: Boolean(binaryPath),
+      ...(spec.displayName ? { displayName: spec.displayName } : {}),
+      installed: Boolean(binaryPath) || detectDirExists,
       ...(binaryPath ? { binaryPath } : {}),
       ...(version ? { version } : {}),
       mcpConfigured,
       ...(mcpUrl ? { mcpUrl } : {}),
       ...(mcpConflict !== undefined ? { mcpConflict } : {}),
       ...(configPath ? { configPath } : {}),
+      connectMode: spec.connectMode,
+      ...(spec.configRuleId ? { configRuleId: spec.configRuleId } : {}),
     };
   }
 

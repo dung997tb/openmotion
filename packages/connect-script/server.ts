@@ -21,6 +21,7 @@ import {
   type ConnectScriptInvokeRequest,
 } from '../../shared/connect-script-protocol.ts';
 import { isUrlInAllowedDomainScope } from '../../shared/desktop-builtin-rules.ts';
+import { ConnectScriptInvokeRequestSchema } from '../../shared/desktop-schemas.ts';
 import {
   hostErr,
   type HostReleaseChannel,
@@ -283,23 +284,22 @@ function parseInvokeRequestBody(
     return { ok: false, message: 'Request body must be a JSON object' };
   }
 
-  const { capability, method, params } = parsed;
-  if (typeof capability !== 'string' || capability.trim().length === 0) {
-    return { ok: false, message: 'Field "capability" must be a non-empty string' };
-  }
-  if (typeof method !== 'string' || method.trim().length === 0) {
-    return { ok: false, message: 'Field "method" must be a non-empty string' };
-  }
-  if (params !== undefined && !isPlainRecord(params)) {
-    return { ok: false, message: 'Field "params" must be a JSON object when provided' };
+  const validated = ConnectScriptInvokeRequestSchema.safeParse(parsed);
+  if (!validated.success) {
+    const first = validated.error.issues[0];
+    const field = first?.path.length ? `"${first.path.join('.')}" ` : '';
+    return {
+      ok: false,
+      message: first ? `Field ${field}${first.message}` : 'Invalid invoke request payload',
+    };
   }
 
   return {
     ok: true,
     request: {
-      capability: capability.trim(),
-      method: method.trim(),
-      ...(params !== undefined ? { params } : {}),
+      capability: validated.data.capability,
+      method: validated.data.method,
+      ...(validated.data.params !== undefined ? { params: validated.data.params } : {}),
     },
   };
 }

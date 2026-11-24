@@ -35,6 +35,9 @@ import {
 import { SignedConfigManager } from '../../packages/signed-config/index.ts';
 import { DesktopAuthHandoffManager } from './auth-handoff.ts';
 import { createElectronSafeSecretStore } from './safe-secret-store.ts';
+import { DesktopTelemetryCollector } from './telemetry.ts';
+import { validateHostMethodParams } from '../../shared/desktop-schemas.ts';
+import type { DesktopTelemetryRecordInput } from '../../shared/desktop-telemetry.ts';
 import {
   CapabilityRegistry,
   createAccountCapabilityModule,
@@ -154,6 +157,16 @@ const logger = new DesktopLogger({
   logDir,
   redactPaths: [distDir, dataDir, logDir, os.homedir()],
 });
+
+const telemetry = new DesktopTelemetryCollector({
+  dataDir,
+  channel: releaseChannel,
+  platform,
+  arch: process.arch,
+  shellVersion: app.getVersion(),
+  allowLocalDevLoopback,
+});
+const appStartupStartedAt = Date.now();
 
 logger.markSessionStarted({
   version: app.getVersion(),
@@ -565,6 +578,13 @@ function registerCapabilities(): void {
       },
       openExternal: url => openExternalSafe(url),
       notifyRendererReady: () => {
+        if (!rendererReady) {
+          telemetry.record({
+            category: 'app.startup',
+            outcome: 'ok',
+            durationMs: Date.now() - appStartupStartedAt,
+          });
+        }
         rendererReady = true;
         revealMainWindow();
         const queued = pendingMenuActions;
@@ -583,14 +603,42 @@ function registerCapabilities(): void {
   registry.register(
     createUpdaterCapabilityModule({
       getUpdateState: () => updater.getState(),
-      checkForUpdates: () => updater.checkForUpdates(),
-      downloadUpdate: () => updater.downloadUpdate(),
-      installUpdateNow: () =>
-        updater.installUpdateNow(async () => {
+      checkForUpdates: async () => {
+        const startedAt = Date.now();
+        const state = await updater.checkForUpdates();
+        telemetry.record({
+          category: 'updater.check',
+          outcome: state.status === 'error' ? 'error' : 'ok',
+          durationMs: Date.now() - startedAt,
+          ...(state.availableVersion ? { targetVersion: state.availableVersion } : {}),
+        });
+        return state;
+      },
+      downloadUpdate: async () => {
+        const startedAt = Date.now();
+        const state = await updater.downloadUpdate();
+        telemetry.record({
+          category: 'updater.download',
+          outcome: state.status === 'error' ? 'error' : 'ok',
+          durationMs: Date.now() - startedAt,
+          ...(state.availableVersion ? { targetVersion: state.availableVersion } : {}),
+        });
+        return state;
+      },
+      installUpdateNow: async () => {
+        const startedAt = Date.now();
+        const result = await updater.installUpdateNow(async () => {
           shuttingDown = true;
           authHandoff.cancelLogin();
           logger.markSessionEnded('install-update');
-        }),
+        });
+        telemetry.record({
+          category: 'updater.install',
+          outcome: result.ok ? 'ok' : 'error',
+          durationMs: Date.now() - startedAt,
+        });
+        return result;
+      },
     }),
   );
 
@@ -605,10 +653,43 @@ function registerCapabilities(): void {
   registry.register(
     createAccountCapabilityModule({
       startSignIn: async params => {
-        const result = await authHandoff.startLogin({
-          switchAccount: params?.switchAccount,
-        });
-        return result as unknown as Record<string, unknown>;
+        const startedAt = Date.now();
+        try {
+          const result = await authHandoff.startLogin({
+            switchAccount: params?.switchAccount,
+          });
+          void result.completion
+            .then(finalState => {
+              const outcome =
+                finalState.status === 'authenticated'
+                  ? 'authenticated'
+                  : finalState.status === 'canceled'
+                    ? 'cancelled'
+                    : finalState.errorCode === 'TIMEOUT'
+                      ? 'timeout'
+                      : 'error';
+              telemetry.record({
+                category: 'auth.handoff',
+                outcome,
+                durationMs: Date.now() - startedAt,
+              });
+            })
+            .catch(() => {
+              telemetry.record({
+                category: 'auth.handoff',
+                outcome: 'error',
+                durationMs: Date.now() - startedAt,
+              });
+            });
+          return result as unknown as Record<string, unknown>;
+        } catch (error) {
+          telemetry.record({
+            category: 'auth.handoff',
+            outcome: 'error',
+            durationMs: Date.now() - startedAt,
+          });
+          throw error;
+        }
       },
       cancelSignIn: () => authHandoff.cancelLogin() as unknown as Record<string, unknown>,
       refreshAccount: () => authHandoff.getState() as unknown as Record<string, unknown>,
@@ -641,7 +722,15 @@ function registerCapabilities(): void {
       },
       refresh: {
         handler: async () => {
+          const startedAt = Date.now();
           const result = await signedConfig.fetchAndApply();
+          telemetry.record({
+            category: 'signed_config.refresh',
+            outcome: result.applied ? (result.unchanged ? 'unchanged' : 'applied') : 'rejected',
+            durationMs: Date.now() - startedAt,
+            ...(result.applied && typeof result.sequence === 'number' ? { sequence: result.sequence } : {}),
+            ...(!result.applied && result.code ? { errorCode: result.code } : {}),
+          });
           if (result.applied && !result.unchanged) {
             registry.emit(HOST_CAPABILITIES.SIGNED_CONFIG, 'updated', signedConfig.getStatus());
             maybeReloadMainWindowForSignedConfigChange();
@@ -652,6 +741,52 @@ function registerCapabilities(): void {
     },
   };
   registry.register(signedConfigModule);
+
+  const telemetryModule: CapabilityModule = {
+    name: HOST_CAPABILITIES.TELEMETRY,
+    version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.TELEMETRY],
+    status: 'available',
+    methods: {
+      getSummary: {
+        handler: async params => {
+          const checked = validateHostMethodParams(HOST_CAPABILITIES.TELEMETRY, 'getSummary', params);
+          if (!checked.ok) return checked;
+          return hostOk(telemetry.getSummary());
+        },
+      },
+      recordEvent: {
+        handler: async params => {
+          const checked = validateHostMethodParams<DesktopTelemetryRecordInput>(
+            HOST_CAPABILITIES.TELEMETRY,
+            'recordEvent',
+            params,
+          );
+          if (!checked.ok) return checked;
+          const recorded = telemetry.record(checked.data);
+          return hostOk({ recorded: Boolean(recorded), event: recorded });
+        },
+      },
+      setEnabled: {
+        handler: async params => {
+          const checked = validateHostMethodParams<{ enabled: boolean }>(
+            HOST_CAPABILITIES.TELEMETRY,
+            'setEnabled',
+            params,
+          );
+          if (!checked.ok) return checked;
+          return hostOk(telemetry.setEnabled(checked.data.enabled));
+        },
+      },
+      reset: {
+        handler: async params => {
+          const checked = validateHostMethodParams(HOST_CAPABILITIES.TELEMETRY, 'reset', params);
+          if (!checked.ok) return checked;
+          return hostOk(telemetry.reset());
+        },
+      },
+    },
+  };
+  registry.register(telemetryModule);
 
   for (const [capName, atomHandler] of Object.entries(atomsRuntime.capabilities)) {
     const methods: CapabilityModule['methods'] = {};

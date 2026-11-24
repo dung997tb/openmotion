@@ -23,6 +23,7 @@ import {
   type HostReleaseChannel,
 } from '../../shared/desktop-contract.ts';
 import type { SignedConfigPayload } from '../../shared/signed-config.ts';
+import { validateHostMethodParams } from '../../shared/desktop-schemas.ts';
 import {
   ConfigAtom,
   createConfigAtom,
@@ -261,8 +262,10 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         methods: ['scan'],
       },
       async invoke(method, params) {
-        if (method === 'scan' || method === 'detect') {
-          return detectAtom.scan((params ?? {}) as AtomDetectParams);
+        if (method === 'scan' || method === 'detect' || method === 'detectAll') {
+          const checked = validateHostMethodParams<AtomDetectParams>(HOST_CAPABILITIES.ATOM_DETECT, method, params);
+          if (!checked.ok) return checked;
+          return detectAtom.scan(checked.data);
         }
         return hostErr('UNSUPPORTED', `Unknown method "${method}" for ${HOST_CAPABILITIES.ATOM_DETECT}`);
       },
@@ -276,11 +279,10 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         methods: ['run', 'preview'],
       },
       async invoke(method, params) {
-        if (method === 'run') {
-          return execAtom.run((params ?? {}) as unknown as AtomExecParams);
-        }
-        if (method === 'preview') {
-          return execAtom.preview((params ?? {}) as unknown as AtomExecParams);
+        if (method === 'run' || method === 'preview') {
+          const checked = validateHostMethodParams<AtomExecParams>(HOST_CAPABILITIES.ATOM_EXEC, method, params);
+          if (!checked.ok) return checked;
+          return method === 'run' ? execAtom.run(checked.data) : execAtom.preview(checked.data);
         }
         return hostErr('UNSUPPORTED', `Unknown method "${method}" for ${HOST_CAPABILITIES.ATOM_EXEC}`);
       },
@@ -294,17 +296,25 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         methods: ['install', 'preview', 'status', 'uninstall'],
       },
       async invoke(method, params) {
-        if (method === 'install') {
-          return installComponentAtom.install((params ?? {}) as unknown as AtomInstallComponentParams);
-        }
-        if (method === 'preview') {
-          return installComponentAtom.preview((params ?? {}) as unknown as AtomInstallComponentParams);
+        if (method === 'install' || method === 'preview' || method === 'uninstall') {
+          const checked = validateHostMethodParams<AtomInstallComponentParams>(
+            HOST_CAPABILITIES.ATOM_INSTALL_COMPONENT,
+            method,
+            params,
+          );
+          if (!checked.ok) return checked;
+          if (method === 'install') return installComponentAtom.install(checked.data);
+          if (method === 'preview') return installComponentAtom.preview(checked.data);
+          return installComponentAtom.uninstall(checked.data);
         }
         if (method === 'status') {
-          return installComponentAtom.status((params ?? {}) as unknown as { componentId: string });
-        }
-        if (method === 'uninstall') {
-          return installComponentAtom.uninstall((params ?? {}) as unknown as AtomInstallComponentParams);
+          const checked = validateHostMethodParams<{ componentId: string }>(
+            HOST_CAPABILITIES.ATOM_INSTALL_COMPONENT,
+            method,
+            params,
+          );
+          if (!checked.ok) return checked;
+          return installComponentAtom.status(checked.data);
         }
         return hostErr('UNSUPPORTED', `Unknown method "${method}" for ${HOST_CAPABILITIES.ATOM_INSTALL_COMPONENT}`);
       },
@@ -318,25 +328,59 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
         methods: ['start', 'poll', 'status', 'inject', 'revoke', 'retryPendingRevokes'],
       },
       async invoke(method, params) {
-        if (method === 'start') {
-          return credentialAtom.start((params ?? {}) as unknown as AtomCredentialStartParams);
+        if (method === 'start' || method === 'startDeviceAuth') {
+          const checked = validateHostMethodParams<AtomCredentialStartParams>(
+            HOST_CAPABILITIES.ATOM_CREDENTIAL,
+            method,
+            params,
+          );
+          if (!checked.ok) return checked;
+          return credentialAtom.start(checked.data);
         }
-        if (method === 'poll') {
-          return credentialAtom.poll((params ?? {}) as unknown as AtomCredentialPollParams);
+        if (method === 'poll' || method === 'pollDeviceAuth') {
+          const checked = validateHostMethodParams<AtomCredentialPollParams>(
+            HOST_CAPABILITIES.ATOM_CREDENTIAL,
+            method,
+            params,
+          );
+          if (!checked.ok) return checked;
+          return credentialAtom.poll(checked.data);
         }
         if (method === 'status') {
-          return credentialAtom.status((params ?? {}) as unknown as { credentialId: string });
+          const checked = validateHostMethodParams<{ credentialId: string; installationId?: string }>(
+            HOST_CAPABILITIES.ATOM_CREDENTIAL,
+            method,
+            params,
+          );
+          if (!checked.ok) return checked;
+          return credentialAtom.status(checked.data);
         }
         if (method === 'inject') {
-          return credentialAtom.inject((params ?? {}) as unknown as AtomCredentialInjectParams);
+          const checked = validateHostMethodParams<AtomCredentialInjectParams>(
+            HOST_CAPABILITIES.ATOM_CREDENTIAL,
+            method,
+            params,
+          );
+          if (!checked.ok) return checked;
+          return credentialAtom.inject(checked.data);
         }
         if (method === 'revoke') {
-          return credentialAtom.revoke((params ?? {}) as unknown as AtomCredentialRevokeParams);
+          const checked = validateHostMethodParams<AtomCredentialRevokeParams>(
+            HOST_CAPABILITIES.ATOM_CREDENTIAL,
+            method,
+            params,
+          );
+          if (!checked.ok) return checked;
+          return credentialAtom.revoke(checked.data);
         }
         if (method === 'retryPendingRevokes') {
-          return credentialAtom.retryPendingRevokes(
-            (params ?? {}) as unknown as AtomCredentialRetryPendingRevokesParams,
+          const checked = validateHostMethodParams<AtomCredentialRetryPendingRevokesParams>(
+            HOST_CAPABILITIES.ATOM_CREDENTIAL,
+            method,
+            params,
           );
+          if (!checked.ok) return checked;
+          return credentialAtom.retryPendingRevokes(checked.data);
         }
         return hostErr('UNSUPPORTED', `Unknown method "${method}" for ${HOST_CAPABILITIES.ATOM_CREDENTIAL}`);
       },
@@ -351,16 +395,27 @@ export function createLocalAtomsRuntime(deps: LocalAtomsRuntimeDeps): LocalAtoms
       },
       async invoke(method, params) {
         if (method === 'read') {
-          return configAtom.read((params ?? {}) as unknown as AtomConfigReadParams);
+          const checked = validateHostMethodParams<AtomConfigReadParams>(HOST_CAPABILITIES.ATOM_CONFIG, method, params);
+          if (!checked.ok) return checked;
+          return configAtom.read(checked.data);
         }
-        if (method === 'write') {
-          return configAtom.write((params ?? {}) as unknown as AtomConfigWriteParams);
-        }
-        if (method === 'previewWrite') {
-          return configAtom.previewWrite((params ?? {}) as unknown as AtomConfigWriteParams);
+        if (method === 'write' || method === 'previewWrite') {
+          const checked = validateHostMethodParams<AtomConfigWriteParams>(
+            HOST_CAPABILITIES.ATOM_CONFIG,
+            method,
+            params,
+          );
+          if (!checked.ok) return checked;
+          return method === 'write' ? configAtom.write(checked.data) : configAtom.previewWrite(checked.data);
         }
         if (method === 'restoreBackup') {
-          return configAtom.restoreBackup((params ?? {}) as unknown as AtomConfigRestoreParams);
+          const checked = validateHostMethodParams<AtomConfigRestoreParams>(
+            HOST_CAPABILITIES.ATOM_CONFIG,
+            method,
+            params,
+          );
+          if (!checked.ok) return checked;
+          return configAtom.restoreBackup(checked.data);
         }
         return hostErr('UNSUPPORTED', `Unknown method "${method}" for ${HOST_CAPABILITIES.ATOM_CONFIG}`);
       },

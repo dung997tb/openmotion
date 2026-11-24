@@ -11,7 +11,11 @@ import {
 import { isValidDesktopLoopbackRedirectUri } from '../shared/desktop-auth-handoff.ts';
 import { HOST_CAPABILITIES, HOST_CONTRACT_VERSION, hostErr, hostOk } from '../shared/desktop-contract.ts';
 import { MURMUR_COMMAND_TEMPLATES, MURMUR_ENGINE_PORT } from '../shared/engine-command-contract.ts';
-import { validateSignedConfigPayloadBounds } from '../shared/signed-config.ts';
+import {
+  isAllowedMcpConfigRelativePath,
+  validateSignedConfigPayloadBounds,
+} from '../shared/signed-config.ts';
+import { validateHostMethodParams } from '../shared/desktop-schemas.ts';
 
 test('Q1 built-in third-party allowlist contains codex and claude with 3 templates each', () => {
   assert.deepEqual([...BUILTIN_THIRD_PARTY_PROGRAMS], ['codex', 'claude']);
@@ -197,4 +201,64 @@ test('Q1/M9 built-in bounds allow safe murmur management commands and block laun
     ]).ok,
     true,
   );
+});
+
+test('Declarative MCP config path bounds allow mainstream agent configs and block sensitive dotfiles', () => {
+  for (const safe of [
+    ['.cursor/mcp.json', 'json'],
+    ['.codeium/windsurf/mcp_config.json', 'json'],
+    ['.config/opencode/opencode.json', 'json'],
+    ['.gemini/antigravity/mcp_config.json', 'json'],
+    ['.codex/config.toml', 'toml'],
+  ] as const) {
+    assert.equal(isAllowedMcpConfigRelativePath(safe[0], safe[1]), true, `Expected safe path: ${safe[0]}`);
+  }
+
+  for (const dangerous of [
+    '.ssh/config.json',
+    '.aws/credentials.toml',
+    '.bashrc',
+    '.zshrc',
+    '.env',
+    '.git/config.toml',
+    '.cursor/mcp.sh',
+    '../outside/mcp.json',
+    '/etc/mcp.json',
+  ]) {
+    assert.equal(isAllowedMcpConfigRelativePath(dangerous), false, `Expected blocked path: ${dangerous}`);
+  }
+});
+
+test('Unified Zod schema layer validates host capability method params and rejects unknown fields', () => {
+  const okExec = validateHostMethodParams(HOST_CAPABILITIES.ATOM_EXEC, 'run', {
+    featureId: 'mcp_connect',
+    templateId: 'codex.mcp.add_remote',
+    args: { serverName: 'openmotion' },
+  });
+  assert.equal(okExec.ok, true);
+
+  const extraFieldExec = validateHostMethodParams(HOST_CAPABILITIES.ATOM_EXEC, 'run', {
+    featureId: 'mcp_connect',
+    templateId: 'codex.mcp.add_remote',
+    injectedShellFlag: true,
+  });
+  assert.equal(extraFieldExec.ok, false);
+  if (!extraFieldExec.ok) assert.equal(extraFieldExec.error.code, 'INVALID_PARAMS');
+
+  const okTelemetry = validateHostMethodParams(HOST_CAPABILITIES.TELEMETRY, 'recordEvent', {
+    category: 'agent.connect',
+    outcome: 'ok',
+    agentId: 'cursor',
+    connectMode: 'config',
+    durationMs: 42,
+  });
+  assert.equal(okTelemetry.ok, true);
+
+  const badTelemetry = validateHostMethodParams(HOST_CAPABILITIES.TELEMETRY, 'recordEvent', {
+    category: 'agent.connect',
+    outcome: 'ok',
+    email: 'leak@example.com',
+  });
+  assert.equal(badTelemetry.ok, false);
+  if (!badTelemetry.ok) assert.equal(badTelemetry.error.code, 'INVALID_PARAMS');
 });
