@@ -84,9 +84,10 @@ export const PREVIEW_PEER_TIMING = `
         typeof p.getTime !== 'function' || typeof window.__hfForceTimelineRebind !== 'function' ||
         !Array.isArray(m.changes) || !m.changes.length || m.changes.length > 32) return false;
     const edits = [], effects = [];
+    let removing = false;
     for (const change of m.changes) {
       if (!change || (!change.hfId && !change.id && !change.compositionId) || !Array.isArray(change.attributes) ||
-          (!change.attributes.length && !change.styles && !change.text) || change.attributes.length > previewAttributes.size) return false;
+          (!change.attributes.length && !change.styles && !change.text && !change.removeFromComposition) || change.attributes.length > previewAttributes.size) return false;
       if ((temporary || ownDrag) && (!change.styles || change.text || change.attributes.length)) return false;
       const selector = change.hfId ? '[data-hf-id="'+CSS.escape(change.hfId)+'"]' :
         change.id ? '#'+CSS.escape(change.id) : '[data-composition-id="'+CSS.escape(change.compositionId)+'"]';
@@ -94,6 +95,14 @@ export const PREVIEW_PEER_TIMING = `
         node.localName === change.tag && sourceFileForElement(node) === m.path);
       if (matches.length !== 1 || matches[0].closest('[data-hf-parked-scene]')) return false;
       const node = matches[0];
+      if (change.removeFromComposition) {
+        const parent = node.parentElement, next = node.nextSibling;
+        if (removing || !timingDocumentId || m.type !== 'peer-timing' || !change.hfId || !presentationTags.has(node.localName) ||
+            node.id !== change.id || node.childElementCount || !node.classList.contains('clip') ||
+            parent?.getAttribute('data-composition-id') !== change.removeFromComposition) return false;
+        removing = true;
+        effects.push(forward => forward ? node.remove() : parent.insertBefore(node, next));
+      }
       if (media && change.tag !== 'audio' && node !== document.querySelector('[data-composition-id]')) return false;
       if (!stagePresentation(node, change, effects, local, pending)) return false;
       for (const [name, from, to] of change.attributes) {
@@ -114,7 +123,7 @@ export const PREVIEW_PEER_TIMING = `
       }
       for (const effect of effects) effect(key === 'to');
       // Lock is an editor flag. Studio reapplies the local monitor preference on mute.
-      if (!edits.some(edit => edit.attr !== 'data-timeline-locked' && edit.attr !== 'muted')) return;
+      if (!removing && !edits.some(edit => edit.attr !== 'data-timeline-locked' && edit.attr !== 'muted')) return;
       p.seek(time);
       window.__hfForceTimelineRebind();
       window.__hfStudioManualEditsApply?.();
