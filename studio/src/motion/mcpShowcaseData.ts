@@ -7,16 +7,11 @@ import templateBriefPoster from './mcp-gallery/template-brief.jpg';
 import templateBriefVideo from './mcp-gallery/template-brief.mp4';
 import { motionSkills } from './skillCatalog';
 
-export type LocalizedPair<T> = { en: T; 'zh-CN': T };
-
 export function localizedMcpExample<T extends Record<string, string>>(
-  copy: LocalizedPair<T>,
-  locale: string,
+  copy: T,
   t: (message: string) => string,
 ): T {
-  if (locale === 'zh-CN') return copy['zh-CN'];
-  if (locale === 'en') return copy.en;
-  return Object.fromEntries(Object.entries(copy.en).map(([key, value]) => [key, t(value)])) as T;
+  return Object.fromEntries(Object.entries(copy).map(([key, value]) => [key, t(value)])) as T;
 }
 
 export type McpCaseTarget =
@@ -41,7 +36,7 @@ export type McpHeroBeat = {
   loop?: boolean;
   fit?: 'contain';
   target?: McpCaseTarget;
-  content: LocalizedPair<{ title: string; desc: string; prompt: string; alt: string }>;
+  content: { title: string; desc: string; prompt: string; alt: string };
 };
 
 export type McpModelPill = {
@@ -55,13 +50,13 @@ export type McpShowcaseSlide = {
   video?: string;
   showcaseIframe?: string;
   target: McpCaseTarget;
-  content: LocalizedPair<{ tabLabel: string; title: string; prompt: string }>;
+  content: { tabLabel: string; title: string; prompt: string };
 };
 
 export type McpShowcaseModule = {
   id: string;
   anchorId?: string;
-  title: LocalizedPair<string>;
+  title: string;
   models: readonly McpModelPill[];
   slides: readonly McpShowcaseSlide[];
 };
@@ -154,18 +149,10 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
       previewUrl: TEMPLATE_MEDIA.figmaMotion.preview,
     },
     content: {
-      en: {
-        title: 'Choose a template and write your brief',
-        desc: 'Give your Agent the feature to show and the screens to use.',
-        prompt: 'Use "Config 2026 · Figma Motion" as a reference for a 20-second launch video about our new timeline. Use the two product screenshots I provided to show keyframes and easing, and deliver an editable project and MP4.',
-        alt: 'Selecting the Figma Motion template and writing a product launch brief',
-      },
-      'zh-CN': {
-        title: '选模板，写创作需求',
-        desc: '告诉 Agent 要讲哪个功能、用哪些产品截图。',
-        prompt: '参考「Config 2026 发布 Figma Motion」，为新版时间轴制作一支 20 秒功能发布片。用我提供的两张界面截图演示关键帧和缓动，交付可编辑工程和 MP4。',
-        alt: '选择 Figma Motion 模板并撰写功能发布片的创作需求',
-      },
+      title: 'Choose a template and write your brief',
+      desc: 'Give your Agent the feature to show and the screens to use.',
+      prompt: 'Use "Config 2026 · Figma Motion" as a reference for a 20-second launch video about our new timeline. Use the two product screenshots I provided to show keyframes and easing, and deliver an editable project and MP4.',
+      alt: 'Selecting the Figma Motion template and writing a product launch brief',
     },
   },
   {
@@ -181,18 +168,10 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
       previewUrl: TEMPLATE_MEDIA.framer3.preview,
     },
     content: {
-      en: {
-        title: 'Turn the brief into a storyboard',
-        desc: 'Plan the opening, product demo and end card, then connect the shots.',
-        prompt: `Adapt "Framer 3.0 Brand & Product Launch" for our v3 release: keep the blue glass lighting transitions, insert our product screens and export 1080p MP4.`,
-        alt: 'Framer 3.0 brand and product launch film',
-      },
-      'zh-CN': {
-        title: '把需求拆成分镜',
-        desc: '排好开场、产品演示和收尾，再把镜头接起来。',
-        prompt: `基于「Framer 3.0 品牌与产品发布」生成我们的新版本发布短片，保留蓝色光影与玻璃符号转场，替换成我方界面并导出 1080p MP4。`,
-        alt: 'Framer 3.0 品牌与产品发布短片',
-      },
+      title: 'Turn the brief into a storyboard',
+      desc: 'Plan the opening, product demo and end card, then connect the shots.',
+      prompt: `Adapt "Framer 3.0 Brand & Product Launch" for our v3 release: keep the blue glass lighting transitions, insert our product screens and export 1080p MP4.`,
+      alt: 'Framer 3.0 brand and product launch film',
     },
   },
   {
@@ -204,18 +183,10 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
     fit: 'contain',
     target: { kind: 'skill', skillId: 'higgsfield-product-photoshoot' },
     content: {
-      en: {
-        title: 'Add product shots with a Skill',
-        desc: 'Add a studio shot, a lifestyle shot and a hero shot to the cut.',
-        prompt: 'Use the "Product showcase reel" Skill with my product images to create a studio shot, a lifestyle shot and a hero shot. Keep the packaging and lettering consistent, then add the shots to my current OpenMotion project.',
-        alt: 'BIOJUSS product showcase reel',
-      },
-      'zh-CN': {
-        title: '用 Skill 补产品镜头',
-        desc: '给粗剪补上棚拍、使用场景和主视觉镜头。',
-        prompt: '用「产品展示短片」Skill，根据我提供的产品图做棚拍、使用场景和主视觉镜头。保持包装和字样一致，再把镜头加进我当前的 OpenMotion 工程。',
-        alt: 'BIOJUSS 产品展示短片',
-      },
+      title: 'Add product shots with a Skill',
+      desc: 'Add a studio shot, a lifestyle shot and a hero shot to the cut.',
+      prompt: 'Use the "Product showcase reel" Skill with my product images to create a studio shot, a lifestyle shot and a hero shot. Keep the packaging and lettering consistent, then add the shots to my current OpenMotion project.',
+      alt: 'BIOJUSS product showcase reel',
     },
   },
   {
@@ -225,18 +196,10 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
     video: studioEditingVideo,
     loop: false,
     content: {
-      en: {
-        title: 'Fine-tune in Studio and export',
-        desc: 'Adjust text and track timing, then export landscape and portrait versions.',
-        prompt: 'Read my current OpenMotion project and version. Confirm the text and timing edits with me, then make editable 16:9 and 9:16 versions while preserving the original. Review both in Studio before exporting MP4.',
-        alt: 'OpenMotion Studio composition preview and timeline',
-      },
-      'zh-CN': {
-        title: '在 Studio 微调并导出',
-        desc: '改文字、调轨道时序，分别导出横版和竖版。',
-        prompt: '读取我当前的 OpenMotion 工程和版本。和我确认文字与轨道时序的修改后，保留原工程，另做 16:9 和 9:16 两份可编辑版本。在 Studio 预览确认后，分别导出 MP4。',
-        alt: 'OpenMotion Studio 的成片预览和时间轴',
-      },
+      title: 'Fine-tune in Studio and export',
+      desc: 'Adjust text and track timing, then export landscape and portrait versions.',
+      prompt: 'Read my current OpenMotion project and version. Confirm the text and timing edits with me, then make editable 16:9 and 9:16 versions while preserving the original. Review both in Studio before exporting MP4.',
+      alt: 'OpenMotion Studio composition preview and timeline',
     },
   },
 ];
@@ -244,10 +207,7 @@ export const mcpHeroBeats: readonly McpHeroBeat[] = [
 export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
   {
     id: 'band-ecom',
-    title: {
-      en: 'Product launch films',
-      'zh-CN': '产品发布片',
-    },
+    title: 'Product launch films',
     models: [
       { label: 'GPT Image 2.6', icon: modelIcon('providers/openai.svg') },
       { label: 'Seedance 2.5', icon: modelIcon('providers/models/bytedance-color.svg') },
@@ -266,16 +226,9 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
           previewUrl: TEMPLATE_MEDIA.aesthetics.preview,
         },
         content: {
-          en: {
-            tabLabel: 'Aesthetics',
-            title: 'Aesthetics · 3D craft & interactive design reveal',
-            prompt: `Adapt template "Aesthetics" for our design-tool launch: open with sculptural 3D visual tension, then transition smoothly into live product interactions and deliver HTML + MP4.`,
-          },
-          'zh-CN': {
-            tabLabel: 'Aesthetics',
-            title: 'Aesthetics · 3D 审美张力与交互揭示片',
-            prompt: `使用模板「Aesthetics」制作产品发布短片：前段用高质感 3D 视觉与多维度排版建立审美期待，后段自然切入真实操作演示，交付 HTML 和 MP4。`,
-          },
+          tabLabel: 'Aesthetics',
+          title: 'Aesthetics · 3D craft & interactive design reveal',
+          prompt: `Adapt template "Aesthetics" for our design-tool launch: open with sculptural 3D visual tension, then transition smoothly into live product interactions and deliver HTML + MP4.`,
         },
       },
       {
@@ -290,16 +243,9 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
           previewUrl: TEMPLATE_MEDIA.harvey.preview,
         },
         content: {
-          en: {
-            tabLabel: 'Harvey II',
-            title: 'Harvey II · Paper collage meets product UI',
-            prompt: `Adapt the "Harvey II" template: use textured paper, circles and cutouts to introduce our product, then connect those shapes to real screens for projects, tasks and resources.`,
-          },
-          'zh-CN': {
-            tabLabel: 'Harvey II',
-            title: 'Harvey II · 纸面拼贴与产品界面',
-            prompt: `用「Harvey II」模板做发布片。先用纸张纹理、圆形与镂空拼贴引入，再把这些图形接到我们的项目、任务和资源界面。`,
-          },
+          tabLabel: 'Harvey II',
+          title: 'Harvey II · Paper collage meets product UI',
+          prompt: `Adapt the "Harvey II" template: use textured paper, circles and cutouts to introduce our product, then connect those shapes to real screens for projects, tasks and resources.`,
         },
       },
       {
@@ -314,16 +260,9 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
           previewUrl: TEMPLATE_MEDIA.noCode.preview,
         },
         content: {
-          en: {
-            tabLabel: 'No-Code',
-            title: 'A New Era of No-Code · A journey through layered screens',
-            prompt: `Use "A New Era of No-Code" as a template: let one moving sphere guide the viewer through our layered pages, forms and workflow screens, then reveal the finished site.`,
-          },
-          'zh-CN': {
-            tabLabel: 'No-Code',
-            title: 'A New Era of No-Code · 穿行于多层界面',
-            prompt: `用「A New Era of No-Code」模板，让一颗球穿过我们的网页、表单和工作流界面，最后拉开镜头展示完成的网站。`,
-          },
+          tabLabel: 'No-Code',
+          title: 'A New Era of No-Code · A journey through layered screens',
+          prompt: `Use "A New Era of No-Code" as a template: let one moving sphere guide the viewer through our layered pages, forms and workflow screens, then reveal the finished site.`,
         },
       },
     ],
@@ -331,10 +270,7 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
   {
     id: 'band-alpha',
     anchorId: 'band-3d',
-    title: {
-      en: 'Motion Skills for ads, workflows and explainers',
-      'zh-CN': '动效 Skill：广告、流程与讲解',
-    },
+    title: 'Motion Skills for ads, workflows and explainers',
     models: [
       { label: 'Flux', icon: modelIcon('providers/models/flux.svg') },
       { label: 'Wan 2.7', icon: modelIcon('providers/models/alibaba-color.svg') },
@@ -347,16 +283,9 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
         video: splashMedia.video,
         target: { kind: 'skill', skillId: 'openmotion-juicy-splash-poster' },
         content: {
-          en: {
-            tabLabel: 'Juicy Splash Poster',
-            title: 'A fruit and liquid burst for a drink launch',
-            prompt: `Use the Juicy Splash Poster Skill with our drink photo and flavour name. Keep the packaging readable as fruit and liquid burst around it, then hold on the final poster.`,
-          },
-          'zh-CN': {
-            tabLabel: '夏日饮品冰爽海报',
-            title: '用果片和水花做一支饮品广告',
-            prompt: `用「夏日饮品冰爽海报」Skill，把我的饮料图和口味名做成动效海报。果片和液体从产品周围迸发，保持包装清晰，最后停在完整海报。`,
-          },
+          tabLabel: 'Juicy Splash Poster',
+          title: 'A fruit and liquid burst for a drink launch',
+          prompt: `Use the Juicy Splash Poster Skill with our drink photo and flavour name. Keep the packaging readable as fruit and liquid burst around it, then hold on the final poster.`,
         },
       },
       {
@@ -365,16 +294,9 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
         video: inkRibbonMedia.video,
         target: { kind: 'skill', skillId: 'openmotion-ink-ribbon' },
         content: {
-          en: {
-            tabLabel: 'Ink Ribbon',
-            title: 'One blue ribbon links every step of a workflow',
-            prompt: `Use the Ink Ribbon Skill to explain our three-step workflow. Carry a glossy blue ribbon from the opening headline through each step icon and into the closing brand mark.`,
-          },
-          'zh-CN': {
-            tabLabel: '产品流程一线串讲',
-            title: '用一条蓝色丝带串起完整流程',
-            prompt: `用「产品流程一线串讲」Skill 讲解我们的三步流程。让一条有光泽的蓝色丝带从开场标题穿过三个步骤图标，最后收成品牌标志。`,
-          },
+          tabLabel: 'Ink Ribbon',
+          title: 'One blue ribbon links every step of a workflow',
+          prompt: `Use the Ink Ribbon Skill to explain our three-step workflow. Carry a glossy blue ribbon from the opening headline through each step icon and into the closing brand mark.`,
         },
       },
       {
@@ -383,26 +305,16 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
         video: facelessMedia.video,
         target: { kind: 'skill', skillId: 'higgsfield-faceless-video' },
         content: {
-          en: {
-            tabLabel: 'Faceless explainer',
-            title: 'Narrated story & explainer films with zero filming',
-            prompt: 'Use OpenMotion Skill "Faceless explainer" (higgsfield-faceless-video) to turn our product story into a 30-second illustrated chronicle with expressive voiceover, cut-paper captions and an editable Studio timeline.',
-          },
-          'zh-CN': {
-            tabLabel: '无出镜讲解',
-            title: '无需真人出镜，直出电影感水彩叙事讲解片',
-            prompt: '使用 OpenMotion Skill「无出镜讲解视频」（higgsfield-faceless-video），把这段科普故事做成 30 秒水彩插画叙事短片，配情绪旁白与手写纸条字幕并保存可编辑工程。',
-          },
+          tabLabel: 'Faceless explainer',
+          title: 'Narrated story & explainer films with zero filming',
+          prompt: 'Use OpenMotion Skill "Faceless explainer" (higgsfield-faceless-video) to turn our product story into a 30-second illustrated chronicle with expressive voiceover, cut-paper captions and an editable Studio timeline.',
         },
       },
     ],
   },
   {
     id: 'band-recreate',
-    title: {
-      en: 'Brand identity in motion',
-      'zh-CN': '品牌标志与视觉系统',
-    },
+    title: 'Brand identity in motion',
     models: [
       { label: 'Seedance 2.5', icon: modelIcon('providers/models/bytedance-color.svg') },
       { label: 'Google Veo', icon: modelIcon('providers/models/google-color.svg') },
@@ -421,16 +333,9 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
           previewUrl: TEMPLATE_MEDIA.universe.preview,
         },
         content: {
-          en: {
-            tabLabel: 'Universe',
-            title: 'Universe 2023 · A 3D world unfolds from one mark',
-            prompt: `Adapt the Universe 2023 template for our event: start on our logo outline, open it into a world of playful 3D shapes in our brand colours, and gather them back into the event mark.`,
-          },
-          'zh-CN': {
-            tabLabel: 'Universe',
-            title: 'Universe 2023 · 从标志展开三维图形宇宙',
-            prompt: `用「Universe 2023｜大会图形揭晓」模板做我们的活动片头。由标志轮廓展开品牌色三维图形，最后收回活动标志。`,
-          },
+          tabLabel: 'Universe',
+          title: 'Universe 2023 · A 3D world unfolds from one mark',
+          prompt: `Adapt the Universe 2023 template for our event: start on our logo outline, open it into a world of playful 3D shapes in our brand colours, and gather them back into the event mark.`,
         },
       },
       {
@@ -445,16 +350,9 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
           previewUrl: TEMPLATE_MEDIA.creativeCloud.preview,
         },
         content: {
-          en: {
-            tabLabel: 'Creative Cloud',
-            title: 'Creative Cloud · One outline across collage and illustration',
-            prompt: `Use the Creative Cloud brand-film template to carry our logo outline through interface, collage and illustration. Keep the silhouette recognizable as the materials change.`,
-          },
-          'zh-CN': {
-            tabLabel: 'Creative Cloud',
-            title: 'Creative Cloud · 同一标志穿过拼贴与插画',
-            prompt: `用「Creative Cloud｜标志主片」模板，把我们的标志轮廓带过界面、拼贴和插画。每次换材质时保留可辨认的外形。`,
-          },
+          tabLabel: 'Creative Cloud',
+          title: 'Creative Cloud · One outline across collage and illustration',
+          prompt: `Use the Creative Cloud brand-film template to carry our logo outline through interface, collage and illustration. Keep the silhouette recognizable as the materials change.`,
         },
       },
       {
@@ -467,16 +365,9 @@ export const mcpShowcaseModules: readonly McpShowcaseModule[] = [
           showcaseUrl: brandCatalogFile('bento', 'showcase'),
         },
         content: {
-          en: {
-            tabLabel: 'Bento Brand Kit',
-            title: 'Apply style-first Brand Kits without brand lock-in',
-            prompt: 'Import the official OpenMotion Brand Kit "Bento" (bento) as a style-only Motion Package, reuse its grid spacing, typography and colour tokens for our 20-second product overview, and export MP4.',
-          },
-          'zh-CN': {
-            tabLabel: 'Bento 品牌包',
-            title: '套用官方 Bento 版式风格包，不绑定特定大牌也能高出片',
-            prompt: '导入 OpenMotion 官方品牌包「Bento」（bento）作为纯视觉规范包，复用其网格卡片、字体层级与配色系统生成 20 秒产品总览视频，保留可编辑工程并导出 MP4。',
-          },
+          tabLabel: 'Bento Brand Kit',
+          title: 'Apply style-first Brand Kits without brand lock-in',
+          prompt: 'Import the official OpenMotion Brand Kit "Bento" (bento) as a style-only Motion Package, reuse its grid spacing, typography and colour tokens for our 20-second product overview, and export MP4.',
         },
       },
     ],

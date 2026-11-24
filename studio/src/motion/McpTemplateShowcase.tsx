@@ -41,7 +41,7 @@ export function McpTemplateShowcase({ enabled, initialCategory, onCopy, openLibr
   const previewTrigger = useRef<HTMLButtonElement>(null);
   const latestCopy = useRef(0);
   const copyPromptLabel = t(locale === 'en' ? 'Copy prompt' : 'Copy example prompt');
-  const content = (card: McpGalleryCard) => localizedMcpExample(card.content, locale, t);
+  const content = (card: McpGalleryCard) => localizedMcpExample(card.content, t);
   const visible = mcpGalleryCards.filter(card => category === 'all' || card.category === category);
   const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
 

@@ -330,6 +330,7 @@ it('uses browser history between the template gallery, its preview and the origi
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
   expect(container.querySelector(`${detail} > header`)).toBeNull();
   expect(container.querySelector(`${detail} button[aria-label="Close template preview"]`)).not.toBeNull();
+  expect([...container.querySelectorAll(`${detail} button`)].some(button => button.textContent === 'Open and edit')).toBe(true);
   expect(container.querySelector(`${detail} button[aria-label="Previous template"]`)).not.toBeNull();
   expect(container.querySelector(`${detail} button[aria-label="Next template"]`)).not.toBeNull();
   await traverse(-1); expect(page().template).toBeNull();

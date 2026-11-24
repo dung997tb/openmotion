@@ -35,15 +35,17 @@ async function mount(locale: Locale = 'en', projectId?: string) {
 it.each(languages.filter(({ locale }) => locale !== 'en'))('localizes MCP copy in $label without changing setup targets', ({ locale }) => {
   const t = (message: string) => translate(locale, message);
   expect(t('Manual setup')).not.toBe('Manual setup');
+  for (const module of mcpShowcaseModules) expect(t(module.title)).not.toBe(module.title);
+  for (const label of ['Juicy Splash Poster', 'Ink Ribbon', 'Faceless explainer']) expect(t(label)).not.toBe(label);
   const examples = [
     ...mcpHeroBeats,
     ...mcpShowcaseModules.flatMap(module => module.slides),
     ...mcpGalleryCards,
   ];
   for (const { content } of examples) {
-    const localized = localizedMcpExample(content, locale, t);
-    expect(localized.title, content.en.title).not.toBe(content.en.title);
-    expect(localized.prompt, content.en.title).not.toBe(content.en.prompt);
+    const localized = localizedMcpExample(content, t);
+    expect(localized.title, content.title).not.toBe(content.title);
+    expect(localized.prompt, content.title).not.toBe(content.prompt);
   }
 
   const copyLanguage = locale === 'zh-CN' ? 'zh-CN' : 'en';

@@ -19,7 +19,7 @@ export function McpHeroShowcaseStage({
   enabled: boolean;
   onCopyPrompt: (prompt: string) => Promise<boolean>;
 }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [activeBeat, setActiveBeat] = useState(0);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -28,7 +28,7 @@ export function McpHeroShowcaseStage({
   const latestCopy = useRef(0);
 
   const current = mcpHeroBeats[activeBeat];
-  const currentText = localizedMcpExample(current.content, locale, t);
+  const currentText = localizedMcpExample(current.content, t);
   const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const waitsForVideo = current.loop === false && Boolean(current.video) && !videoErrors[current.id];
 
@@ -67,7 +67,7 @@ export function McpHeroShowcaseStage({
       <div className="om-mcp-stage-layout">
         <div className="om-mcp-stage-steps">
           {mcpHeroBeats.map((beat, index) => {
-            const copy = localizedMcpExample(beat.content, locale, t);
+            const copy = localizedMcpExample(beat.content, t);
             const isActive = index === activeBeat;
             return (
               <McpTiltCard key={beat.id}>
@@ -110,7 +110,7 @@ export function McpHeroShowcaseStage({
                     <video
                       src={beat.video}
                       poster={beat.image}
-                      aria-label={localizedMcpExample(beat.content, locale, t).alt}
+                      aria-label={localizedMcpExample(beat.content, t).alt}
                       autoPlay
                       muted
                       loop={beat.loop !== false}
@@ -120,7 +120,7 @@ export function McpHeroShowcaseStage({
                       onError={() => setVideoErrors(prev => ({ ...prev, [beat.id]: true }))}
                     />
                   ) : (
-                    <img src={beat.image} alt={localizedMcpExample(beat.content, locale, t).alt} decoding="async" />
+                    <img src={beat.image} alt={localizedMcpExample(beat.content, t).alt} decoding="async" />
                   )}
                 </div>
               );

@@ -17,8 +17,8 @@ function FeatureModuleCarousel({
   enabled: boolean;
   onCopy: (slideId: string, prompt: string) => Promise<boolean>;
 }) {
-  const { t, locale } = useI18n();
-  const moduleTitle = locale === 'zh-CN' ? module.title['zh-CN'] : t(module.title.en);
+  const { t } = useI18n();
+  const moduleTitle = t(module.title);
   const [index, setIndex] = useState(0);
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
@@ -31,7 +31,7 @@ function FeatureModuleCarousel({
   const current: McpShowcaseSlide = slides[index];
   const prevSlide = slides[(index - 1 + total) % total];
   const nextSlide = slides[(index + 1) % total];
-  const currentText = localizedMcpExample(current.content, locale, t);
+  const currentText = localizedMcpExample(current.content, t);
   const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const playVideo = enabled && !reducedMotion && Boolean(current.video) && !videoErrors[current.id];
 
@@ -93,7 +93,7 @@ function FeatureModuleCarousel({
       <TabsList className="om-mcp-carousel-tabs bg-transparent p-0" aria-label={moduleTitle}>
         {slides.map(slide => (
           <Tab key={slide.id} value={slide.id} className="om-mcp-carousel-tab">
-            <span>{locale === 'zh-CN' ? slide.content['zh-CN'].tabLabel : t(slide.content.en.tabLabel)}</span>
+            <span>{t(slide.content.tabLabel)}</span>
           </Tab>
         ))}
         <TabsIndicator className="om-mcp-tab-indicator" aria-hidden="true" />
