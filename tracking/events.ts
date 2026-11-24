@@ -333,6 +333,11 @@ export const omEvents = {
   game_action_result: { producers: ['studio'], fields: { page_name: ['creative_studio'], studio_id: creative.studio_id,
     action: ['play', 'favorite', 'unfavorite', 'like', 'dislike', 'clear_reaction', 'copy_link', 'copy_instruction', 'start_trailer', 'regenerate_trailer', 'open_trailer_project'],
     outcome: ['success', 'failure', 'unavailable'], ...game }, required: ['page_name', 'action', 'outcome'] },
+  // Game Studio market search. One per settled query, never per keystroke.
+  game_search_result: { producers: ['studio'], fields: { page_name: ['creative_studio'], studio_id: creative.studio_id, area: ['game_market'],
+    search_id: 'uuid', search_keyword: 'text', query_length: 'integer', result_count: 'integer', outcome: ['success'],
+    filter_value: 'slug' },
+    required: ['page_name', 'search_id', 'query_length', 'result_count', 'outcome'] },
   // One per cloud-share operation in the shared publish popover (Design, Game, Super Agent artifacts). Success means the service answered.
   web_publish_result: { producers: ['studio'], fields: { publish_target: webPublishTargets, action: ['publish', 'resume', 'new_link', 'stop', 'copy_link', 'sign_in'],
     outcome: ['success', 'failure', 'cancelled'], copied: 'boolean', error_kind: ['auth_required', 'conflict', 'other'], publish_attempt_id: 'uuid',

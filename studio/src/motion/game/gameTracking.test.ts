@@ -85,10 +85,16 @@ it('reports Game detail/handoff exposures, trailer actions, and Assets game entr
   tracking.reportGameAssetClick('open_game', mine);
   tracking.reportGameAssetClick('view_all_games');
   tracking.reportGameAssetClick('open_game_studio');
+  const searchId = crypto.randomUUID();
+  tracking.reportGameSearch(searchId, '  snake  ', 0, 'arcade');
+  tracking.reportGameSearch(crypto.randomUUID(), '   ', 10, 'all');
 
   expect(of('surface_view')).toEqual([
     expect.objectContaining({ page_name: 'creative_studio', studio_id: 'game', area: 'game_detail', element: 'detail', game_id: mine.id }),
     expect.objectContaining({ page_name: 'creative_studio', studio_id: 'game', area: 'game_handoff', element: 'handoff', game_id: mine.id }),
+  ]);
+  expect(of('game_search_result')).toEqual([
+    expect.objectContaining({ page_name: 'creative_studio', studio_id: 'game', area: 'game_market', search_id: searchId, search_keyword: 'snake', query_length: 5, result_count: 0, outcome: 'success', filter_value: 'arcade' }),
   ]);
   expect(of('game_action_result').map(row => [row.action, row.outcome])).toEqual([
     ['start_trailer', 'success'],

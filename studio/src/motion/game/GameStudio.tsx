@@ -21,7 +21,8 @@ import { GameMasonry, interleavePortrait } from './GameMasonry';
 import { bundledGames, communityGames, communityRemixPrompt, composeBrief, coverUrl, formatPlays, gameApi, gameSource, storedInstruction, genreCovers, genreLabels, settingCovers, styleCovers, genrePlaceholders, isLocalOnly, playableUrl, rememberInstruction, settingLabels, styleLabels } from './gameCatalog';
 import { buildGameContextTags, buildGameHiddenInstructions, buildGameUserPrompt, toGameArtifact, toGameCapabilityRef } from './gameSuperAgent';
 import { optionId as optionFilter } from '../reporting';
-import { reportGameAction, reportGameClick, reportGameCreate, reportGameDetailShown, reportGameHandoffShown } from './gameTracking';
+import { reportGameAction, reportGameClick, reportGameCreate, reportGameDetailShown, reportGameHandoffShown, reportGameSearch } from './gameTracking';
+import { newTrackingId } from '../reporting';
 import './gameStudio.css';
 
 type Menu = 'genre' | 'style' | 'setting';
@@ -253,6 +254,18 @@ export function GameStudio({
   }, [all, category, query, sort, t, locale]);
   // The user's own games, newest first, live in the side list like projects in the Motion editor.
   const mine = useMemo(() => games.filter(game => game.source === 'mine').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [games]);
+  const lastSearchKey = useRef('');
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) { lastSearchKey.current = ''; return; }
+    const key = `${trimmed}\0${category}\0${visible.length}`;
+    if (key === lastSearchKey.current) return;
+    const timer = window.setTimeout(() => {
+      lastSearchKey.current = key;
+      reportGameSearch(newTrackingId(), trimmed, visible.length, category);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [query, category, visible.length]);
   const browsing = category === 'all' && !query.trim();
   const rows = [
     ...(browsing ? [
@@ -320,7 +333,7 @@ export function GameStudio({
             <Button variant="plain" role="tab" className="om-game-genre-chip" aria-selected={category === 'portrait'} onClick={() => { if (category !== 'portrait') reportGameClick('game_market', 'category_select', null, optionFilter('portrait')); setCategory('portrait'); }}><RemixIcon name="smartphone-line" size={15} />{t('Portrait')}</Button>
           </div>
           <span className="om-game-selects">
-            <span className="om-field om-game-search"><RemixIcon name="search-line" size={15} /><input value={query} placeholder={t('Search')} aria-label={t('Search games')} onChange={event => setQuery(event.target.value)} /></span>
+            <span className="om-field om-game-search"><RemixIcon name="search-line" size={15} /><input value={query} placeholder={t('Search')} aria-label={t('Search games')} onFocus={() => reportGameClick('game_market', 'search_focus')} onChange={event => setQuery(event.target.value)} /></span>
             <label className="om-field"><RemixIcon name="sort-desc" size={15} /><select value={sort} aria-label={t('Sort')} onChange={event => { reportGameClick('game_market', 'sort_option', null, optionFilter(event.target.value)); setSort(event.target.value as Sort); }}>
               <option value="relevance">{t('Relevance')}</option><option value="plays">{t('Most played')}</option><option value="newest">{t('Newest')}</option></select></label>
           </span>
