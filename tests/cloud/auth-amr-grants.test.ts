@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { Hono } from 'hono';
 import {
   AmrIdentityClient,
@@ -15,6 +16,7 @@ import {
   type AuthEnv,
 } from '../../src/auth/index.ts';
 import { parseConfig } from '../../src/infra/config.ts';
+import { CloudError } from '../../src/contracts/errors.ts';
 import { OpenDesignModelGateway } from '../../src/services/opendesign-adapter.ts';
 
 function oidcConfig(overrides: Record<string, string> = {}) {
@@ -37,6 +39,38 @@ function oidcConfig(overrides: Record<string, string> = {}) {
 }
 
 describe('AMR Identity Lookup, 60s Multi-Workspace Cache, Ban/503 Handling, DCR Anti-Abuse & Connected Apps', () => {
+  it('correlates unavailable responses with a single classified diagnostic without logging identity or upstream content', async () => {
+    const cases: Array<[string, number | undefined, typeof fetch]> = [
+      ['transport', undefined, async () => { throw new Error('sensitive transport detail'); }],
+      ['timeout', undefined, async (_input, init) => {
+        await delay(1_000, undefined, { signal: init!.signal! });
+        throw new Error('expected the lookup to time out');
+      }],
+      ['upstream_http', 429, async () => new Response('private upstream body', { status: 429 })],
+      ['invalid_response', 200, async () => new Response('invalid JSON')],
+      ['missing_workspace', 200, async () => Response.json({ active: true })],
+    ];
+    const ids = new Set<string>();
+    for (const [reason, upstreamStatus, fetcher] of cases) {
+      const warnings: unknown[] = [];
+      const client = new AmrIdentityClient({
+        apiUrl: 'https://identity.example.test', internalToken: 'private-token', fetcher,
+        timeoutMs: reason === 'timeout' ? 1 : 5_000,
+        logger: { warn: (_message, fields) => warnings.push(fields) },
+      });
+      await assert.rejects(client.lookupIdentity('private-user'), (error: unknown) => {
+        assert.ok(error instanceof CloudError);
+        const diagnosticId = error.details?.diagnosticId;
+        assert.ok(typeof diagnosticId === 'string' && !ids.has(diagnosticId));
+        ids.add(diagnosticId);
+        assert.equal(error.status, 503);
+        assert.equal(error.toJSON().errorCode, 'auth_unavailable');
+        assert.deepEqual(warnings, [{ diagnosticId, reason, upstreamStatus }]);
+        return true;
+      });
+    }
+  });
+
   it('isolates 60s identity cache by (authUserId, externalWorkspaceId), enforces ban=401 and AMR-down=503', async () => {
     const config = oidcConfig();
     const store = new InMemoryAuthStore();
@@ -96,12 +130,14 @@ describe('AMR Identity Lookup, 60s Multi-Workspace Cache, Ban/503 Handling, DCR 
       );
     };
 
+    const warnings: unknown[] = [];
     const amrIdentity = new AmrIdentityClient({
       apiUrl: 'https://amr-api.example.test',
       internalToken: 'ephemeral-internal-token',
       cache,
       cacheTtlSec: 60,
       fetcher: mockFetch,
+      logger: { warn: (_message, fields) => warnings.push(fields) },
     });
 
     // Project both AMR workspaces for Alice
@@ -187,6 +223,7 @@ describe('AMR Identity Lookup, 60s Multi-Workspace Cache, Ban/503 Handling, DCR 
     assert.equal(rBanned.status, 401);
     const bodyBanned = (await rBanned.json()) as Record<string, unknown>;
     assert.equal(bodyBanned.errorCode, 'auth_required');
+    assert.deepEqual(warnings, []);
 
     // 5. AMR unreachable -> returns 503 auth_unavailable (does NOT clear session)
     amrStatus = 'down';
@@ -194,9 +231,11 @@ describe('AMR Identity Lookup, 60s Multi-Workspace Cache, Ban/503 Handling, DCR 
       headers: { Cookie: `om_session=${session.token}` },
     });
     assert.equal(rDown.status, 503);
-    const bodyDown = (await rDown.json()) as Record<string, unknown>;
+    const bodyDown = await rDown.json();
     assert.equal(bodyDown.code, 'AUTH_UNAVAILABLE');
     assert.equal(bodyDown.errorCode, 'auth_unavailable');
+    assert.equal(typeof bodyDown.details.diagnosticId, 'string');
+    assert.deepEqual(warnings, [{ diagnosticId: bodyDown.details.diagnosticId, reason: 'transport', upstreamStatus: undefined }]);
   });
 
   it('enforces DCR redirect_uri allowlist, per-IP rate limiting, unused client cleanup, and connected-app revocation independent of web logout', async () => {

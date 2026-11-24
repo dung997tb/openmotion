@@ -1957,7 +1957,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
 
   const amrIdentity =
     deps.amrIdentity ??
-    (config.AUTH_MODE === 'oidc' ? amrIdentityClientFromAppConfig(config, authCache) : undefined);
+    (config.AUTH_MODE === 'oidc' ? amrIdentityClientFromAppConfig(config, authCache, logger) : undefined);
 
   const authDeps: AuthMiddlewareDeps = {
     config,
