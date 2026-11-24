@@ -480,9 +480,11 @@ test('resolvePublicAddresses resolves proxy Fake-IP (198.18.0.0/15) via public D
   );
 });
 
-test('gateway runs up to 4 remote jobs concurrently while keeping local codex jobs capped at 2', () => fixture(async store => {
+test('gateway runs up to 4 OpenDesign jobs concurrently while keeping BYOK and local codex jobs capped at 2', () => fixture(async store => {
   let inflightRemote = 0, peakRemote = 0;
+  let inflightFal = 0, peakFal = 0;
   const resolvers: (() => void)[] = [];
+  const falResolvers: (() => void)[] = [];
   const gateway = new ModelGateway(store, {
     detect: agents,
     pollMs: 1,
@@ -492,6 +494,22 @@ test('gateway runs up to 4 remote jobs concurrently while keeping local codex jo
       if (url.endsWith('/api/v1/media/models')) {
         return Response.json({ models: [{ model: 'seedream-5.0-flash', kind: 'image', capabilities: { edits: true } }] });
       }
+      if (url.startsWith('https://queue.fal.run/') && init?.method === 'POST') {
+        inflightFal++;
+        peakFal = Math.max(peakFal, inflightFal);
+        return new Promise<Response>(resolve => {
+          falResolvers.push(() => {
+            inflightFal--;
+            resolve(Response.json({
+              request_id: `fal-${falResolvers.length}`,
+              status_url: `https://queue.fal.run/status/${falResolvers.length}`,
+              response_url: `https://queue.fal.run/response/${falResolvers.length}`,
+            }));
+          });
+        });
+      }
+      if (url.startsWith('https://queue.fal.run/status/')) return Response.json({ status: 'COMPLETED' });
+      if (url.startsWith('https://queue.fal.run/response/')) return Response.json({ images: [{ url: 'https://cdn.example/out.png' }] });
       if (init?.method === 'POST' && url.endsWith('/images/generations')) {
         inflightRemote++;
         peakRemote = Math.max(peakRemote, inflightRemote);
@@ -524,7 +542,25 @@ test('gateway runs up to 4 remote jobs concurrently while keeping local codex jo
     await Promise.all([...gateway.active.values()].map(task => task.done));
     for (const job of remoteJobs) assert.equal((await gateway.getJob(job.id)).state, 'completed');
 
-    // Local codex jobs stay capped at 2 concurrent workers.
+    // Non-OpenDesign BYOK providers (e.g. fal) stay capped at 2 concurrent workers.
+    await gateway.configureProvider('fal', { apiKey: 'fal-test-key' });
+    const falJobs = [];
+    for (let i = 0; i < 4; i++) {
+      falJobs.push(await gateway.submit({ modality: 'image', model: 'fal:fal-ai/flux/schnell', prompt: `Fal ${i}`, library: {} }));
+    }
+    await gateway.tick();
+    while (falResolvers.length < 2) await new Promise(r => setTimeout(r, 5));
+    assert.equal(gateway.active.size, 2);
+    assert.equal(peakFal, 2);
+    while (falResolvers.length) falResolvers.shift()!();
+    await Promise.all([...gateway.active.values()].map(task => task.done));
+    await gateway.tick();
+    while (falResolvers.length < 2) await new Promise(r => setTimeout(r, 5));
+    while (falResolvers.length) falResolvers.shift()!();
+    await Promise.all([...gateway.active.values()].map(task => task.done));
+    for (const job of falJobs) assert.equal((await gateway.getJob(job.id)).state, 'completed');
+
+    // Local codex jobs also stay capped at 2 concurrent workers.
     let inflightLocal = 0, peakLocal = 0;
     const localResolvers: (() => void)[] = [];
     gateway.options.codex = async () => {
