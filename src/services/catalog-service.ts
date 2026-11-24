@@ -52,6 +52,7 @@ import {
   upgradeTemplateGuidePage,
 } from '../../shared/template-guide.ts';
 import { catalogLocale } from '../../shared/template-locale.ts';
+import { assertAgentSessionAccess } from './project-files-service.ts';
 import { RuntimeTemplateAssets } from './runtime-template-assets.ts';
 
 export {
@@ -1133,6 +1134,8 @@ export class CatalogService implements CatalogPort {
             applied: false,
           });
         }
+        // The clone is auto-granted, so it must not open someone else's conversation to the agent.
+        await assertAgentSessionAccess(tx, ctx, options.sessionId);
         sessionId = options.sessionId;
         await tx
           .update(sessions)

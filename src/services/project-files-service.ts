@@ -272,6 +272,46 @@ export async function readCommitReceipt(
   return null;
 }
 
+export type AgentProjectFilter = (project: { id: string; ownerUserId: string | null }) => boolean;
+
+/**
+ * OAuth agents only see projects granted to their connection, matching `assertAgentProjectAccess`.
+ * Returns null for callers that are not restricted by project grants.
+ */
+export async function agentProjectFilter(db: DbExecutor, auth: AuthContext): Promise<AgentProjectFilter | null> {
+  if (auth.authMethod !== 'oauth_bearer') return null;
+  if (!auth.clientId) return () => false;
+  const rows = await db
+    .select({ projectId: projectGrants.projectId })
+    .from(projectGrants)
+    .where(
+      and(
+        eq(projectGrants.userId, auth.userId),
+        eq(projectGrants.clientId, auth.clientId),
+        isNull(projectGrants.revokedAt),
+      ),
+    );
+  const granted = new Set(rows.map((row) => row.projectId));
+  return (project) =>
+    granted.has(project.id) && (!project.ownerUserId || project.ownerUserId === auth.userId);
+}
+
+/**
+ * A session's conversation belongs to its projects: an OAuth agent may address a session only when it
+ * holds no project yet or at least one granted project. Other sessions look missing.
+ */
+export async function assertAgentSessionAccess(db: DbExecutor, auth: AuthContext, sessionId: string): Promise<void> {
+  const visible = await agentProjectFilter(db, auth);
+  if (!visible) return;
+  const rows = await db
+    .select({ id: projects.id, ownerUserId: projects.ownerUserId })
+    .from(projects)
+    .where(and(eq(projects.workspaceId, auth.workspaceId), eq(projects.sessionId, sessionId)));
+  if (rows.length > 0 && !rows.some(visible)) {
+    throw new CloudError('SESSION_NOT_FOUND', `Session ${sessionId} was not found.`, { status: 404, applied: false });
+  }
+}
+
 export async function assertAgentProjectAccess(
   db: DbExecutor,
   auth: AuthContext,
