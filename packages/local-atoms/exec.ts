@@ -849,7 +849,7 @@ export class ExecAtom {
             { templateId: template.templateId, componentId: template.componentId },
           );
         }
-        const sigResult = await this.codeSignatureVerifier(binaryPath, publisher.appleTeamId, this.platform);
+        const sigResult = await this.codeSignatureVerifier(binaryPath, publisher.appleTeamId, this.platform, publisher);
         if (!sigResult.ok) {
           return hostErr(
             'VERIFICATION_FAILED',

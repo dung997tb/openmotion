@@ -8,6 +8,7 @@ export {
   createBundledDefaultConfigPayload,
   EMBEDDED_ROOT_PUBLIC_KEY_SPKI_BASE64,
   isEmbeddedRootPublicKeyPlaceholder,
+  resolveEmbeddedRootPublicKeySpki,
 } from './default-config.ts';
 export {
   exportPublicKeySpkiBase64,

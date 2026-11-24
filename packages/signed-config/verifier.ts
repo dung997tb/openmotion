@@ -30,7 +30,7 @@ import {
   type SignedRevocationList,
 } from '../../shared/signed-config.ts';
 import { canonicalJsonBytes } from './canonical.ts';
-import { BUILTIN_REVOKED_KEY_IDS, EMBEDDED_ROOT_PUBLIC_KEY_SPKI_BASE64 } from './default-config.ts';
+import { BUILTIN_REVOKED_KEY_IDS, resolveEmbeddedRootPublicKeySpki } from './default-config.ts';
 
 export type SignedConfigFailureCode =
   | 'INVALID_ENVELOPE'
@@ -459,7 +459,7 @@ export function verifySignedConfigEnvelope(
   // 2. Parse root Ed25519 public key.
   let rootPublicKey: KeyObject;
   try {
-    const rawRootKey = options.rootPublicKey ?? options.rootPublicKeyPem ?? EMBEDDED_ROOT_PUBLIC_KEY_SPKI_BASE64;
+    const rawRootKey = options.rootPublicKey ?? options.rootPublicKeyPem ?? resolveEmbeddedRootPublicKeySpki();
     rootPublicKey = parseEd25519PublicKey(rawRootKey);
   } catch (err) {
     return {

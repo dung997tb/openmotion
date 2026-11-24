@@ -26,7 +26,7 @@ import { canonicalJson } from './canonical.ts';
 import {
   BUILTIN_REVOKED_KEY_IDS,
   createBundledDefaultConfigPayload,
-  EMBEDDED_ROOT_PUBLIC_KEY_SPKI_BASE64,
+  resolveEmbeddedRootPublicKeySpki,
 } from './default-config.ts';
 import {
   verifySignedConfigEnvelope,
@@ -164,7 +164,7 @@ export class SignedConfigManager {
     this.channel = options.channel ?? 'stable';
     this.allowLocalDevLoopback = Boolean(options.allowLocalDevLoopback);
     this.rootPublicKey =
-      options.rootPublicKey ?? options.rootPublicKeyPem ?? EMBEDDED_ROOT_PUBLIC_KEY_SPKI_BASE64;
+      options.rootPublicKey ?? options.rootPublicKeyPem ?? resolveEmbeddedRootPublicKeySpki();
     this.fetchFn = options.fetchFn ?? ((url, init) => globalThis.fetch(url, init));
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
     this.now = options.now ?? (() => Date.now());

@@ -882,6 +882,22 @@ test('sign-desktop-config.mjs CLI issues daily cert, signs config, and verifies 
     );
     assert.equal(code4, 1);
     assert.match(c4.getErr(), /bounds/i);
+
+    // keygen subcommand generates an Ed25519 keypair with private key on disk and SPKI base64 on stdout.
+    const genPrivPath = path.join(workDir, 'gen-root.pem');
+    const genPubPath = path.join(workDir, 'gen-root.pub.pem');
+    const genSpkiPath = path.join(workDir, 'gen-root.spki.txt');
+    const c5 = capture();
+    const code5 = runCli(
+      ['keygen', '--private-out', genPrivPath, '--public-out', genPubPath, '--spki-out', genSpkiPath],
+      c5.io,
+    );
+    assert.equal(code5, 0, c5.getErr());
+    const keygenOut = JSON.parse(c5.getOut()) as { algorithm: string; publicKeySpkiBase64: string };
+    assert.equal(keygenOut.algorithm, 'Ed25519');
+    assert.equal(readFileSync(genSpkiPath, 'utf8').trim(), keygenOut.publicKeySpkiBase64);
+    assert.match(readFileSync(genPrivPath, 'utf8'), /BEGIN PRIVATE KEY/);
+    assert.match(readFileSync(genPubPath, 'utf8'), /BEGIN PUBLIC KEY/);
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }

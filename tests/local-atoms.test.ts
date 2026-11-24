@@ -23,6 +23,8 @@ import {
   createMemorySecretStore,
   createPathResolver,
   createSerialMutationQueue,
+  defaultCodeSignatureVerifier,
+  evaluateWindowsAuthenticodeResult,
   parseMacOsCodesignTeamId,
   type CommandRunnerInput,
 } from '../packages/local-atoms/index.ts';
@@ -1321,5 +1323,70 @@ describe('atom.detect & createLocalAtomsRuntime unified dispatch', () => {
       assert.equal(otherRes.data.engine.occupiedBy, 'nginx/1.25');
       assert.equal(otherRes.data.engine.installed, false);
     }
+  });
+});
+
+describe('Windows Authenticode code signature verification', () => {
+  it('validates Status === Valid and constant-time SHA-256 / SHA-1 publisher thumbprint pinning', async () => {
+    const pinnedSha256 = 'A'.repeat(64);
+    const pinnedSha1 = 'B'.repeat(40);
+    const wrongSha256 = 'C'.repeat(64);
+
+    // Valid SHA-256 match (case-insensitive)
+    const okSha256 = evaluateWindowsAuthenticodeResult(
+      {
+        Status: 'Valid',
+        Thumbprint: '0'.repeat(40),
+        Sha256Thumbprint: pinnedSha256.toLowerCase(),
+        Subject: 'CN=Powerformer Inc.',
+      },
+      [pinnedSha256],
+    );
+    assert.equal(okSha256.ok, true);
+    if (okSha256.ok) assert.equal(okSha256.teamId, pinnedSha256);
+
+    // Valid SHA-1 match
+    const okSha1 = evaluateWindowsAuthenticodeResult(
+      {
+        Status: 'Valid',
+        Thumbprint: pinnedSha1.toLowerCase(),
+        Sha256Thumbprint: wrongSha256,
+      },
+      [pinnedSha1],
+    );
+    assert.equal(okSha1.ok, true);
+
+    // Rejects untrusted / tampered status even if thumbprint matches
+    const badStatus = evaluateWindowsAuthenticodeResult(
+      {
+        Status: 'HashMismatch',
+        StatusMessage: 'File hash does not match signature',
+        Sha256Thumbprint: pinnedSha256,
+      },
+      [pinnedSha256],
+    );
+    assert.equal(badStatus.ok, false);
+    if (!badStatus.ok) assert.match(badStatus.reason, /HashMismatch/);
+
+    // Rejects wrong signer thumbprint
+    const mismatch = evaluateWindowsAuthenticodeResult(
+      {
+        Status: 'Valid',
+        Sha256Thumbprint: wrongSha256,
+      },
+      [pinnedSha256],
+    );
+    assert.equal(mismatch.ok, false);
+    if (!mismatch.ok) assert.equal(mismatch.actualTeamId, wrongSha256);
+
+    // Fails closed when publisher has no Windows thumbprints configured
+    const unconfigured = await defaultCodeSignatureVerifier(
+      'C:\\Program Files\\OpenDesign\\murmur.exe',
+      'POWERFORMER_MURMUR_TEAM_ID_PENDING',
+      'win32',
+      { id: 'powerformer-murmur', label: 'Test', appleTeamId: 'POWERFORMER_MURMUR_TEAM_ID_PENDING' },
+    );
+    assert.equal(unconfigured.ok, false);
+    if (!unconfigured.ok) assert.match(unconfigured.reason, /thumbprint is not configured/i);
   });
 });

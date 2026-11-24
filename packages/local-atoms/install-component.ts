@@ -118,6 +118,7 @@ export type CodeSignatureVerifier = (
   filePath: string,
   expectedTeamId: string,
   platform: HostPlatform,
+  publisher?: BuiltinPublisherEntry,
 ) => Promise<CodeSignatureVerificationResult>;
 
 export type InstallComponentAtomDeps = {
@@ -264,7 +265,150 @@ export function parseMacOsCodesignTeamId(output: string): string | null {
   return value;
 }
 
-export const defaultCodeSignatureVerifier: CodeSignatureVerifier = async (filePath, expectedTeamId, platform) => {
+const WIN_THUMBPRINT_RE = /^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$/;
+
+export type WindowsAuthenticodeProbeOutput = {
+  Status?: unknown;
+  StatusMessage?: unknown;
+  Thumbprint?: unknown;
+  Sha256Thumbprint?: unknown;
+  Subject?: unknown;
+};
+
+/**
+ * Pure evaluator for Windows `Get-AuthenticodeSignature` JSON output.
+ * Requires `Status === 'Valid'` and a constant-time match between the signer
+ * certificate's SHA-256 or SHA-1 thumbprint and the publisher's pinned list.
+ */
+export function evaluateWindowsAuthenticodeResult(
+  raw: WindowsAuthenticodeProbeOutput | null | undefined,
+  expectedThumbprints: readonly string[],
+): CodeSignatureVerificationResult {
+  const validExpected = expectedThumbprints
+    .map(item => item.trim().toLowerCase())
+    .filter(item => WIN_THUMBPRINT_RE.test(item));
+  if (validExpected.length === 0) {
+    return {
+      ok: false,
+      reason: 'Windows Authenticode publisher thumbprint is not configured for this publisher',
+    };
+  }
+  if (!raw || typeof raw !== 'object') {
+    return {
+      ok: false,
+      reason: 'Windows Authenticode signature probe returned empty output',
+    };
+  }
+  const status = typeof raw.Status === 'string' ? raw.Status.trim() : '';
+  if (status !== 'Valid') {
+    const detail = typeof raw.StatusMessage === 'string' && raw.StatusMessage.trim()
+      ? ` (${raw.StatusMessage.trim()})`
+      : '';
+    return {
+      ok: false,
+      reason: `Windows Authenticode signature is not valid: status=${status || 'Unknown'}${detail}`,
+    };
+  }
+
+  const sha1 = typeof raw.Thumbprint === 'string' ? raw.Thumbprint.trim().toLowerCase() : '';
+  const sha256 = typeof raw.Sha256Thumbprint === 'string' ? raw.Sha256Thumbprint.trim().toLowerCase() : '';
+  const actualCandidates = [sha256, sha1].filter(candidate => WIN_THUMBPRINT_RE.test(candidate));
+  if (actualCandidates.length === 0) {
+    return {
+      ok: false,
+      reason: 'Windows Authenticode signature is missing signer certificate thumbprint',
+    };
+  }
+
+  for (const expected of validExpected) {
+    for (const actual of actualCandidates) {
+      if (expected.length === actual.length && hexDigestsEqual(actual, expected)) {
+        return { ok: true, teamId: actual.toUpperCase() };
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    reason: 'Windows Authenticode signer certificate thumbprint does not match allowlisted publisher',
+    actualTeamId: actualCandidates[0]!.toUpperCase(),
+  };
+}
+
+export const defaultCodeSignatureVerifier: CodeSignatureVerifier = async (
+  filePath,
+  expectedTeamId,
+  platform,
+  publisher,
+) => {
+  if (platform === 'win32') {
+    const pinnedThumbprints = [
+      ...(publisher?.windowsThumbprints ?? []),
+      ...(WIN_THUMBPRINT_RE.test(expectedTeamId.trim()) ? [expectedTeamId.trim()] : []),
+    ];
+    if (pinnedThumbprints.length === 0) {
+      return {
+        ok: false,
+        reason: 'Windows Authenticode publisher thumbprint is not configured for this publisher',
+      };
+    }
+
+    const psScript = [
+      '$ErrorActionPreference = "Stop"',
+      '$sig = Get-AuthenticodeSignature -LiteralPath $env:OM_VERIFY_FILE',
+      '$cert = $sig.SignerCertificate',
+      '$sha256 = ""',
+      'if ($null -ne $cert) {',
+      '  $hasher = [System.Security.Cryptography.SHA256]::Create()',
+      '  try { $sha256 = ([System.BitConverter]::ToString($hasher.ComputeHash($cert.RawData)) -replace "-", "") } finally { $hasher.Dispose() }',
+      '}',
+      '[PSCustomObject]@{',
+      '  Status = [string]$sig.Status',
+      '  StatusMessage = [string]$sig.StatusMessage',
+      '  Thumbprint = if ($null -ne $cert) { [string]$cert.Thumbprint } else { "" }',
+      '  Sha256Thumbprint = $sha256',
+      '  Subject = if ($null -ne $cert) { [string]$cert.Subject } else { "" }',
+      '} | ConvertTo-Json -Compress',
+    ].join('; ');
+
+    return new Promise(resolve => {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+        {
+          encoding: 'utf8',
+          timeout: 15_000,
+          shell: false,
+          maxBuffer: 256 * 1024,
+          windowsHide: true,
+          env: {
+            ...process.env,
+            OM_VERIFY_FILE: filePath,
+          },
+        },
+        (error, stdout, stderr) => {
+          if (error) {
+            const errStr = typeof stderr === 'string' ? stderr.trim() : '';
+            resolve({
+              ok: false,
+              reason: `Windows Authenticode verification failed: ${errStr || error.message}`,
+            });
+            return;
+          }
+          try {
+            const parsed = JSON.parse(String(stdout || '').trim()) as WindowsAuthenticodeProbeOutput;
+            resolve(evaluateWindowsAuthenticodeResult(parsed, pinnedThumbprints));
+          } catch (parseErr) {
+            resolve({
+              ok: false,
+              reason: `Windows Authenticode probe returned malformed JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+            });
+          }
+        },
+      );
+    });
+  }
+
   if (!expectedTeamId || !expectedTeamId.trim()) {
     return { ok: false, reason: 'Expected publisher Team ID is empty' };
   }
@@ -502,6 +646,7 @@ export class InstallComponentAtom {
             unifiedBinaryPath,
             publisher.appleTeamId,
             this.platform,
+            publisher,
           );
           if (!standaloneSig.ok) {
             return hostErr(
@@ -643,8 +788,8 @@ export class InstallComponentAtom {
         });
       }
 
-      // 2. Strict code signature publisher Team ID verification
-      const sigResult = await this.codeSignatureVerifier(stagingFile, publisher.appleTeamId, this.platform);
+      // 2. Strict code signature publisher verification (Apple Team ID / Windows Authenticode)
+      const sigResult = await this.codeSignatureVerifier(stagingFile, publisher.appleTeamId, this.platform, publisher);
       if (!sigResult.ok) {
         rmSync(stagingFile, { force: true });
         return hostErr('VERIFICATION_FAILED', sigResult.reason, {
