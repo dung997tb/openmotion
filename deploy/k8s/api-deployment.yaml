@@ -269,6 +269,11 @@ spec:
                 configMapKeyRef:
                   name: openmotion-config
                   key: OPENDESIGN_LINK_URL
+            - name: OPENDESIGN_CONSOLE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: openmotion-config
+                  key: OPENDESIGN_CONSOLE_URL
             - name: OPENDESIGN_S2S_API_KEY
               valueFrom:
                 secretKeyRef:

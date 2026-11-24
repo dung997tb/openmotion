@@ -3353,3 +3353,170 @@ describe('Cloud API Entrypoint — OAuth Agent Project Grants (Import Assets & M
     assert.equal(retrySaveGranted.result?.isError, undefined);
   });
 });
+
+describe('Cloud API Entrypoint — OAuth Agent Project Visibility', () => {
+  it('shows an OAuth agent only granted projects and their sessions across catalog, REST and MCP listings', async () => {
+    const fixture = createApiFixture({ config: { AUTH_MODE: 'dev' } });
+    const { app, config, pgClient, authStore } = fixture;
+    const userId = config.DEV_USER_ID;
+    const workspaceId = config.DEV_WORKSPACE_ID;
+    const clientId = 'oauth-client-visibility';
+    authStore.seedWorkspace({ userId, workspaceId, email: 'owner@example.test', displayName: 'Owner' });
+    const rawAccessToken = `om_oat_${'v'.repeat(40)}`;
+    await authStore.createOAuthToken({
+      clientId,
+      userId,
+      workspaceId,
+      accessTokenHash: createHash('sha256').update(rawAccessToken).digest('hex'),
+      refreshTokenHash: null,
+      scope: DEFAULT_PAT_SCOPES.join(' '),
+      resource: `${config.APP_PUBLIC_ORIGIN}/mcp`,
+      accessExpiresAt: new Date(Date.now() + 3600_000),
+      refreshExpiresAt: null,
+    });
+
+    const createProj = async (title: string): Promise<string> => {
+      const res = await app.request('/motion-api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      assert.equal(res.status, 201);
+      return ((await res.json()) as { projectId: string }).projectId;
+    };
+    const projectA = await createProj('Granted Project A');
+    const projectB = await createProj('Ungranted Project B');
+    pgClient.seed('project_grants', {
+      id: randomUUID(),
+      project_id: projectA,
+      user_id: userId,
+      workspace_id: workspaceId,
+      client_id: clientId,
+      granted_at: new Date().toISOString(),
+      revoked_at: null,
+    });
+    const sessionA = pgClient.rows('projects').find(row => row.id === projectA)!.session_id as string;
+    const sessionB = pgClient.rows('projects').find(row => row.id === projectB)!.session_id as string;
+
+    const workspace = fixture.services.workspace;
+    const agent: AuthContext = {
+      authMode: 'oidc', authMethod: 'oauth_bearer', role: 'editor', scopes: DEFAULT_PAT_SCOPES,
+      clientId, userId, workspaceId,
+    };
+    const owner: AuthContext = {
+      authMode: 'oidc', authMethod: 'session_cookie', role: 'owner', scopes: DEFAULT_PAT_SCOPES,
+      userId, workspaceId,
+    };
+
+    const ownerCatalog = await workspace.getCatalog(owner);
+    assert.deepEqual(new Set(ownerCatalog.projects.map(p => p.id)), new Set([projectA, projectB]));
+    assert.equal(ownerCatalog.activeId, projectB);
+
+    const agentCatalog = await workspace.getCatalog(agent);
+    assert.deepEqual(agentCatalog.projects.map(p => p.id), [projectA]);
+    assert.equal(agentCatalog.activeId, projectA);
+    assert.deepEqual((agentCatalog.sessions ?? []).map(s => s.id), [sessionA]);
+
+    // Session detail carries the project conversation, so it follows the same grant.
+    assert.equal((await workspace.getSession(agent, sessionA)).artifacts[0]?.projectId, projectA);
+    await assert.rejects(workspace.getSession(agent, sessionB), { code: 'SESSION_NOT_FOUND' });
+    await assert.rejects(workspace.renameSession(agent, sessionB, 'Renamed'), { code: 'SESSION_NOT_FOUND' });
+    await assert.rejects(workspace.appendMessage(agent, sessionB, { content: 'hello' }), { code: 'SESSION_NOT_FOUND' });
+    await assert.rejects(workspace.openSession(agent, sessionB), { code: 'SESSION_NOT_FOUND' });
+    assert.equal((await workspace.getSession(owner, sessionB)).artifacts[0]?.projectId, projectB);
+
+    // An auto-granted new project must not open an ungranted session's conversation.
+    await assert.rejects(
+      workspace.createProject(agent, { sessionId: sessionB, title: 'Probe' }),
+      { code: 'SESSION_NOT_FOUND' },
+    );
+    // Opening for the editor without a project never picks (or reveals) an ungranted one.
+    await assert.rejects(workspace.openSessionForEditor(agent, sessionB), { code: 'SESSION_NOT_FOUND' });
+
+    // Mixed session: an ungranted project C inside session A stays hidden and is never chosen.
+    const created = await app.request('/motion-api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Ungranted Project C', sessionId: sessionA }),
+    });
+    assert.equal(created.status, 201);
+    const projectC = ((await created.json()) as { projectId: string }).projectId;
+    await workspace.openSession(owner, sessionA, projectC);
+    const mixed = (await workspace.getCatalog(agent)).sessions?.find(s => s.id === sessionA);
+    assert.deepEqual(mixed?.artifacts.map(a => a.projectId), [projectA]);
+    assert.equal(mixed?.activeArtifactId, mixed?.artifacts[0]?.id);
+    const mixedDetail = await workspace.getSession(agent, sessionA);
+    assert.deepEqual(mixedDetail.artifacts.map(a => a.projectId), [projectA]);
+    assert.equal(mixedDetail.activeArtifactId, mixedDetail.artifacts[0]?.id);
+    assert.equal((await workspace.openSessionForEditor(agent, sessionA)).projectId, projectA);
+    await assert.rejects(workspace.openSession(agent, sessionA, projectC), { code: 'PROJECT_GRANT_REQUIRED' });
+    assert.equal((await workspace.getCatalog(owner)).activeId, projectA);
+
+    const restList = await app.request('/motion-api/projects', {
+      headers: { Authorization: `Bearer ${rawAccessToken}` },
+    });
+    assert.equal(restList.status, 200);
+    assert.deepEqual(((await restList.json()) as { projects: Array<{ id: string }> }).projects.map(p => p.id), [projectA]);
+
+    const mcpHeaders = {
+      Authorization: `Bearer ${rawAccessToken}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+    };
+    const initRes = await app.request('/mcp', {
+      method: 'POST',
+      headers: mcpHeaders,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'visibility-test', version: '1.0.0' } },
+      }),
+    });
+    assert.equal(initRes.status, 200);
+    const mcpSessionId = initRes.headers.get('mcp-session-id');
+    assert.ok(mcpSessionId);
+    const listRes = await app.request('/mcp', {
+      method: 'POST',
+      headers: { ...mcpHeaders, 'Mcp-Session-Id': mcpSessionId },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'openmotion_get_project', arguments: {} },
+      }),
+    });
+    assert.equal(listRes.status, 200);
+    const listed = ((await listRes.json()) as {
+      result?: { structuredContent?: { total?: number; activeId?: string; projects?: Array<{ id: string }> } };
+    }).result?.structuredContent;
+    assert.equal(listed?.total, 1);
+    assert.equal(listed?.activeId, projectA);
+    assert.deepEqual(listed?.projects?.map(p => p.id), [projectA]);
+
+    // A session the agent creates has no project yet and stays usable by ID.
+    const agentSession = await workspace.createSession(agent, { title: 'Agent session' });
+    assert.equal((await workspace.getSession(agent, agentSession.id)).id, agentSession.id);
+    const agentProject = await workspace.createProject(agent, { sessionId: agentSession.id, title: 'Agent project' });
+    assert.deepEqual(
+      (await workspace.getSession(agent, agentSession.id)).artifacts.map(a => a.projectId),
+      [agentProject.projectId],
+    );
+  });
+});
+
+describe('Cloud API Entrypoint — OpenDesign Console URL', () => {
+  it('serves the configured OpenDesign console URL from /motion-api/account/summary', async () => {
+    const readConsoleUrl = async (overrides: Record<string, string>) => {
+      const { app } = createApiFixture({ config: { AUTH_MODE: 'dev', ...overrides } });
+      const res = await app.request('/motion-api/account/summary');
+      assert.equal(res.status, 200);
+      return ((await res.json()) as { consoleUrl: string }).consoleUrl;
+    };
+    assert.equal(await readConsoleUrl({}), 'https://open-design.ai/cloud');
+    assert.equal(
+      await readConsoleUrl({ OPENDESIGN_CONSOLE_URL: 'https://console.example.test/cloud' }),
+      'https://console.example.test/cloud',
+    );
+  });
+});

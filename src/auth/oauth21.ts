@@ -26,6 +26,8 @@ const AUTH_CODE_TTL_SEC = 300; // 5 minutes
 const ACCESS_TOKEN_TTL_SEC = 3600; // 1 hour
 const REFRESH_TOKEN_TTL_SEC = 30 * 24 * 60 * 60; // 30 days
 const OAUTH_TOUCH_THROTTLE_SEC = 60;
+// Concurrent refreshes from one client lose the rotation race within this window; that is not theft.
+const REFRESH_REUSE_GRACE_SEC = 30;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 export const DEFAULT_DCR_ALLOWED_HTTPS_HOSTS: readonly string[] = ['chatgpt.com', 'claude.ai'];
 
@@ -497,8 +499,10 @@ export async function exchangeOAuthToken(
     if (!req.refreshToken) {
       throw new CloudError('INVALID_ARGUMENT', 'refresh_token is required', { status: 400 });
     }
-    const existing = await store.findActiveOAuthTokenByRefreshHash(sha256Hex(req.refreshToken));
+    const refreshHash = sha256Hex(req.refreshToken);
+    const existing = await store.findActiveOAuthTokenByRefreshHash(refreshHash);
     if (!existing || existing.clientId !== client.clientId) {
+      await revokeConnectionOnRefreshReuse(store, refreshHash, client.clientId);
       throw new CloudError('INVALID_ARGUMENT', 'invalid_grant: refresh token is invalid or expired', {
         status: 400,
       });
@@ -523,6 +527,24 @@ export async function exchangeOAuthToken(
   }
 
   throw new CloudError('INVALID_ARGUMENT', 'unsupported_grant_type', { status: 400 });
+}
+
+/**
+ * RFC 9700 §4.14.2: a refresh token presented again after rotation means a copy leaked, and the
+ * server cannot tell the attacker from the client, so every live token of that connection is revoked.
+ * Only rotation keeps the refresh hash on a revoked row; explicitly revoked tokens no longer match.
+ * Project grants stay; the user only has to authorize the client again.
+ */
+async function revokeConnectionOnRefreshReuse(
+  store: AuthStore,
+  refreshHash: string,
+  clientId: string,
+): Promise<void> {
+  const prior = await store.findOAuthTokenByRefreshHash(refreshHash);
+  if (!prior?.revokedAt || prior.clientId !== clientId) return;
+  if (!prior.refreshExpiresAt || prior.refreshExpiresAt.getTime() <= Date.now()) return;
+  if (Date.now() - prior.revokedAt.getTime() < REFRESH_REUSE_GRACE_SEC * 1000) return;
+  await store.revokeOAuthClientForUser(prior.userId, prior.clientId);
 }
 
 async function mintOAuthTokenPair(
