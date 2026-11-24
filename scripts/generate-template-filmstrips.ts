@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getHyperframeRuntimeScript } from '@hyperframes/core/runtime-script';
-import puppeteer from 'puppeteer-core';
+import puppeteer, { type Page } from 'puppeteer-core';
 import sharp from 'sharp';
 import { isMain } from '../shared/entry.ts';
 import { isTextProjectPath } from '../shared/project-validation.ts';
@@ -190,7 +190,7 @@ async function startTemplatePreviewServer(
 }
 
 async function captureCompositionSprite(
-  page: puppeteer.Page,
+  page: Page,
   origin: string,
   compPath: string,
 ): Promise<{ jpeg: Buffer; frameCount: number; frameWidth: number; frameHeight: number; aspect: number }> {

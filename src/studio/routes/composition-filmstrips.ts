@@ -239,7 +239,7 @@ export function createStudioCompositionFilmstripsRoutes(
     }
 
     const bodyResult = await readBoundedRequestBody(c.req.raw, MAX_FILMSTRIP_JPEG_BYTES);
-    if (!bodyResult.ok) {
+    if ('status' in bodyResult) {
       return c.json(
         {
           error:
