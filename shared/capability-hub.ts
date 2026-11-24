@@ -1,4 +1,5 @@
-import type { SuperAgentArtifact, SuperAgentContextTag, SuperAgentResourceAttachment } from './super-agent.ts';
+import { isDesignScenario } from './design-project.ts';
+import type { SuperAgentArtifact, SuperAgentContextTag, SuperAgentDesignModuleId, SuperAgentResourceAttachment } from './super-agent.ts';
 
 export type CapabilityDomainId =
   | 'motion'
@@ -238,7 +239,8 @@ export type SuperAgentHandoffPayload = {
   /** Concise mode/skill and parameter tags displayed above the user message bubble. */
   contextTags?: SuperAgentContextTag[];
   initialArtifact?: Partial<SuperAgentArtifact>;
-  mode?: 'game' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
+  mode?: 'game' | 'design' | 'website' | 'motion' | 'deck' | 'image' | 'media' | 'audio';
+  designModule?: SuperAgentDesignModuleId;
   title?: string;
   autoSend?: boolean;
   newChat?: boolean;
@@ -436,15 +438,24 @@ export function buildResourceMcpPrompt(
   }
 }
 
+function defaultDesignModuleForRef(ref: CapabilityResourceRef): SuperAgentDesignModuleId | undefined {
+  switch (ref.kind) {
+    case 'design-template':
+    case 'design-skill':
+      return isDesignScenario(ref.scenario) ? ref.scenario : 'prototype';
+    case 'brand-kit':
+      return 'prototype';
+    default:
+      return undefined;
+  }
+}
+
 function defaultModeForRef(ref: CapabilityResourceRef): SuperAgentHandoffPayload['mode'] {
   switch (ref.kind) {
     case 'design-template':
     case 'design-skill':
-      return ref.scenario === 'deck' || ref.scenario === 'document'
-        ? 'deck'
-        : ref.scenario === 'webgl'
-          ? 'game'
-          : 'website';
+    case 'brand-kit':
+      return 'design';
     case 'motion-template':
     case 'skill':
       return 'motion';
@@ -454,8 +465,6 @@ function defaultModeForRef(ref: CapabilityResourceRef): SuperAgentHandoffPayload
     case 'model':
     case 'scene-prompt':
       return ref.modality === 'audio' ? 'audio' : ref.modality === 'video' ? 'media' : 'image';
-    case 'brand-kit':
-      return 'website';
     case 'workflow':
       return 'motion';
   }
@@ -573,6 +582,8 @@ export function buildSuperAgentHandoff(
   ].filter(Boolean);
   const hiddenInstructions = hiddenParts.join('\n');
 
+  const designModule = defaultDesignModuleForRef(ref);
+
   return {
     prompt,
     ...(hiddenInstructions ? { hiddenInstructions } : {}),
@@ -580,6 +591,7 @@ export function buildSuperAgentHandoff(
     ...(options.contextTags?.length ? { contextTags: options.contextTags } : {}),
     ...(options.initialArtifact ? { initialArtifact: options.initialArtifact } : {}),
     mode: defaultModeForRef(ref),
+    ...(designModule ? { designModule } : {}),
     title: ref.title,
     autoSend: options.autoSend,
     ...(options.newChat !== undefined ? { newChat: options.newChat } : {}),

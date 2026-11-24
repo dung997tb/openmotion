@@ -11,6 +11,7 @@ import {
   buildCanonicalModels,
   buildCuratedShard,
   classifyMultimodalTask,
+  classifyParameterTier,
   compareModels,
   createRegistryFromShards,
   formatComparisonMarkdown,
@@ -342,6 +343,14 @@ test('persisted live registry shards load cleanly, stay below 1 MiB, and support
   assert.equal(genOpts.delivery, 'provider');
   assert.ok(genOpts.fields.length >= 3);
   assert.ok(genOpts.fields.some(f => f.presentation === 'ratio'));
+  assert.ok(genOpts.fields.every(f => f.tier === 'primary' || f.tier === 'advanced'));
+  assert.ok(genOpts.fields.every(f => typeof f.uiOrder === 'number'));
+  assert.equal(classifyParameterTier('video', 'duration', 'duration'), 'primary');
+  assert.equal(classifyParameterTier('video', 'seed', 'seed'), 'advanced');
+  assert.equal(classifyParameterTier('image', 'aspect_ratio', 'aspectRatio'), 'primary');
+  assert.equal(classifyParameterTier('image', 'negative_prompt', 'negativePrompt'), 'advanced');
+  assert.equal(classifyParameterTier('audio', 'voice', 'voice'), 'primary');
+  assert.equal(classifyParameterTier('audio', 'speed', 'speed'), 'advanced');
 
   // Curated shard validates cleanly
   assertValidShard(buildCuratedShard());

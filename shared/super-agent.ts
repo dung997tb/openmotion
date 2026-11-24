@@ -1,12 +1,34 @@
 import type { BrowserPickedElement, BrowserRect } from './browser.ts';
+import type { DesignScenarioId } from './design-project.ts';
 
 export const SUPER_AGENT_API = '/motion-api/super-agent';
 
+export const SUPER_AGENT_DESIGN_MODULES = [
+  'image',
+  'prototype',
+  'mobile-app',
+  'deck',
+  'document',
+  'web-clone',
+  'live-artifact',
+  'webgl',
+] as const;
+
+export type SuperAgentDesignModuleId = DesignScenarioId | 'image';
+
+export function isSuperAgentDesignModule(value: unknown): value is SuperAgentDesignModuleId {
+  return typeof value === 'string' && (SUPER_AGENT_DESIGN_MODULES as readonly string[]).includes(value);
+}
+
 export type SuperAgentEngine = string;
 export type SuperAgentPermissionMode = 'on-request' | 'auto';
+export type SuperAgentFollowUpMode = 'steer' | 'queue';
 
 export type SuperAgentResourceKind =
   | 'asset'
+  | 'file'
+  | 'folder'
+  | 'chat'
   | 'brand-kit'
   | 'motion-template'
   | 'design-template'
@@ -19,8 +41,39 @@ export type SuperAgentResourceKind =
   | 'game-project'
   | 'browser-annotation';
 
+export type SuperAgentMotionClipSelection = {
+  id: string;
+  label: string;
+  kind: string;
+  tag?: string;
+  start: number;
+  duration: number;
+  track?: number;
+  sourceFile?: string;
+  selector?: string;
+  hfId?: string;
+  src?: string;
+};
+
+export type SuperAgentEditorElementSelection = {
+  label: string;
+  tagName: string;
+  selector: string;
+  hfId?: string;
+  sourceFile?: string;
+  text?: string;
+};
+
 export type SuperAgentBrowserAnnotation = {
-  mode: 'select' | 'region' | 'draw' | 'screenshot' | 'console';
+  mode:
+    | 'select'
+    | 'region'
+    | 'draw'
+    | 'screenshot'
+    | 'console'
+    | 'motion-selection'
+    | 'design-comment'
+    | 'code-selection';
   pageUrl: string;
   pageTitle?: string;
   comment?: string;
@@ -35,6 +88,20 @@ export type SuperAgentBrowserAnnotation = {
   artifactId?: string;
   artifactKind?: SuperAgentArtifactKind;
   projectId?: string;
+  filePath?: string;
+  lineRange?: { start: number; end: number };
+  codeSnippet?: string;
+  slideIndex?: number;
+  slideCount?: number;
+  commentId?: string;
+  compositionPath?: string;
+  timeSec?: number;
+  durationSec?: number;
+  fps?: number;
+  timeRange?: { start: number; end: number };
+  timelineClips?: SuperAgentMotionClipSelection[];
+  selectedElements?: SuperAgentEditorElementSelection[];
+  keyframeCount?: number;
 };
 
 export type SuperAgentResourceAttachment = {
@@ -49,8 +116,30 @@ export type SuperAgentResourceAttachment = {
   previewUrl?: string;
   swatches?: string[];
   tags?: string[];
+  filePath?: string;
+  rootKey?: string;
+  artifactId?: string;
+  sizeBytes?: number;
+  mimeType?: string;
+  chatId?: string;
+  updatedAt?: number;
   annotation?: SuperAgentBrowserAnnotation;
 };
+
+export function resourceAttachmentKey(
+  item: Pick<SuperAgentResourceAttachment, 'kind' | 'id' | 'versionId'>,
+): string {
+  return `${item.kind}:${item.id}:${item.versionId ?? ''}`;
+}
+
+export function formatAttachmentBytes(bytes?: number): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
 
 export type SuperAgentResourceCounts = {
   assets: number;
@@ -83,6 +172,7 @@ export type SuperAgentArtifactKind =
   | 'asset-audio'
   | 'brand-kit'
   | 'game-project'
+  | 'workspace-file'
   | 'web';
 
 export type SuperAgentArtifact = {
@@ -103,6 +193,9 @@ export type SuperAgentArtifact = {
   url?: string;
   downloadUrl?: string;
   mimeType?: string;
+  filePath?: string;
+  rootKey?: string;
+  sizeBytes?: number;
   createdAt: number;
   updatedAt: number;
   /** Monotonic timestamp bumped when an artifact is explicitly presented/opened in the Artifact Viewer. */
@@ -191,6 +284,10 @@ export type SuperAgentContextTag = {
   tone?: 'coding' | 'agent' | 'image' | 'video' | 'audio';
 };
 
+export type SuperAgentPromptSegment =
+  | { type: 'text'; text: string }
+  | { type: 'mention'; attachmentKey: string; label: string; kind: SuperAgentResourceKind };
+
 export type SuperAgentMessage = {
   id: string;
   role: 'user' | 'assistant' | 'tool' | 'reasoning';
@@ -199,6 +296,7 @@ export type SuperAgentMessage = {
   status?: 'streaming' | 'completed';
   durationMs?: number;
   attachments?: SuperAgentResourceAttachment[];
+  segments?: SuperAgentPromptSegment[];
   contextTags?: SuperAgentContextTag[];
   toolEvent?: SuperAgentToolEvent;
   artifactIds?: string[];
@@ -207,6 +305,9 @@ export type SuperAgentMessage = {
 export type SuperAgentIntent =
   | 'chat'
   | 'coding'
+  | 'design'
+  | 'research'
+  | 'visualization'
   | 'image'
   | 'video'
   | 'audio'
@@ -217,9 +318,13 @@ export type SuperAgentIntent =
 
 export type SuperAgentModeId =
   | 'coding'
+  | 'design'
+  | 'research'
+  | 'visualization'
   | 'website'
   | 'motion'
   | 'deck'
+  | 'document'
   | 'game'
   | 'image'
   | 'media'
@@ -246,6 +351,35 @@ export type SuperAgentApprovalDisplay = {
 
 export type SuperAgentProjectKind = 'custom' | 'game' | 'design' | 'motion' | 'workspace';
 
+export type SuperAgentQueuedMessage = {
+  id: string;
+  requestId: string;
+  text: string;
+  hiddenInstructions?: string;
+  mode?: SuperAgentModeId;
+  workingDir?: string;
+  runtimeId?: string;
+  engine?: SuperAgentEngine;
+  model?: string;
+  reasoning?: string;
+  permissionMode?: SuperAgentPermissionMode;
+  attachments?: SuperAgentResourceAttachment[];
+  segments?: SuperAgentPromptSegment[];
+  contextTags?: SuperAgentContextTag[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type SuperAgentFeedbackRating = 'positive' | 'negative' | 'note';
+
+export type SuperAgentFeedbackEntry = {
+  id: string;
+  rating: SuperAgentFeedbackRating;
+  note: string;
+  includeLogs?: boolean;
+  createdAt: number;
+};
+
 export type SuperAgentChat = {
   id: string;
   title: string;
@@ -262,6 +396,9 @@ export type SuperAgentChat = {
   reasoning?: string;
   permissionMode: SuperAgentPermissionMode;
   threadId?: string;
+  compactedSummary?: string;
+  compactedAt?: number;
+  feedback?: SuperAgentFeedbackEntry[];
   createdAt: number;
   updatedAt: number;
   state: 'idle' | 'running' | 'waiting' | 'failed' | 'cancelled';
@@ -269,6 +406,7 @@ export type SuperAgentChat = {
   artifacts: SuperAgentArtifact[];
   activeArtifactId?: string;
   approvals: SuperAgentApproval[];
+  queuedMessages?: SuperAgentQueuedMessage[];
   turnActivity?: SuperAgentTurnActivity;
   lastTurnDurationMs?: number;
   lastTurnUsage?: SuperAgentUsage;
@@ -286,6 +424,7 @@ export type SuperAgentChatSummary = {
   state: SuperAgentChat['state'];
   artifactCount: number;
   messageCount: number;
+  queuedCount?: number;
   lastTurnId?: string;
   updatedAt: number;
   createdAt: number;
@@ -304,6 +443,7 @@ export function summarizeSuperAgentChat(chat: SuperAgentChat): SuperAgentChatSum
     state: chat.state,
     artifactCount: chat.artifacts.length,
     messageCount: messages.length,
+    ...(chat.queuedMessages?.length ? { queuedCount: chat.queuedMessages.length } : {}),
     ...(lastTurnId ? { lastTurnId } : {}),
     updatedAt: chat.updatedAt,
     createdAt: chat.createdAt,
@@ -322,7 +462,9 @@ export type SuperAgentTurnInput = {
   reasoning?: string;
   permissionMode?: SuperAgentPermissionMode;
   attachments?: SuperAgentResourceAttachment[];
+  segments?: SuperAgentPromptSegment[];
   contextTags?: SuperAgentContextTag[];
+  followUpBehavior?: SuperAgentFollowUpMode;
 };
 
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -360,6 +502,8 @@ export function artifactCanonicalAddress(artifact: SuperAgentArtifact): string {
       return `asset://${artifact.assetId ?? artifact.id}${artifact.versionId ? `/${artifact.versionId}` : ''}`;
     case 'brand-kit':
       return `brand://${artifact.kitId ?? artifact.id}`;
+    case 'workspace-file':
+      return `file://${artifact.filePath ?? artifact.title}`;
     case 'web':
       return artifact.url || 'about:blank';
   }
@@ -383,7 +527,8 @@ function validationDecision(output: unknown): boolean | undefined {
   return typeof value.passed === 'boolean' ? value.passed : undefined;
 }
 
-export function gameValidationPassed(tool: string, output: unknown): boolean | undefined {
+export function gameValidationPassed(tool: string | undefined, output: unknown): boolean | undefined {
+  if (typeof tool !== 'string' || !tool) return undefined;
   const name = tool.replace(/^mcp_+openmotion_+/, '');
   if (name !== 'openmotion_game_validate' && name !== 'motion_game_validate') return undefined;
   const value = parseValidationOutput(output);
@@ -1086,6 +1231,12 @@ export function modeToSuperAgentIntent(mode?: SuperAgentModeId): SuperAgentInten
   switch (mode) {
     case 'coding':
       return 'coding';
+    case 'design':
+      return 'design';
+    case 'research':
+      return 'research';
+    case 'visualization':
+      return 'visualization';
     case 'image':
       return 'image';
     case 'motion':
@@ -1098,6 +1249,7 @@ export function modeToSuperAgentIntent(mode?: SuperAgentModeId): SuperAgentInten
     case 'website':
       return 'website';
     case 'deck':
+    case 'document':
       return 'slides';
     default:
       return undefined;
@@ -1141,6 +1293,12 @@ export function detectIntentFromPrompt(
   attachments?: SuperAgentResourceAttachment[],
 ): SuperAgentIntent {
   const source = (text || '').trim();
+  if (/^\[Mode:\s*Design Studio\s*·\s*Image Artwork/i.test(source)) return 'image';
+  if (/^\[Mode:\s*Design Studio\s*·\s*HTML Design\s*\|\s*Module:\s*(?:Slide deck|Document)\b/i.test(source)) return 'slides';
+  if (/^\[Mode:\s*Design Studio\b/i.test(source)) return 'design';
+  if (/^\[Mode:\s*Research a topic\b/i.test(source)) return 'research';
+  if (/^\[Mode:\s*Visualization\b/i.test(source)) return 'visualization';
+  if (/^\[Mode:\s*Game Studio\b/i.test(source)) return 'game';
   if (/^\[(?:Mode:\s*Coding|Coding:)/i.test(source)) return 'coding';
   if (/^\[Mode:\s*Image Artwork/i.test(source)) return 'image';
   if (/^\[Mode:\s*(?:Motion graphics|AI Cinema Video)/i.test(source)) return 'video';
@@ -1371,6 +1529,12 @@ export function superAgentIntentMeta(intent?: SuperAgentIntent): {
   switch (intent) {
     case 'coding':
       return { icon: 'code-s-slash-line', tone: 'coding', label: 'Coding' };
+    case 'design':
+      return { icon: 'palette-line', tone: 'image', label: 'Design Studio' };
+    case 'research':
+      return { icon: 'book-open-line', tone: 'agent', label: 'Research' };
+    case 'visualization':
+      return { icon: 'bar-chart-box-line', tone: 'coding', label: 'Visualization' };
     case 'image':
       return { icon: 'image-line', tone: 'image', label: 'Image' };
     case 'video':

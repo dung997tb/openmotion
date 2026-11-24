@@ -485,11 +485,18 @@ export function RouteViewport({
             active={unifiedSuperAgentActive}
             chatId={gameStudioActive ? null : page.superAgentChat}
             requestedMode={gameStudioActive ? 'game' : (page.superAgentMode ?? null)}
+            requestedDesignModule={gameStudioActive ? null : (page.superAgentDesignModule ?? null)}
             requestedGameId={gameStudioActive ? (page.gameId ?? null) : null}
             onBack={gameStudioActive ? returnToExplore : undefined}
             onChangeRequestedMode={mode => {
               navigatePage(
-                { superAgent: true, superAgentChat: gameStudioActive ? null : page.superAgentChat, superAgentMode: mode, templates: false },
+                {
+                  superAgent: true,
+                  superAgentChat: gameStudioActive ? null : page.superAgentChat,
+                  superAgentMode: mode,
+                  superAgentDesignModule: mode === 'design' ? page.superAgentDesignModule ?? null : null,
+                  templates: false,
+                },
                 !gameStudioActive && mode === null,
               );
             }}
@@ -499,6 +506,7 @@ export function RouteViewport({
                   superAgent: true,
                   superAgentChat: chat,
                   superAgentMode: chat ? null : (gameStudioActive ? null : page.superAgentMode ?? null),
+                  superAgentDesignModule: chat ? null : (gameStudioActive ? null : (page.superAgentMode === 'design' ? page.superAgentDesignModule ?? null : null)),
                   templates: false,
                 },
                 replace,

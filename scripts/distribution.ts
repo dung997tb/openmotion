@@ -736,11 +736,25 @@ export const distributionDocuments = [
   'docs/skills.md', 'docs/template-catalog.md', 'docs/template-repository.md', 'docs/repository-storage.md', 'docs/test-packages.md', 'docs/templates/requirement.md',
 ];
 
+const multimodalModelsRuntimeFiles = [
+  'packages/multimodal-models/package.json',
+  'packages/multimodal-models/src/schema.ts',
+  'packages/multimodal-models/src/normalize.ts',
+  'packages/multimodal-models/src/query.ts',
+  'packages/multimodal-models/data/index.json',
+  'packages/multimodal-models/data/providers/curated.json',
+  'packages/multimodal-models/data/providers/fal.json',
+  'packages/multimodal-models/data/providers/atlascloud.json',
+  'packages/multimodal-models/data/providers/models-dev.json',
+  'packages/multimodal-models/data/providers/openrouter.json',
+];
+
 export async function distributionFiles(profile: string, include: (file: string) => boolean = () => true): Promise<string[]> {
   if (!['phase1', 'legacy'].includes(profile)) throw new Error('Unknown distribution profile: ' + profile);
   const files = [
     ...onboardingSourceFiles,
     ...designSystemRuntimeFiles.map(file => 'packages/design-system/' + file),
+    ...multimodalModelsRuntimeFiles,
     ...distributionDocuments, 'LICENSE', '.codex-plugin/plugin.json', '.codex-plugin/onboarding/SKILL.md', '.mcp.json', 'marketplace.example.json',
     'package.json', 'package-lock.json',
     'skills/openmotion-recreate/assets/reconstruction.js',

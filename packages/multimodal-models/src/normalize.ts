@@ -7,6 +7,7 @@ import {
   type MultimodalTask,
   type ParameterChoiceOption,
   type ParameterFieldSchema,
+  type ParameterTier,
   type ParameterValueType,
   type CanonicalModelRecord,
   type RegistryStats,
@@ -178,6 +179,30 @@ export function mapWireKeyToStandard(
     return 'quality';
   }
   return WIRE_TO_STANDARD_KEY[normalized];
+}
+
+export const PRIMARY_STANDARD_KEYS_BY_MODALITY: Record<MultimodalModality, readonly StandardParameterKey[]> = {
+  image: ['aspectRatio', 'resolution', 'size', 'quality', 'count', 'background'],
+  video: ['aspectRatio', 'resolution', 'duration', 'generateAudio'],
+  audio: ['voice', 'duration', 'instrumental', 'language'],
+  '3d': ['quality', 'outputFormat'],
+};
+
+/**
+ * Classify whether a parameter belongs to quick primary controls or collapsible advanced controls.
+ * Shared as the SSOT rule across Studio, Super Agent, and registry conversions.
+ */
+export function classifyParameterTier(
+  modality: MultimodalModality,
+  wireKey: string,
+  standardKey?: StandardParameterKey,
+  valueType?: ParameterValueType,
+): ParameterTier {
+  const std = standardKey ?? mapWireKeyToStandard(wireKey, modality, valueType);
+  if (std && PRIMARY_STANDARD_KEYS_BY_MODALITY[modality].includes(std)) {
+    return 'primary';
+  }
+  return 'advanced';
 }
 
 export function humanizeParameterKey(key: string): string {

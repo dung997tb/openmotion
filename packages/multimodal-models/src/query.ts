@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GenerationOption, GenerationOptions } from '../../../shared/generation-options.ts';
-import { buildCanonicalModels, computeRegistryStats } from './normalize.ts';
+import { buildCanonicalModels, classifyParameterTier, computeRegistryStats } from './normalize.ts';
 import {
   assertValidShard,
   REGISTRY_SCHEMA_VERSION,
@@ -618,11 +618,19 @@ export function formatComparisonMarkdown(comparison: ModelComparisonResult): str
 export function toOpenMotionGenerationOptions(endpoint: ModelEndpointEntry): GenerationOptions {
   const fields: GenerationOption[] = [];
 
-  for (const p of endpoint.parameters) {
+  for (const [index, p] of endpoint.parameters.entries()) {
     if (p.standardKey === 'prompt' || p.type === 'array' || p.type === 'object') continue;
     if (p.standardKey === 'inputImage' || p.standardKey === 'endImage' || p.standardKey === 'maskImage' || p.standardKey === 'inputVideo' || p.standardKey === 'inputAudio') {
       continue;
     }
+
+    const tier = p.tier ?? classifyParameterTier(endpoint.modality, p.key, p.standardKey, p.type);
+    const sharedMeta = {
+      ...(p.standardKey ? { standardKey: p.standardKey } : {}),
+      tier,
+      uiOrder: p.uiOrder ?? index,
+      ...(p.description ? { description: p.description } : {}),
+    };
 
     if (p.type === 'enum' && p.enum?.length) {
       const primitiveChoices = p.enum.filter((v): v is string | number => typeof v === 'string' || typeof v === 'number');
@@ -648,9 +656,11 @@ export function toOpenMotionGenerationOptions(endpoint: ModelEndpointEntry): Gen
           };
         }),
         ...(typeof p.default === 'string' || typeof p.default === 'number' ? { default: p.default } : {}),
-        ...(p.standardKey === 'aspectRatio' ? { presentation: 'ratio' as const } : {}),
+        ...(p.standardKey === 'aspectRatio' || p.key === 'image_size' ? { presentation: 'ratio' as const } : {}),
+        ...(p.standardKey === 'count' ? { presentation: 'count' as const } : {}),
         ...(p.required ? { required: true } : {}),
         ...(p.allowCustom ? { allowCustom: true } : {}),
+        ...sharedMeta,
       });
     } else if (p.type === 'boolean') {
       fields.push({
@@ -659,6 +669,7 @@ export function toOpenMotionGenerationOptions(endpoint: ModelEndpointEntry): Gen
         kind: 'boolean',
         ...(typeof p.default === 'boolean' ? { default: p.default } : {}),
         ...(p.required ? { required: true } : {}),
+        ...sharedMeta,
       });
     } else if (p.type === 'integer' || p.type === 'number') {
       fields.push({
@@ -671,6 +682,7 @@ export function toOpenMotionGenerationOptions(endpoint: ModelEndpointEntry): Gen
         step: p.step ?? (p.type === 'integer' ? 1 : 0.1),
         ...(p.standardKey === 'count' ? { presentation: 'count' as const } : {}),
         ...(p.required ? { required: true } : {}),
+        ...sharedMeta,
       });
     } else if (p.type === 'string') {
       fields.push({
@@ -679,9 +691,12 @@ export function toOpenMotionGenerationOptions(endpoint: ModelEndpointEntry): Gen
         kind: 'text',
         ...(typeof p.default === 'string' ? { default: p.default } : {}),
         ...(p.required ? { required: true } : {}),
+        ...sharedMeta,
       });
     }
   }
+
+  fields.sort((a, b) => (a.uiOrder ?? Number.MAX_SAFE_INTEGER) - (b.uiOrder ?? Number.MAX_SAFE_INTEGER));
 
   const delivery: GenerationOptions['delivery'] =
     endpoint.provider === 'codex' || endpoint.tags?.includes('prompt-delivery') ? 'prompt' : 'provider';

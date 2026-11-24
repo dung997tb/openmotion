@@ -163,6 +163,12 @@ export type StandardParameterKey = (typeof STANDARD_PARAMETER_KEYS)[number];
 
 export type ParameterPrimitive = string | number | boolean | null;
 
+export const PARAMETER_TIERS = [
+  'primary',
+  'advanced',
+] as const;
+export type ParameterTier = (typeof PARAMETER_TIERS)[number];
+
 export interface ParameterRequirement {
   /** Sibling wire parameter name and required value(s) when this choice or field is used. */
   field: string;
@@ -180,6 +186,8 @@ export interface ParameterFieldSchema {
   key: string;
   /** Canonical cross-provider parameter key when mappable. */
   standardKey?: StandardParameterKey;
+  /** Display tier (`primary` quick controls vs collapsible `advanced` parameters). */
+  tier?: ParameterTier;
   /** Human-readable display label (e.g. `Aspect Ratio`). */
   label: string;
   /** Normalized data type. */

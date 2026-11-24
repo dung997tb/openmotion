@@ -1,4 +1,5 @@
 import type { BrowserScreenshotResult } from '../../../shared/browser';
+import { assetMediaUrl, assetVersion } from '../../../shared/asset-library';
 import {
   SUPER_AGENT_API,
   type SuperAgentArtifact,
@@ -6,10 +7,14 @@ import {
   type SuperAgentChatSummary,
   type SuperAgentEngine,
   type SuperAgentIntent,
+  type SuperAgentModeId,
   type SuperAgentPermissionMode,
+  type SuperAgentResourceAttachment,
   type SuperAgentResourceCatalog,
   type SuperAgentTurnInput,
 } from '../../../shared/super-agent';
+import { uploadLibraryAsset } from '../motion/assetClient';
+import { AssetUploadError } from '../motion/assetUploadError';
 import { isClientCacheEnabled } from '../utils/clientCacheMode';
 
 const MAX_CACHED_CHATS = 24;
@@ -244,6 +249,49 @@ export async function startSuperAgentTurn(id: string, input: SuperAgentTurnInput
   return res;
 }
 
+export async function enqueueSuperAgentMessage(id: string, input: SuperAgentTurnInput) {
+  invalidateChatListCache();
+  const res = await saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}/queue`, 'POST', input);
+  if (res?.conversation) seedCachedSuperAgentChat(res.conversation);
+  return res;
+}
+
+export async function updateSuperAgentQueuedMessage(
+  id: string,
+  queueId: string,
+  patch: Omit<Partial<SuperAgentTurnInput>, 'mode'> & { mode?: SuperAgentModeId | null },
+) {
+  invalidateChatListCache();
+  const res = await saRequest<{ conversation: SuperAgentChat }>(
+    `/chats/${encodeURIComponent(id)}/queue/${encodeURIComponent(queueId)}`,
+    'PATCH',
+    patch,
+  );
+  if (res?.conversation) seedCachedSuperAgentChat(res.conversation);
+  return res;
+}
+
+export async function deleteSuperAgentQueuedMessage(id: string, queueId: string) {
+  invalidateChatListCache();
+  const res = await saRequest<{ conversation: SuperAgentChat }>(
+    `/chats/${encodeURIComponent(id)}/queue/${encodeURIComponent(queueId)}`,
+    'DELETE',
+  );
+  if (res?.conversation) seedCachedSuperAgentChat(res.conversation);
+  return res;
+}
+
+export async function sendSuperAgentQueuedMessageNow(id: string, queueId: string) {
+  invalidateChatListCache();
+  const res = await saRequest<{ conversation: SuperAgentChat }>(
+    `/chats/${encodeURIComponent(id)}/queue/${encodeURIComponent(queueId)}/send`,
+    'POST',
+    {},
+  );
+  if (res?.conversation) seedCachedSuperAgentChat(res.conversation);
+  return res;
+}
+
 export async function stopSuperAgentChat(id: string) {
   invalidateChatListCache();
   const res = await saRequest<{ conversation: SuperAgentChat }>(`/chats/${encodeURIComponent(id)}/stop`, 'POST', {});
@@ -335,4 +383,128 @@ export async function captureSuperAgentPreviewSnapshot(
   const value = await response.json();
   if (!response.ok) throw new Error(value?.error || `HTTP ${response.status}`);
   return value as BrowserScreenshotResult;
+}
+
+function isMediaLibraryCandidate(file: File): boolean {
+  const mime = (file.type || '').toLowerCase();
+  if (mime === 'image/svg+xml' || /\.svgz?$/i.test(file.name)) return false;
+  if (/^image\/(?:png|jpeg|jpg|webp|gif|avif)$/.test(mime)) return true;
+  if (/^(?:video|audio)\//.test(mime)) return true;
+  return /\.(?:png|jpe?g|webp|gif|avif|mp4|mov|webm|mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name);
+}
+
+/** Uploads any file: raster images/video/audio go to Asset Library when supported, other files go to general Super Agent uploads. */
+export async function uploadSuperAgentFile(file: File): Promise<SuperAgentResourceAttachment> {
+  if (isMediaLibraryCandidate(file)) {
+    try {
+      const asset = await uploadLibraryAsset(file);
+      const current = assetVersion(asset);
+      return {
+        id: asset.id,
+        kind: 'asset',
+        title: asset.name,
+        subtitle: current?.model || current?.source || asset.modality,
+        modality: asset.modality,
+        versionId: asset.currentVersionId,
+        previewUrl: assetMediaUrl(asset.id, asset.currentVersionId),
+      };
+    } catch (error) {
+      if (error instanceof AssetUploadError && (error.reason === 'size' || error.reason === 'unreadable')) {
+        throw error;
+      }
+      // Fall through to general file upload when media library doesn't accept this file variant
+    }
+  }
+
+  if (!file.size) {
+    throw new Error('Uploaded file cannot be empty');
+  }
+  const response = await fetch(`${SUPER_AGENT_API}/uploads`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-File-Name': encodeURIComponent(file.name || 'uploaded-file.txt'),
+    },
+    body: file,
+  });
+  const value = await response.json().catch(() => null);
+  if (!response.ok || !value?.attachment) {
+    throw new Error(value?.error || `HTTP ${response.status}`);
+  }
+  return value.attachment as SuperAgentResourceAttachment;
+}
+
+export async function fetchSuperAgentWorkspaceFiles(params: {
+  chatId?: string | null;
+  workingDir?: string;
+  query?: string;
+  limit?: number;
+} = {}): Promise<SuperAgentResourceAttachment[]> {
+  const sp = new URLSearchParams();
+  if (params.chatId) sp.set('chatId', params.chatId);
+  if (params.workingDir?.trim()) sp.set('workingDir', params.workingDir.trim());
+  if (params.query?.trim()) sp.set('query', params.query.trim());
+  if (typeof params.limit === 'number') sp.set('limit', String(params.limit));
+  const qs = sp.toString();
+  const data = await saRequest<{ items: SuperAgentResourceAttachment[] }>(`/files${qs ? `?${qs}` : ''}`);
+  return Array.isArray(data?.items) ? data.items : [];
+}
+
+export async function readSuperAgentFileContent(params: {
+  chatId?: string | null;
+  workingDir?: string;
+  rootKey?: string;
+  path?: string;
+  uploadId?: string;
+}): Promise<{
+  path: string;
+  content?: string;
+  binary: boolean;
+  sizeBytes: number;
+  mimeType: string;
+  previewUrl?: string;
+}> {
+  if (params.rootKey === 'upload' && params.uploadId) {
+    return saRequest(`${`/uploads/${encodeURIComponent(params.uploadId)}?format=json`}`);
+  }
+  const sp = new URLSearchParams();
+  if (params.chatId) sp.set('chatId', params.chatId);
+  if (params.workingDir?.trim()) sp.set('workingDir', params.workingDir.trim());
+  if (params.rootKey) sp.set('rootKey', params.rootKey);
+  if (params.path) sp.set('path', params.path);
+  return saRequest(`/file-content?${sp.toString()}`);
+}
+
+export async function compactSuperAgentChat(chatId: string): Promise<{
+  conversation: SuperAgentChat;
+  compactedCount: number;
+  summary: string;
+}> {
+  const result = await saRequest<{
+    conversation: SuperAgentChat;
+    compactedCount: number;
+    summary: string;
+  }>(`/chats/${encodeURIComponent(chatId)}/compact`, 'POST', {});
+  if (result?.conversation) {
+    seedCachedSuperAgentChat(result.conversation);
+  }
+  return result;
+}
+
+export function superAgentSessionExportUrl(chatId: string): string {
+  return `${SUPER_AGENT_API}/chats/${encodeURIComponent(chatId)}/export`;
+}
+
+export async function submitSuperAgentFeedback(input: {
+  chatId?: string | null;
+  rating?: 'positive' | 'negative' | 'note';
+  note: string;
+  includeLogs?: boolean;
+}): Promise<{ id: string; createdAt: number; filePath: string }> {
+  return saRequest('/feedback', 'POST', {
+    ...(input.chatId ? { chatId: input.chatId } : {}),
+    rating: input.rating ?? 'note',
+    note: input.note,
+    includeLogs: input.includeLogs !== false,
+  });
 }

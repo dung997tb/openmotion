@@ -34,7 +34,7 @@ const projectScope = () => {
 
 export function AgentSettings() {
   const { t } = useI18n(), directory = useLocalAgents(), runtimes = useAgentRuntimes(), toast = useToast();
-  const [selected, setSelected] = useState(() => (consumePendingRuntimesView() ? RUNTIMES_VIEW_ID : 'codex'));
+  const [selected, setSelected] = useState(() => (consumePendingRuntimesView() ? RUNTIMES_VIEW_ID : 'antigravity'));
   const [query, setQuery] = useState(''), [filter, setFilter] = useState('all'), [detail, setDetail] = useState(() => selected === RUNTIMES_VIEW_ID);
 
   useEffect(() => {
@@ -47,7 +47,8 @@ export function AgentSettings() {
     return () => window.removeEventListener('motion:agents-runtimes-open', onOpenRuntimes);
   }, []);
 
-  const agent = directory.data?.agents.find(item => item.id === selected);
+  const agent = selected === RUNTIMES_VIEW_ID ? undefined : (directory.data?.agents.find(item => item.id === selected) ?? directory.data?.agents[0]);
+  const activeSelectedId = selected === RUNTIMES_VIEW_ID ? RUNTIMES_VIEW_ID : (agent?.id ?? selected);
   const filteredByInstall = directory.data?.agents.filter(item => filter === 'all' || item.installed === (filter === 'installed')) ?? [];
   const agents = rankSearchResults(filteredByInstall, query, item => ({ id: item.id, title: item.label, subtitle: item.bin })).map(r => r.item);
   const remoteRuntimes = (runtimes.data?.runtimes ?? []).filter(item => item.kind !== 'local-direct');
@@ -78,7 +79,7 @@ export function AgentSettings() {
         <Menu tooltip={t('Filter Agents')} modal={false} trigger={<IconButton variant="ghost" className="motion-icon-button" aria-label={t('Filter Agents')} icon={<RemixIcon name="filter-3-line" size={16} />} />}><MenuRadioGroup value={filter} onValueChange={value => setFilter(String(value))}>{[['all', 'All Agents'], ['installed', 'Installed'], ['missing', 'Not installed']].map(([value, label]) => <MenuRadioItem key={value} value={value}>{t(label)}</MenuRadioItem>)}</MenuRadioGroup></Menu>
       </div>
       <div className="om-provider-list-caption"><span className="om-eyebrow">{t('Local Agents')} · {agents.length}</span><Tooltip label={t('Rescan installation')} wrap><IconButton variant="ghost" className="motion-icon-button" aria-label={t('Rescan installation')} onClick={() => { tracking.reportSettingsClick('local_agents', 'rescan_agents'); directory.refresh(); }} icon={<RemixIcon name="refresh-line" size={14} />} /></Tooltip></div>
-      <nav className="om-provider-items" aria-label={t('Agents')}>{agents.map(item => <Tooltip label={`${item.label} · ${t(item.installed ? 'Installed' : 'Not installed')}`} wrap key={item.id}><Button variant="plain" aria-label={`${item.label} · ${t(item.installed ? 'Installed' : 'Not installed')}`} className="om-nav-item om-provider-item" aria-current={selected === item.id ? 'page' : undefined} onClick={() => { tracking.reportSettingsClick('local_agents', 'select_agent', { agent: item.id }); setSelected(item.id); setDetail(true); }}><ProviderAvatar name={item.label} provider={agentIcon(item)} /><span className="om-provider-item-name">{item.label}</span>{directory.data?.default?.agent === item.id ? <RemixIcon name="check-line" size={14} /> : item.installed ? <span className="om-status-dot" aria-label={t('Installed')} /> : null}</Button></Tooltip>)}</nav>
+      <nav className="om-provider-items" aria-label={t('Agents')}>{agents.map(item => <Tooltip label={`${item.label} · ${t(item.installed ? 'Installed' : 'Not installed')}`} wrap key={item.id}><Button variant="plain" aria-label={`${item.label} · ${t(item.installed ? 'Installed' : 'Not installed')}`} className="om-nav-item om-provider-item" aria-current={activeSelectedId === item.id ? 'page' : undefined} onClick={() => { tracking.reportSettingsClick('local_agents', 'select_agent', { agent: item.id }); setSelected(item.id); setDetail(true); }}><ProviderAvatar name={item.label} provider={agentIcon(item)} /><span className="om-provider-item-name">{item.label}</span>{directory.data?.default?.agent === item.id ? <RemixIcon name="check-line" size={14} /> : item.installed ? <span className="om-status-dot" aria-label={t('Installed')} /> : null}</Button></Tooltip>)}</nav>
       {!agents.length && directory.data && <p className="om-empty om-muted">{t('No matching Agents')}</p>}
       <p className="om-muted om-agent-list-note">{t('Use the Agents installed on this computer, with their own accounts.')}</p>
     </aside>

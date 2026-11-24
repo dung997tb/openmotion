@@ -34,24 +34,24 @@ export function artifactDeliverableMeta(artifact: SuperAgentArtifact): ArtifactD
           icon: 'slideshow-line',
           tone: 'audio',
           typeLabel: 'Slides & Docs',
-          primaryActionLabel: 'Preview',
-          primaryActionIcon: 'eye-line',
+          primaryActionLabel: 'Open editor',
+          primaryActionIcon: 'slideshow-line',
         };
       }
       return {
         icon: 'layout-line',
         tone: 'agent',
         typeLabel: 'Interactive Prototype',
-        primaryActionLabel: 'Preview',
-        primaryActionIcon: 'eye-line',
+        primaryActionLabel: 'Open editor',
+        primaryActionIcon: 'layout-line',
       };
     case 'motion-project':
       return {
         icon: 'movie-line',
         tone: 'video',
         typeLabel: 'Motion Video',
-        primaryActionLabel: 'Preview',
-        primaryActionIcon: 'play-fill',
+        primaryActionLabel: 'Open editor',
+        primaryActionIcon: 'movie-line',
       };
     case 'motion-export':
       return {
@@ -247,8 +247,8 @@ export function ArtifactDeliverableCard({
   onCopyText,
   onNotify,
   onOpenAccountSettings,
-  onOpenInDesignStudio,
-  onOpenInMotionStudio,
+  onOpenInDesignStudio: _onOpenInDesignStudio,
+  onOpenInMotionStudio: _onOpenInMotionStudio,
   onOpenInAssets,
   onOpenInBrandKit,
 }: ArtifactDeliverableCardProps) {
@@ -444,30 +444,6 @@ export function ArtifactDeliverableCard({
               ))}
             </div>
           </Popover>
-        )}
-
-        {artifact.kind === 'design-project' && artifact.projectId && onOpenInDesignStudio && (
-          <Button
-            variant="plain"
-            type="button"
-            className="om-sa-deliverable-btn"
-            onClick={() => onOpenInDesignStudio(artifact.projectId!)}
-          >
-            <RemixIcon name="layout-line" size={13} />
-            <span>{t('Edit in Studio')}</span>
-          </Button>
-        )}
-
-        {artifact.kind === 'motion-project' && artifact.projectId && onOpenInMotionStudio && (
-          <Button
-            variant="plain"
-            type="button"
-            className="om-sa-deliverable-btn"
-            onClick={() => onOpenInMotionStudio(artifact.projectId!)}
-          >
-            <RemixIcon name="download-2-line" size={13} />
-            <span>{t('Export video')}</span>
-          </Button>
         )}
 
         {mediaDownloadUrl && (

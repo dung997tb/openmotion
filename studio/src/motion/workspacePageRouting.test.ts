@@ -467,3 +467,56 @@ it('round-trips ?mode=game on /agent and clears it when opening a chat or leavin
   const left = workspacePageHref('http://localhost/agent?mode=game', { explore: true });
   expect(left).toBe('/explore');
 });
+
+it('round-trips ?mode=design and ?scene=<module> on /agent, preserves legacy modes and /design/*, and clears scene on exit', () => {
+  const baseDesign = readWorkspacePage('?mode=design', '', '/agent');
+  expect(baseDesign).toMatchObject({ superAgent: true, superAgentMode: 'design' });
+  expect(baseDesign.superAgentDesignModule).toBeUndefined();
+
+  for (const mod of ['prototype', 'mobile-app', 'deck', 'document', 'web-clone', 'live-artifact', 'webgl', 'image'] as const) {
+    const parsed = readWorkspacePage(`?mode=design&scene=${mod}`, '', '/agent');
+    expect(parsed).toMatchObject({ superAgent: true, superAgentMode: 'design', superAgentDesignModule: mod });
+    const href = workspacePageHref('http://localhost/explore', {
+      superAgent: true,
+      superAgentChat: null,
+      superAgentMode: 'design',
+      superAgentDesignModule: mod,
+    });
+    expect(href).toBe(`/agent?mode=design&scene=${mod}`);
+  }
+
+  const invalidScene = readWorkspacePage('?mode=design&scene=bogus', '', '/agent');
+  expect(invalidScene).toMatchObject({ superAgent: true, superAgentMode: 'design' });
+  expect(invalidScene.superAgentDesignModule).toBeUndefined();
+
+  const roundTripMobile = workspacePageHref('http://localhost/explore', {
+    superAgent: true,
+    superAgentChat: null,
+    superAgentMode: 'design',
+    superAgentDesignModule: 'mobile-app',
+  });
+  expect(roundTripMobile).toBe('/agent?mode=design&scene=mobile-app');
+
+  expect(workspacePageHref('http://localhost/agent?mode=design&scene=mobile-app', { superAgentMode: null })).toBe('/agent');
+  expect(workspacePageHref('http://localhost/agent?mode=design&scene=mobile-app', { explore: true })).toBe('/explore');
+  expect(workspacePageHref('http://localhost/agent?mode=design&scene=mobile-app', { superAgentMode: 'game' })).toBe('/agent?mode=game');
+
+  for (const legacy of ['website', 'deck', 'document', 'image', 'research', 'visualization'] as const) {
+    expect(readWorkspacePage(`?mode=${legacy}`, '', '/agent')).toMatchObject({
+      superAgent: true,
+      superAgentMode: legacy,
+    });
+    expect(
+      workspacePageHref('http://localhost/explore', {
+        superAgent: true,
+        superAgentChat: null,
+        superAgentMode: legacy,
+        superAgentDesignModule: null,
+      }),
+    ).toBe(`/agent?mode=${legacy}`);
+  }
+  expect(readWorkspacePage('', '', '/design/prototype')).toMatchObject({
+    designScene: 'prototype',
+    superAgent: false,
+  });
+});

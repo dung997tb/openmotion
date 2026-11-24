@@ -10,6 +10,7 @@ import {
   type SuperAgentContextTag,
   type SuperAgentFileOperation,
   type SuperAgentMessage,
+  type SuperAgentPromptSegment,
   type SuperAgentResourceAttachment,
   type SuperAgentToolCategory,
   type SuperAgentToolEvent,
@@ -21,7 +22,8 @@ import { WorkingIndicator } from '../motion/AssetCreationVisuals';
 import { readDirectGameBrief } from '../motion/game/gameSuperAgent';
 import { ArtifactDeliverableCard } from './ArtifactDeliverableCard';
 import { FilesChangedCard, UnifiedDiffView } from './ChangedFilesTree';
-import { resourceIcon, resourceKey } from './ResourcePickerDialog';
+import { InlineMentionChip } from './MentionNode';
+import { ResourceThumbImage, resourceIcon, resourceImagePreviewUrl, resourceKey } from './ResourcePickerDialog';
 import { SimpleMarkdown } from './SimpleMarkdown';
 
 type TurnGroup = {
@@ -44,6 +46,15 @@ export function formatElapsedDuration(ms?: number): string {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function formatWorkingDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '1s';
+  const totalSecs = Math.max(1, Math.floor(ms / 1000));
+  if (totalSecs < 60) return `${totalSecs}s`;
+  const mins = Math.floor(totalSecs / 60);
+  const remSecs = totalSecs % 60;
+  return `${mins}m ${remSecs}s`;
 }
 
 function useLiveElapsedMs(startedAt: number | undefined, active: boolean, intervalMs = 500): number {
@@ -89,7 +100,7 @@ function resolveLiveTurnStatusText(
   options: { chat: SuperAgentChat | null; sending?: boolean; engineLabel?: string },
 ): string {
   if (options.sending && options.chat?.state !== 'running' && options.chat?.state !== 'waiting') {
-    return t('Sending…');
+    return t('Starting…');
   }
   const activity = options.chat?.turnActivity;
   const phase = activity?.phase ?? 'thinking';
@@ -245,7 +256,7 @@ const gameGuideSections: Readonly<Record<string, string>> = {
 };
 
 function workflowGuideDetail(event: SuperAgentToolEvent, t: Translate): string | undefined {
-  const tool = event.tool.replace(/^mcp_+openmotion_+/, '');
+  const tool = (event.tool ?? '').replace(/^mcp_+openmotion_+/, '');
   if (tool !== 'openmotion_read_workflow' || !event.inputPreview || event.status === 'failed') {
     return event.summary;
   }
@@ -273,6 +284,7 @@ function ToolStepRow({
   onOpenArtifactId: (artifactId: string) => void;
 }) {
   const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
   const ev = message.toolEvent;
   const isRunning = ev?.status === 'running';
   const liveElapsedMs = useLiveElapsedMs(ev?.startedAt, isRunning);
@@ -282,67 +294,88 @@ function ToolStepRow({
   const fileOp = ev.fileOp ?? ev.files?.[0];
   const diffFiles = (ev.files ?? (fileOp ? [fileOp] : [])).filter(f => f.diffPreview);
   const hasBody = Boolean(ev.command || diffFiles.length > 0 || ev.inputPreview || ev.outputPreview);
+  const isOpen = hasBody && expanded;
   const displayDurationMs = status === 'running'
     ? (liveElapsedMs >= 1000 ? liveElapsedMs : undefined)
     : ev.durationMs;
   const detail = workflowGuideDetail(ev, t);
 
-  return (
-    <details className="om-sa-tool-row" open={status === 'failed' || undefined}>
-      <summary>
-        <span
-          className="om-sa-tool-status"
-          data-status={status}
-          data-category={ev.category || 'tool'}
-        >
-          <RemixIcon name={categoryIcon(ev.category, status)} size={15} />
-        </span>
-        <span className="om-sa-tool-label">{t(failedValidation ? 'Game validation failed' : ev.label || message.text)}</span>
-        {detail && detail !== ev.label && (
-          <span className="om-sa-tool-summary" title={detail}>{detail}</span>
+  const headerContent = (
+    <>
+      <span
+        className="om-sa-tool-status"
+        data-status={status}
+        data-category={ev.category || 'tool'}
+      >
+        <RemixIcon name={categoryIcon(ev.category, status)} size={15} />
+      </span>
+      <span className="om-sa-tool-label">{t(failedValidation ? 'Game validation failed' : ev.label || message.text)}</span>
+      {detail && detail !== ev.label && (
+        <span className="om-sa-tool-summary" title={detail}>{detail}</span>
+      )}
+      <span className="om-sa-step-trail">
+        {fileOp && (fileOp.addedLines !== undefined || fileOp.removedLines !== undefined) && (
+          <span className="om-sa-diff-badges">
+            {fileOp.addedLines !== undefined && fileOp.addedLines > 0 && (
+              <span className="om-sa-diff-add">+{fileOp.addedLines}</span>
+            )}
+            {fileOp.removedLines !== undefined && fileOp.removedLines > 0 && (
+              <span className="om-sa-diff-del">-{fileOp.removedLines}</span>
+            )}
+          </span>
         )}
-        <span className="om-sa-step-trail">
-          {fileOp && (fileOp.addedLines !== undefined || fileOp.removedLines !== undefined) && (
-            <span className="om-sa-diff-badges">
-              {fileOp.addedLines !== undefined && fileOp.addedLines > 0 && (
-                <span className="om-sa-diff-add">+{fileOp.addedLines}</span>
-              )}
-              {fileOp.removedLines !== undefined && fileOp.removedLines > 0 && (
-                <span className="om-sa-diff-del">-{fileOp.removedLines}</span>
-              )}
-            </span>
-          )}
-          {ev.exitCode !== undefined && (
-            <span className="om-sa-exit-pill" data-ok={ev.exitCode === 0 || undefined}>
-              {ev.exitCode === 0 ? 'exit 0' : `exit ${ev.exitCode}`}
-            </span>
-          )}
-          {displayDurationMs !== undefined && (
-            <span className="om-sa-step-time">{formatElapsedDuration(displayDurationMs)}</span>
-          )}
-          {ev.artifactId && (
-            <Button
-              variant="plain"
-              type="button"
-              className="om-sa-tool-view-btn"
-              onClick={event => {
-                event.preventDefault();
-                event.stopPropagation();
-                onOpenArtifactId(ev.artifactId!);
-              }}
-            >
-              <span>{t('View in Viewer')}</span>
-              <RemixIcon name="arrow-right-up-line" size={13} />
-            </Button>
-          )}
-          {hasBody && (
-            <span className="om-sa-step-chevron" aria-hidden="true">
-              <RemixIcon name="arrow-down-s-line" size={14} />
-            </span>
-          )}
-        </span>
-      </summary>
-      {hasBody && (
+        {ev.exitCode !== undefined && (
+          <span className="om-sa-exit-pill" data-ok={ev.exitCode === 0 || undefined}>
+            {ev.exitCode === 0 ? 'exit 0' : `exit ${ev.exitCode}`}
+          </span>
+        )}
+        {displayDurationMs !== undefined && (
+          <span className="om-sa-step-time">{formatElapsedDuration(displayDurationMs)}</span>
+        )}
+        {hasBody && (
+          <span className="om-sa-step-chevron" aria-hidden="true">
+            <RemixIcon name="arrow-down-s-line" size={14} />
+          </span>
+        )}
+      </span>
+    </>
+  );
+
+  return (
+    <div className="om-sa-tool-row" data-open={isOpen || undefined}>
+      <div className="om-sa-tool-head">
+        {hasBody ? (
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-tool-trigger"
+            aria-expanded={isOpen}
+            onClick={() => setExpanded(prev => !prev)}
+          >
+            {headerContent}
+          </Button>
+        ) : (
+          <div className="om-sa-tool-trigger" data-static="true">
+            {headerContent}
+          </div>
+        )}
+        {ev.artifactId && (
+          <Button
+            variant="plain"
+            type="button"
+            className="om-sa-tool-view-btn"
+            onClick={event => {
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenArtifactId(ev.artifactId!);
+            }}
+          >
+            <span>{t('View in Viewer')}</span>
+            <RemixIcon name="arrow-right-up-line" size={13} />
+          </Button>
+        )}
+      </div>
+      {isOpen && (
         <div className="om-sa-tool-body">
           {ev.command && (
             <div className="om-sa-cmd-block">
@@ -376,13 +409,29 @@ function ToolStepRow({
           )}
         </div>
       )}
-    </details>
+    </div>
   );
 }
 
-function ReasoningStepRow({ message, isStreaming }: { message: SuperAgentMessage; isStreaming: boolean }) {
+function ReasoningStepRow({
+  message,
+  isStreaming: isStreamingProp,
+  onCopyText,
+  onOpenWebUrl,
+  onOpenFilePath,
+}: {
+  message: SuperAgentMessage;
+  isStreaming?: boolean;
+  onCopyText?: (text: string) => void;
+  onOpenWebUrl?: (url: string) => void;
+  onOpenFilePath?: (filePath: string, label?: string) => void;
+}) {
   const { t } = useI18n();
+  const isStreaming = isStreamingProp ?? message.status === 'streaming';
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
   const liveElapsedMs = useLiveElapsedMs(message.createdAt, isStreaming);
+  const hasBody = Boolean(message.text?.trim());
+  const expanded = hasBody && (userExpanded ?? isStreaming);
   const durationLabel = !isStreaming && message.durationMs !== undefined
     ? t('Thought for {duration}', { duration: formatElapsedDuration(message.durationMs) })
     : isStreaming
@@ -391,52 +440,94 @@ function ReasoningStepRow({ message, isStreaming }: { message: SuperAgentMessage
           : t('Thinking…'))
       : t('Reasoning');
 
-  return (
-    <details className="om-sa-reasoning-row" open={isStreaming || undefined}>
-      <summary>
-        <span className="om-sa-reasoning-icon" data-streaming={isStreaming || undefined}>
-          <RemixIcon name={isStreaming ? 'loader-4-line' : 'sparkling-line'} size={14} />
-        </span>
-        <span className="om-sa-reasoning-label">{durationLabel}</span>
-        {!isStreaming && message.text && (
-          <span className="om-sa-tool-summary">{message.text.slice(0, 120)}</span>
-        )}
+  const headerContent = (
+    <>
+      <span className="om-sa-reasoning-icon" data-streaming={isStreaming || undefined}>
+        <RemixIcon name={isStreaming ? 'loader-4-line' : 'sparkling-line'} size={14} />
+      </span>
+      <span className="om-sa-reasoning-label">{durationLabel}</span>
+      {!isStreaming && message.text && (
+        <span className="om-sa-tool-summary">{message.text.slice(0, 120)}</span>
+      )}
+      {hasBody && (
         <span className="om-sa-step-trail">
           <span className="om-sa-step-chevron" aria-hidden="true">
             <RemixIcon name="arrow-down-s-line" size={14} />
           </span>
         </span>
-      </summary>
-      {message.text && (
-        <div className="om-sa-reasoning-body">
-          {message.text.trim().split(/\n{2,}/).map((para, idx) => (
-            <p key={idx} className="om-sa-reasoning-para">{para.trim()}</p>
-          ))}
+      )}
+    </>
+  );
+
+  return (
+    <div className="om-sa-reasoning-row" data-open={expanded || undefined}>
+      {hasBody ? (
+        <Button
+          variant="plain"
+          type="button"
+          className="om-sa-reasoning-trigger"
+          aria-expanded={expanded}
+          onClick={() => setUserExpanded(prev => !(prev ?? isStreaming))}
+        >
+          {headerContent}
+        </Button>
+      ) : (
+        <div className="om-sa-reasoning-trigger" data-static="true">
+          {headerContent}
         </div>
       )}
-    </details>
+      {expanded && message.text && (
+        <div className="om-sa-reasoning-body">
+          <SimpleMarkdown
+            content={message.text.trim()}
+            compact
+            onCopyCode={onCopyText}
+            onOpenWebUrl={onOpenWebUrl}
+            onOpenFilePath={onOpenFilePath}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
 function WorkLogSection({
   turn,
+  chat,
   isActiveTurn,
+  sending = false,
+  hideInlineStatus = false,
+  hasPendingApproval = false,
+  engineLabel,
   activity,
   onOpenArtifactId,
+  onCopyText,
+  onOpenWebUrl,
+  onOpenFilePath,
 }: {
   turn: TurnGroup;
+  chat: SuperAgentChat;
   isActiveTurn: boolean;
+  sending?: boolean;
+  hideInlineStatus?: boolean;
+  hasPendingApproval?: boolean;
+  engineLabel?: string;
   activity?: SuperAgentChat['turnActivity'];
   onOpenArtifactId: (artifactId: string) => void;
+  onCopyText?: (text: string) => void;
+  onOpenWebUrl?: (url: string) => void;
+  onOpenFilePath?: (filePath: string, label?: string) => void;
 }) {
   const { t } = useI18n();
   const isTurnFinished = !isActiveTurn && !turn.hasRunning && turn.assistantItems.length > 0;
   const shouldAutoExpand = !isTurnFinished;
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
-  const isRunning = isActiveTurn || turn.hasRunning;
-  const liveStart = activity?.startedAt ?? turn.user?.createdAt ?? turn.workItems[0]?.createdAt;
-  const liveRunningMs = useLiveElapsedMs(liveStart, isRunning);
-  const activeReasoningId = isActiveTurn && (!activity || activity.phase === 'thinking')
+  const [mountStartedAt] = useState(() => Date.now());
+  const effectiveActivity = activity ?? chat.turnActivity;
+  const isRunning = (isActiveTurn && !hasPendingApproval) || turn.hasRunning;
+  const liveStart = effectiveActivity?.startedAt ?? turn.workItems[0]?.createdAt ?? turn.user?.createdAt ?? mountStartedAt;
+  const liveRunningMs = useLiveElapsedMs(liveStart, isRunning, 250);
+  const activeReasoningId = isActiveTurn && (!effectiveActivity || effectiveActivity.phase === 'thinking')
     ? turn.workItems.at(-1)?.id
     : undefined;
 
@@ -447,22 +538,47 @@ function WorkLogSection({
   }, [isTurnFinished]);
 
   const expanded = userToggled ?? shouldAutoExpand;
+  const showInlineLive = isActiveTurn && !hasPendingApproval && !hideInlineStatus;
 
-  if (!turn.workItems.length) return null;
+  if (!turn.workItems.length && !showInlineLive) return null;
 
   const toolCount = turn.workItems.filter(m => m.role === 'tool').length;
   const stepCount = turn.workItems.length;
   const completedCount = countCompletedWorkItems(turn.workItems);
+  const plan = isActiveTurn ? (chat.turnActivity?.plan ?? []) : [];
+  const planTotal = plan.length;
+  const planDone = plan.filter(item => item.status === 'completed').length;
   const durationStr = formatElapsedDuration(turn.durationMs);
+  const stepMeta = isRunning
+    ? (planTotal > 0
+        ? t('{done}/{total} tasks', { done: planDone, total: planTotal })
+        : stepCount > 0
+          ? t('{done}/{total} steps', { done: completedCount, total: stepCount })
+          : '')
+    : (stepCount > 0 && durationStr ? t('{count} steps', { count: stepCount }) : '');
+
   const summaryTitle = isRunning
-    ? (completedCount > 0
-        ? t('Running steps ({done}/{total})', { done: completedCount, total: stepCount })
-        : t('Running steps ({count})', { count: stepCount }))
+    ? t('Working for {time}', { time: formatWorkingDuration(liveRunningMs) })
     : durationStr
       ? t('Worked for {duration} · {count} steps', { duration: durationStr, count: stepCount })
       : toolCount > 0
         ? t('Execution steps ({count})', { count: stepCount })
         : t('Thought');
+
+  const hasActiveWorkItem = turn.workItems.some(
+    item => (item.role === 'tool' && item.toolEvent?.status === 'running')
+      || (item.role === 'reasoning' && item.status === 'streaming'),
+  );
+  const phase = sending && chat.state !== 'running' && chat.state !== 'waiting'
+    ? 'connecting'
+    : (chat.turnActivity?.phase ?? 'thinking');
+  const statusText = resolveLiveTurnStatusText(t, { chat, sending, engineLabel });
+  const phaseIcon = phase === 'streaming'
+    ? 'edit-line'
+    : phase === 'thinking'
+      ? 'sparkling-line'
+      : 'loader-4-line';
+  const spinningIcon = phaseIcon === 'loader-4-line';
 
   return (
     <div className="om-sa-work-log" data-active={isActiveTurn || undefined}>
@@ -473,22 +589,23 @@ function WorkLogSection({
         aria-expanded={expanded}
         onClick={() => setUserToggled(prev => !(prev ?? shouldAutoExpand))}
       >
-        {isRunning && (
-          <span className="om-sa-work-summary-spinner" aria-hidden="true">
-            <RemixIcon name="loader-4-line" size={13} />
+        <span className="om-sa-work-summary-main">
+          <span className={isRunning ? 'om-sa-work-summary-label om-sa-work-summary-timer' : 'om-sa-work-summary-label'}>
+            {summaryTitle}
           </span>
-        )}
-        <span className="om-sa-work-summary-label">{summaryTitle}</span>
-        {isRunning && liveRunningMs >= 1000 && (
-          <span className="om-sa-work-summary-timer">{formatElapsedDuration(liveRunningMs)}</span>
-        )}
-        {!isTurnFinished && turn.hasFailure && (
-          <span className="om-sa-work-pill" data-tone="danger">
-            {t('Needs attention')}
+          <span className="om-sa-work-chevron" data-open={expanded || undefined}>
+            <RemixIcon name="arrow-down-s-line" size={14} />
           </span>
-        )}
-        <span className="om-sa-work-chevron" data-open={expanded || undefined}>
-          <RemixIcon name="arrow-down-s-line" size={14} />
+        </span>
+        <span className="om-sa-work-summary-right">
+          {stepMeta && isRunning && (
+            <span className="om-sa-work-summary-meta">{stepMeta}</span>
+          )}
+          {!isTurnFinished && turn.hasFailure && (
+            <span className="om-sa-work-pill" data-tone="danger">
+              {t('Needs attention')}
+            </span>
+          )}
         </span>
       </Button>
       {expanded && (
@@ -499,6 +616,9 @@ function WorkLogSection({
                 key={item.id}
                 message={item}
                 isStreaming={item.id === activeReasoningId && item.status === 'streaming'}
+                onCopyText={onCopyText}
+                onOpenWebUrl={onOpenWebUrl}
+                onOpenFilePath={onOpenFilePath}
               />
             ) : (
               <ToolStepRow
@@ -508,6 +628,15 @@ function WorkLogSection({
               />
             ),
           )}
+          {showInlineLive && !hasActiveWorkItem && (
+            <div className="om-sa-live-reply-phase" role="status" aria-live="polite">
+              <span className="om-sa-live-reply-icon" data-spinning={spinningIcon || undefined} aria-hidden="true">
+                <RemixIcon name={phaseIcon} size={14} />
+              </span>
+              <span className="om-sa-live-status-label om-sa-shimmer-text">{statusText}</span>
+            </div>
+          )}
+          {showInlineLive && <LivePlanCard plan={chat.turnActivity?.plan} />}
         </div>
       )}
     </div>
@@ -543,25 +672,60 @@ function LivePlanCard({ plan }: { plan: NonNullable<SuperAgentChat['turnActivity
 
 function LiveTurnStatusBar({
   chat,
+  sending,
   engineLabel,
+  stepStats,
 }: {
   chat: SuperAgentChat;
+  sending?: boolean;
   engineLabel?: string;
+  stepStats: { done: number; total: number };
 }) {
   const { t } = useI18n();
-  const startedAt = chat.turnActivity?.startedAt || chat.updatedAt;
-  const elapsedMs = useLiveElapsedMs(startedAt, true, 200);
-  const statusText = resolveLiveTurnStatusText(t, { chat, engineLabel });
+  const [mountStartedAt] = useState(() => Date.now());
+  const startedAt = chat.turnActivity?.startedAt || chat.updatedAt || mountStartedAt;
+  const elapsedMs = useLiveElapsedMs(startedAt, true, 250);
+  const statusText = resolveLiveTurnStatusText(t, { chat, sending, engineLabel });
+  const phase = sending && chat.state !== 'running' && chat.state !== 'waiting'
+    ? 'connecting'
+    : (chat.turnActivity?.phase ?? 'thinking');
+  const plan = chat.turnActivity?.plan ?? [];
+  const planTotal = plan.length;
+  const planDone = plan.filter(item => item.status === 'completed').length;
+  const stepMeta = planTotal > 0
+    ? t('{done}/{total} tasks', { done: planDone, total: planTotal })
+    : stepStats.total > 0
+      ? t('{done}/{total} steps', { done: stepStats.done, total: stepStats.total })
+      : '';
+  const phaseIcon = phase === 'streaming'
+    ? 'edit-line'
+    : phase === 'thinking'
+      ? 'sparkling-line'
+      : 'loader-4-line';
+  const spinningIcon = phaseIcon === 'loader-4-line';
 
   return (
-    <div className="om-sa-live-status-wrap">
-      <div className="om-creation-thinking om-sa-thinking om-sa-live-status" role="status">
-        <WorkingIndicator />
-        <span className="om-sa-live-status-label">{statusText}</span>
-        <span className="om-sa-live-timer">{formatElapsedDuration(elapsedMs)}</span>
+    <article
+      className="om-sa-message om-sa-live-reply"
+      data-role="assistant"
+      data-phase={phase}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="om-sa-live-reply-head">
+        <span className="om-sa-live-reply-elapsed">
+          {t('Working for {time}', { time: formatWorkingDuration(elapsedMs) })}
+        </span>
+        {stepMeta && <span className="om-sa-live-reply-steps">{stepMeta}</span>}
+      </div>
+      <div className="om-sa-live-reply-phase">
+        <span className="om-sa-live-reply-icon" data-spinning={spinningIcon || undefined} aria-hidden="true">
+          <RemixIcon name={phaseIcon} size={14} />
+        </span>
+        <span className="om-sa-live-status-label om-sa-shimmer-text">{statusText}</span>
       </div>
       <LivePlanCard plan={chat.turnActivity?.plan} />
-    </div>
+    </article>
   );
 }
 
@@ -634,13 +798,31 @@ function isLongUserQuery(text: string): boolean {
   return trimmed.split(/\r?\n/).length > 4;
 }
 
-function UserMessageBubble({ message }: { message: SuperAgentMessage }) {
-  const game = message.attachments?.find(attachment => attachment.kind === 'game-project');
-  const brief = game ? readDirectGameBrief(message.text, game.id) : undefined;
+function UserMessageBubble({
+  text,
+  segments,
+  attachments,
+  onPreviewAttachment,
+}: {
+  text: string;
+  segments?: SuperAgentPromptSegment[];
+  attachments?: SuperAgentResourceAttachment[];
+  onPreviewAttachment?: (attachment: SuperAgentResourceAttachment) => void;
+}) {
+  const hasInlineMentions = Boolean(segments?.some(seg => seg.type === 'mention'));
+  const game = !hasInlineMentions ? attachments?.find(attachment => attachment.kind === 'game-project') : undefined;
+  const brief = game ? readDirectGameBrief(text, game.id) : undefined;
 
-  return brief
-    ? <GameBriefBubble brief={brief} instruction={message.text} />
-    : <FullUserMessageBubble text={message.text} />;
+  return brief ? (
+    <GameBriefBubble brief={brief} instruction={text} />
+  ) : (
+    <FullUserMessageBubble
+      text={text}
+      segments={segments}
+      attachments={attachments}
+      onPreviewAttachment={onPreviewAttachment}
+    />
+  );
 }
 
 function GameBriefBubble({ brief, instruction }: { brief: string; instruction: string }) {
@@ -677,7 +859,17 @@ function GameBriefBubble({ brief, instruction }: { brief: string; instruction: s
   );
 }
 
-function FullUserMessageBubble({ text }: { text: string }) {
+function FullUserMessageBubble({
+  text,
+  segments,
+  attachments,
+  onPreviewAttachment,
+}: {
+  text: string;
+  segments?: SuperAgentPromptSegment[];
+  attachments?: SuperAgentResourceAttachment[];
+  onPreviewAttachment?: (attachment: SuperAgentResourceAttachment) => void;
+}) {
   const { t } = useI18n();
   const isLong = useMemo(() => isLongUserQuery(text), [text]);
   const lineCount = useMemo(() => text.trim().split(/\r?\n/).length, [text]);
@@ -686,12 +878,42 @@ function FullUserMessageBubble({ text }: { text: string }) {
   const hoverTimerRef = useRef<number | null>(null);
   const suppressHoverRef = useRef(false);
 
+  const hasInlineMentions = Boolean(segments?.some(seg => seg.type === 'mention'));
+  const attachmentByKey = useMemo(() => {
+    const map = new Map<string, SuperAgentResourceAttachment>();
+    for (const att of attachments ?? []) {
+      map.set(resourceKey(att), att);
+    }
+    return map;
+  }, [attachments]);
+
+  const renderedContent = useMemo(() => {
+    if (!hasInlineMentions || !segments?.length) return text;
+    return segments.map((seg, idx) => {
+      if (seg.type === 'text') {
+        return <span key={`txt:${idx}`}>{seg.text}</span>;
+      }
+      const resolved = attachmentByKey.get(seg.attachmentKey) ?? {
+        id: seg.attachmentKey,
+        kind: seg.kind,
+        title: seg.label,
+      };
+      return (
+        <InlineMentionChip
+          key={`mention:${seg.attachmentKey}:${idx}`}
+          attachment={resolved}
+          onOpen={onPreviewAttachment}
+        />
+      );
+    });
+  }, [hasInlineMentions, segments, text, attachmentByKey, onPreviewAttachment]);
+
   useEffect(() => () => {
     if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
   }, []);
 
   if (!isLong) {
-    return <div className="om-sa-user-bubble">{text}</div>;
+    return <div className="om-sa-user-bubble">{renderedContent}</div>;
   }
 
   const expanded = pinnedOpen || hoverExpanded;
@@ -770,7 +992,7 @@ function FullUserMessageBubble({ text }: { text: string }) {
         className="om-sa-user-bubble-text"
         onClick={!expanded ? handleExpandClick : undefined}
       >
-        {text}
+        {renderedContent}
       </div>
 
       <Button
@@ -801,6 +1023,11 @@ function resolveUserMessageContext(
 } {
   const normalizedPrompt = userMsg.text.trim();
   const rawAttachments = userMsg.attachments ?? [];
+  const inlineKeys = new Set(
+    (userMsg.segments ?? [])
+      .filter(seg => seg.type === 'mention')
+      .map(seg => seg.attachmentKey),
+  );
   const hiddenDraftGames: SuperAgentResourceAttachment[] = [];
   const visibleAttachments: SuperAgentResourceAttachment[] = [];
 
@@ -811,7 +1038,7 @@ function resolveUserMessageContext(
       && att.title.trim() === normalizedPrompt;
     if (isDuplicateDraftGame) {
       hiddenDraftGames.push(att);
-    } else {
+    } else if (!inlineKeys.has(resourceKey(att))) {
       visibleAttachments.push(att);
     }
   }
@@ -842,11 +1069,13 @@ export function ExecutionTimeline({
   busy,
   sending,
   hideInlineStatus,
+  hideApprovals = false,
   continueDisabled,
   engineLabel,
   onOpenArtifactId,
   onOpenChangedFile,
   onPreviewAttachment,
+  onOpenFilePath,
   onOpenWebUrl,
   onCopyText,
   onNotify,
@@ -862,11 +1091,13 @@ export function ExecutionTimeline({
   busy: boolean;
   sending: boolean;
   hideInlineStatus?: boolean;
+  hideApprovals?: boolean;
   continueDisabled?: boolean;
   engineLabel?: string;
   onOpenArtifactId: (artifactId: string) => void;
   onOpenChangedFile?: (file: SuperAgentFileOperation) => void;
   onPreviewAttachment: (attachment: SuperAgentResourceAttachment) => void;
+  onOpenFilePath?: (filePath: string, label?: string) => void;
   onOpenWebUrl?: (url: string) => void;
   onCopyText: (text: string) => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
@@ -898,7 +1129,7 @@ export function ExecutionTimeline({
     <div className="om-sa-message-list">
       {turns.map((turn, idx) => {
         const isLastTurn = idx === turns.length - 1;
-        const isActiveTurn = busy && isLastTurn;
+        const isActiveTurn = (busy || sending) && isLastTurn;
         const combinedAssistantText = turn.assistantItems.map(m => m.text).filter(Boolean).join('\n\n');
 
         return (
@@ -943,11 +1174,11 @@ export function ExecutionTimeline({
                               data-kind={isBrowserAnnotation ? 'browser-annotation' : undefined}
                               onClick={() => onPreviewAttachment(att)}
                             >
-                              {isBrowserAnnotation && att.previewUrl ? (
-                                <img className="om-sa-attachment-thumb" src={att.previewUrl} alt="" />
-                              ) : (
-                                <RemixIcon name={resourceIcon(att)} size={13} />
-                              )}
+                              <ResourceThumbImage
+                                className="om-sa-attachment-thumb"
+                                src={isBrowserAnnotation ? resourceImagePreviewUrl(att) : null}
+                                fallback={<RemixIcon name={resourceIcon(att)} size={13} />}
+                              />
                               <span>{chipTitle}</span>
                             </Button>
                           );
@@ -957,7 +1188,12 @@ export function ExecutionTimeline({
                         })}
                       </div>
                     )}
-                    <UserMessageBubble message={turn.user} />
+                    <UserMessageBubble
+                      text={turn.user.text}
+                      segments={turn.user.segments}
+                      attachments={turn.user.attachments}
+                      onPreviewAttachment={onPreviewAttachment}
+                    />
                   </div>
                 </article>
               );
@@ -965,9 +1201,17 @@ export function ExecutionTimeline({
 
             <WorkLogSection
               turn={turn}
+              chat={chat}
               isActiveTurn={isActiveTurn}
+              sending={sending}
+              hideInlineStatus={hideInlineStatus}
+              hasPendingApproval={chat.approvals.length > 0}
+              engineLabel={engineLabel}
               activity={isActiveTurn ? chat.turnActivity : undefined}
               onOpenArtifactId={onOpenArtifactId}
+              onCopyText={onCopyText}
+              onOpenWebUrl={onOpenWebUrl}
+              onOpenFilePath={onOpenFilePath}
             />
 
             {turn.assistantItems.map(msg => (
@@ -978,30 +1222,35 @@ export function ExecutionTimeline({
                       content={msg.text}
                       onCopyCode={onCopyText}
                       onOpenWebUrl={onOpenWebUrl}
+                      onOpenFilePath={onOpenFilePath}
                     />
                   </div>
                 </div>
               </article>
             ))}
 
-            {turn.artifacts.length > 0 && (
-              <div className="om-sa-deliverables" data-count={turn.artifacts.length === 1 ? 'single' : 'multi'}>
-                {turn.artifacts.map(artifact => (
-                  <ArtifactDeliverableCard
-                    key={artifact.id}
-                    artifact={artifact}
-                    onOpenArtifactId={onOpenArtifactId}
-                    onCopyText={onCopyText}
-                    onNotify={onNotify}
-                    onOpenAccountSettings={onOpenAccountSettings}
-                    onOpenInDesignStudio={onOpenInDesignStudio}
-                    onOpenInMotionStudio={onOpenInMotionStudio}
-                    onOpenInAssets={onOpenInAssets}
-                    onOpenInBrandKit={onOpenInBrandKit}
-                  />
-                ))}
-              </div>
-            )}
+            {(() => {
+              const deliverableArtifacts = turn.artifacts.filter(artifact => artifact.kind !== 'workspace-file');
+              if (isActiveTurn || deliverableArtifacts.length === 0) return null;
+              return (
+                <div className="om-sa-deliverables" data-count={deliverableArtifacts.length === 1 ? 'single' : 'multi'}>
+                  {deliverableArtifacts.map(artifact => (
+                    <ArtifactDeliverableCard
+                      key={artifact.id}
+                      artifact={artifact}
+                      onOpenArtifactId={onOpenArtifactId}
+                      onCopyText={onCopyText}
+                      onNotify={onNotify}
+                      onOpenAccountSettings={onOpenAccountSettings}
+                      onOpenInDesignStudio={onOpenInDesignStudio}
+                      onOpenInMotionStudio={onOpenInMotionStudio}
+                      onOpenInAssets={onOpenInAssets}
+                      onOpenInBrandKit={onOpenInBrandKit}
+                    />
+                  ))}
+                </div>
+              );
+            })()}
 
             {!isActiveTurn && turn.changedFiles.length > 0 && (
               <FilesChangedCard
@@ -1015,11 +1264,14 @@ export function ExecutionTimeline({
             {!isActiveTurn && turn.assistantItems.length > 0 && (
               <div className="om-sa-turn-footer">
                 <span className="om-sa-turn-meta">
-                  {engineLabel || chat.engine}
-                  {turn.durationMs !== undefined ? ` · ${formatElapsedDuration(turn.durationMs)}` : ''}
-                  {isLastTurn && chat.lastTurnUsage?.totalTokens
-                    ? ` · ${chat.lastTurnUsage.totalTokens.toLocaleString()} ${t('tokens')}`
-                    : ''}
+                  {[
+                    engineLabel || chat.engine,
+                    turn.workItems.length > 0 ? t('{count} steps', { count: turn.workItems.length }) : '',
+                    turn.durationMs !== undefined ? formatElapsedDuration(turn.durationMs) : '',
+                    isLastTurn && chat.lastTurnUsage?.totalTokens
+                      ? `${chat.lastTurnUsage.totalTokens.toLocaleString()} ${t('tokens')}`
+                      : '',
+                  ].filter(Boolean).join(' · ')}
                 </span>
                 {combinedAssistantText && (
                   <IconButton
@@ -1037,10 +1289,19 @@ export function ExecutionTimeline({
         );
       })}
 
-      {busy && !chat.approvals.length && (
+      {(busy || sending) && !chat.approvals.length && (
         hideInlineStatus
           ? <LivePlanCard plan={chat.turnActivity?.plan} />
-          : <LiveTurnStatusBar chat={chat} engineLabel={engineLabel} />
+          : turns.length === 0
+            ? (
+              <LiveTurnStatusBar
+                chat={chat}
+                sending={sending}
+                engineLabel={engineLabel}
+                stepStats={{ total: 0, done: 0 }}
+              />
+            )
+            : null
       )}
 
       {chat.error && (
@@ -1093,7 +1354,7 @@ export function ExecutionTimeline({
         </div>
       )}
 
-      {chat.approvals.map(approval => (
+      {!hideApprovals && chat.approvals.map(approval => (
         <ApprovalCard
           key={approval.id}
           approval={approval}
@@ -1118,7 +1379,7 @@ function approvalKindIcon(kind: SuperAgentApproval['kind']): string {
   }
 }
 
-function ApprovalCard({
+export function ApprovalCard({
   approval,
   sending,
   onApprove,
