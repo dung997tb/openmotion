@@ -99,7 +99,7 @@ export function MotionTemplateShelf({ root, active }: { root: RefObject<HTMLElem
     {visible.length > 0 && <span className="sr-only" aria-live="polite">{t('{count} templates', { count: visible.length })}</span>}
     {catalog && !matches.length && <p className="om-muted">{t('No matching templates.')}</p>}
     {hasMore && (observing ? <div ref={sentinel} className="om-shelf-sentinel" aria-hidden="true" />
-      : <Button variant="plain" type="button" className="om-button om-shelf-more" onClick={loadMore}>{t('More templates')}<RemixIcon name="arrow-down-line" size={16} /></Button>)}
+      : <Button variant="plain" type="button" className="om-button om-shelf-more" onClick={loadMore}>{t('More templates')}<RemixIcon name="arrow-down-s-line" size={16} /></Button>)}
     {failed && <div className="om-discovery-empty" role="alert"><span>{t('Templates could not be loaded.')}</span>
       <Button variant="ghost" className="om-button h-auto" onClick={retry}>{t('Retry')}</Button></div>}
   </ExploreShelf>;
