@@ -12,6 +12,9 @@ on:
       - 'shared/platform-host.ts'
       - 'shared/signed-config.ts'
       - 'packages/design-system/brand/**'
+      - 'packages/local-atoms/**'
+      - 'packages/observability/**'
+      - 'packages/signed-config/**'
       - '.github/workflows/desktop-release.yml'
   workflow_dispatch:
     inputs:
@@ -254,6 +257,9 @@ jobs:
             shared
             scripts
             packages/design-system/brand
+            packages/local-atoms
+            packages/observability
+            packages/signed-config
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
