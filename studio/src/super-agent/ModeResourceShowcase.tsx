@@ -825,6 +825,8 @@ export function ModeResourceShowcase({
     () => gameCatalog.filter(g => g.source !== 'mine' && g.status === 'published'),
     [gameCatalog],
   );
+  // The market lists every game: templates and community games plus the Top 100 earners.
+  const marketGames = useMemo(() => [...publishedGameTemplates, ...topGameCards()], [publishedGameTemplates]);
   const fannedGames = useMemo(
     () => publishedGameTemplates.filter(g => Boolean(coverUrl(g))),
     [publishedGameTemplates],
@@ -994,16 +996,16 @@ export function ModeResourceShowcase({
         ];
       }
       case 'game': {
-        const portraitCount = publishedGameTemplates.filter(g => g.orientation === 'portrait').length;
+        const portraitCount = marketGames.filter(g => g.orientation === 'portrait').length;
         return [
-          { id: 'all', label: 'All games', count: publishedGameTemplates.length },
+          { id: 'all', label: 'All games', count: marketGames.length },
           ...(topGames.length > 0 ? [{ id: 'top100', label: 'Top 100 earners' }] : []),
           ...(myGames.length > 0 ? [{ id: 'mine', label: 'My games', count: myGames.length }] : []),
           ...gameGenres
             .map(g => ({
               id: `genre:${g}`,
               label: genreLabels[g],
-              count: publishedGameTemplates.filter(item => item.genre === g).length,
+              count: marketGames.filter(item => item.genre === g).length,
             }))
             .filter(item => item.count > 0),
           ...(portraitCount > 0 ? [{ id: 'portrait', label: 'Portrait games', count: portraitCount }] : []),
@@ -1037,7 +1039,7 @@ export function ModeResourceShowcase({
         ];
       }
     }
-  }, [mode.id, modeOptions?.designFormat, isPureVideoView, designTemplates, designProjects, brandKits, designSkills, assets, publishedGameTemplates, myGames, coveredMotion.catalog, motionCatalog, motionPurposes, isZh]);
+  }, [mode.id, modeOptions?.designFormat, isPureVideoView, designTemplates, designProjects, brandKits, designSkills, assets, marketGames, myGames, coveredMotion.catalog, motionCatalog, motionPurposes, isZh]);
 
   // Reset active tab when switching mode.
   useEffect(() => {
@@ -1322,10 +1324,10 @@ export function ModeResourceShowcase({
       : activeFilter === 'mine'
       ? myGames
       : activeFilter === 'portrait'
-        ? publishedGameTemplates.filter(g => g.orientation === 'portrait')
+        ? marketGames.filter(g => g.orientation === 'portrait')
         : activeFilter.startsWith('genre:')
-          ? publishedGameTemplates.filter(item => item.genre === (activeFilter.slice(6) as GameGenre))
-          : publishedGameTemplates;
+          ? marketGames.filter(item => item.genre === (activeFilter.slice(6) as GameGenre))
+          : marketGames;
     const ranked = needle
       ? rankSearchResults(base, needle, game => ({
           id: game.id,
@@ -1346,7 +1348,7 @@ export function ModeResourceShowcase({
     if (gameSort === 'newest') return [...matched].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     if (needle) return matched;
     return interleavePortrait(matched);
-  }, [showGameCards, activeFilter, publishedGameTemplates, myGames, gameQuery, gameSort, locale, t]);
+  }, [showGameCards, activeFilter, marketGames, myGames, gameQuery, gameSort, locale, t]);
 
   const totalCount = showGameCards
     ? filteredGames.length
