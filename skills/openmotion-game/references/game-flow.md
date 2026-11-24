@@ -20,6 +20,7 @@ A game is a local HTML project. HTTP and MCP use the same game service and file 
 ```
 
 - Use the supported genres `shooter`, `platformer`, `story`, `casual`, `racing`, `horror` from `shared/game-contract.ts`. Genre is optional, defaults to casual. The original categories arcade, puzzle, RPG, strategy, simulation, adventure, action, fighting, survival, sports, card-board, education, endless-runner, MOBA, music-rhythm and sandbox-building are brief descriptions, not accepted enum values: choose the closest supported genre and preserve the specific idea in `prompt`.
+- Leave `style` omitted or `null` whenever the user did not explicitly request one of the fixed `gameStyles` (`pixel`, `minimal`, `ascii`, `voxel`, `anime`, `3d`) — never default open visual briefs to `"pixel"` or `"minimal"`.
 - Use the returned project id and playUrl. The single-player scaffold uses `templates/game-kits/arcade-2d/` as a **theme-neutral engineering chassis** — always replace its graybox palette, placeholder copy, and rules with the world and mechanics from `design/plan.md` and `design/style.md`. The standalone game runs its own game loop in the browser.
 
 ## Read the shipped contract
