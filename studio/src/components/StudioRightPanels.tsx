@@ -282,6 +282,7 @@ export const StudioRightPanels = memo(function StudioRightPanels({
     designBody = (
       <BlockParamsPanel
         key={JSON.stringify([projectId, activeBlockParams.compositionPath])}
+        previewIframeRef={previewIframeRef}
         blockName={activeBlockParams.blockName}
         blockTitle={activeBlockParams.blockTitle}
         params={activeBlockParams.params}

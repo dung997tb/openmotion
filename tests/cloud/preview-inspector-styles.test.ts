@@ -51,3 +51,38 @@ it('ignores stale targets and leaves a later runtime style alone on failure', ()
   view.settle('a', false);
   assert.equal(view.get(), '54px');
 });
+
+it('only paints a CSS color rule whose selector belongs exclusively to the edited file', () => {
+  let color = '#333333';
+  const style = {
+    getPropertyValue: (name: string) => name === '--title' ? color : '',
+    getPropertyPriority: () => '',
+    setProperty: (_name: string, value: string) => { color = value; },
+  };
+  let files = ['intro.html', 'intro.html'];
+  const document = {
+    defaultView: { CSS: { supports: () => true } },
+    styleSheets: [{ ownerNode: { nodeName: 'STYLE' }, cssRules: [{ selectorText: '.intro', style }] }],
+    querySelectorAll: () => files.map(path => ({ closest: () => ({ getAttribute: () => path }) })),
+  };
+  const send = runInNewContext(PREVIEW_INSPECTOR_STYLES + '\npreviewInspectorStyles', {
+    document, sourceVersions: { 'intro.html': 'v1' }, sourceIdentity: (fileVersion: string) => ({ fileVersion }),
+    compositionPath: 'index.html',
+  });
+  const show = (id: string, value: string, fileVersion = 'v1') => send({
+    phase: 'show', editId: id, sourceFile: 'intro.html', fileVersion, blockColor: { key: '--title', value },
+  });
+  show('stale', '#aaaaaa', 'v0');
+  assert.equal(color, '#333333');
+  show('invalid', 'url(https://example.test)');
+  assert.equal(color, '#333333');
+  show('first', '#aaaaaa');
+  show('second', '#bbbbbb');
+  send({ phase: 'settle', editId: 'first', saved: false });
+  assert.equal(color, '#bbbbbb');
+  send({ phase: 'settle', editId: 'second', saved: false });
+  assert.equal(color, '#333333');
+  files = ['intro.html', 'other.html'];
+  show('shared', '#cccccc');
+  assert.equal(color, '#333333');
+});
