@@ -1,6 +1,6 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { brandCatalogFile, type BrandCatalogEntry } from '../../../shared/brand-catalog';
 import { rankSearchResults } from '../../../shared/fuzzy-search';
 import type { BrandKit } from '../../../shared/brand-kit';
@@ -21,6 +21,7 @@ import {
 import {
   NEW_VIEWER_TAB_ID,
   artifactCanonicalAddress,
+  isPlayableAdArtifact,
   safeBrowserTabId,
   type SuperAgentArtifact,
   type SuperAgentArtifactKind,
@@ -46,6 +47,7 @@ import {
   rememberInstruction,
   storedInstruction,
 } from '../motion/game/gameCatalog';
+import { isMultiplayerGameArtifact } from '../motion/game/gameSuperAgent';
 import { lazyWithChunkReload, preloadableLazyWithChunkReload } from '../utils/chunkReload';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
 import {
@@ -62,6 +64,8 @@ import {
 } from './superAgentClient';
 
 type WebDevicePresetId = 'responsive' | 'desktop' | 'tablet' | 'mobile';
+
+const COMPACT_VIEWER_TOOLBAR_WIDTH = 540;
 
 const WEB_DEVICE_PRESETS: { id: WebDevicePresetId; label: string; icon: string; width?: number; height?: number }[] = [
   { id: 'responsive', label: 'Responsive', icon: 'fullscreen-line' },
@@ -577,7 +581,7 @@ function PreviewConsoleDrawer({
   filter: PreviewConsoleFilter;
   onChangeFilter: (next: PreviewConsoleFilter) => void;
   onAttachErrors: () => void;
-  onFixWithAgent: () => void;
+  onFixWithAgent?: () => void;
   onClear: () => void;
   onClose: () => void;
 }) {
@@ -623,7 +627,7 @@ function PreviewConsoleDrawer({
             <RemixIcon name="add-line" size={13} />
             <span>{t('Attach errors')}</span>
           </Button>
-          <Button
+          {onFixWithAgent && <Button
             variant="plain"
             type="button"
             className="om-sa-toolbar-btn om-sa-console-fix-btn"
@@ -632,7 +636,7 @@ function PreviewConsoleDrawer({
           >
             <RemixIcon name="sparkling-line" size={13} />
             <span>{t('Fix with Agent')}</span>
-          </Button>
+          </Button>}
           <Button
             variant="plain"
             type="button"
@@ -1005,7 +1009,7 @@ function GameProjectArtifactView({
   onSubmitAnnotation: (payload: BrowserAnnotationSubmitPayload, sendImmediately: boolean) => Promise<void>;
   onCloseAnnotate: () => void;
   onNotify?: (message: string, tone?: 'info' | 'error') => void;
-  onGameMeta?: (meta: { trailerUrl: string | null; source: GameCard['source'] | null }) => void;
+  onGameMeta?: (meta: { trailerUrl: string | null; source: GameCard['source'] | null; multiplayer: boolean }) => void;
 }) {
   const { t } = useI18n();
   const projectId = artifact.projectId || '';
@@ -1032,7 +1036,7 @@ function GameProjectArtifactView({
     setCopiedHandoff(false);
     setHandoffText(projectId ? storedInstruction(projectId) : null);
     if (!projectId) {
-      onGameMeta?.({ trailerUrl: null, source: communityMatch ? 'community' : null });
+      onGameMeta?.({ trailerUrl: null, source: communityMatch ? 'community' : null, multiplayer: communityMatch?.multiplayer === true });
       return;
     }
     let cancelled = false;
@@ -1045,11 +1049,15 @@ function GameProjectArtifactView({
         const trailerUrl = found?.trailer?.status === 'ready' && found.trailer.videoUrl
           ? found.trailer.videoUrl.replace(/^\/api\//, '/motion-api/')
           : null;
-        onGameMeta?.({ trailerUrl, source: found?.source ?? (bundledMatch ? 'template' : 'mine') });
+        onGameMeta?.({
+          trailerUrl,
+          source: found?.source ?? (bundledMatch ? 'template' : 'mine'),
+          multiplayer: (found ?? bundledMatch)?.multiplayer === true,
+        });
       })
       .catch(() => {
         if (cancelled) return;
-        onGameMeta?.({ trailerUrl: null, source: bundledMatch ? 'template' : 'mine' });
+        onGameMeta?.({ trailerUrl: null, source: bundledMatch ? 'template' : 'mine', multiplayer: bundledMatch?.multiplayer === true });
         if (bundledMatch) {
           void playableUrl(bundledMatch).then(next => {
             if (cancelled) {
@@ -1073,9 +1081,10 @@ function GameProjectArtifactView({
     && (gameMeta.status === 'draft' || gameMeta.status === 'failed'),
   );
   const isBuilding = Boolean(projectId && gameMeta?.source === 'mine' && gameMeta.status === 'building');
+  const isMultiplayer = gameMeta?.multiplayer === true || isMultiplayerGameArtifact(artifact);
 
   useEffect(() => {
-    if (!projectId || !isDraftOrFailed) return;
+    if (!projectId || !isDraftOrFailed || isMultiplayer) return;
     let cancelled = false;
     void gameApi.handoff(projectId)
       .then(res => {
@@ -1087,7 +1096,7 @@ function GameProjectArtifactView({
     return () => {
       cancelled = true;
     };
-  }, [projectId, isDraftOrFailed]);
+  }, [projectId, isDraftOrFailed, isMultiplayer]);
 
   const trailerUrl = gameMeta?.trailer?.status === 'ready' && gameMeta.trailer.videoUrl
     ? gameMeta.trailer.videoUrl.replace(/^\/api\//, '/motion-api/')
@@ -1167,6 +1176,14 @@ function GameProjectArtifactView({
             <span>{t('Open original')}</span>
           </Button>
         </div>
+      </div>
+    );
+  }
+
+  if ((isBuilding || isDraftOrFailed) && isMultiplayer && mode === 'preview') {
+    return (
+      <div className="om-sa-game-draft-stage">
+        <strong>{t('Game generation only supports single-player games.')}</strong>
       </div>
     );
   }
@@ -1529,6 +1546,7 @@ export function ArtifactBrowserPane({
   const [viewMode, setViewMode] = useState<'preview' | 'code' | 'trailer'>('preview');
   const [gameTrailerUrl, setGameTrailerUrl] = useState<string | null>(null);
   const [gameSourceKind, setGameSourceKind] = useState<GameCard['source'] | null>(null);
+  const [multiplayerArtifactId, setMultiplayerArtifactId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<DesignViewportId>('desktop');
   const [reloadKey, setReloadKey] = useState(0);
   const [webState, setWebState] = useState<WebPageState | null>(null);
@@ -1548,6 +1566,8 @@ export function ArtifactBrowserPane({
   const [consoleFilter, setConsoleFilter] = useState<PreviewConsoleFilter>('all');
   const [consoleEntries, setConsoleEntries] = useState<BrowserConsoleEntry[]>([]);
   const [capturingScreenshot, setCapturingScreenshot] = useState(false);
+  const [compactToolbar, setCompactToolbar] = useState(false);
+  const viewerRef = useRef<HTMLElement>(null);
   const [webTabTitles, setWebTabTitles] = useState<Record<string, string>>({});
   const [requestedCodeFile, setRequestedCodeFile] = useState<{ artifactId: string; path: string; seq: number } | null>(null);
   const webRef = useRef<WebBrowserHandle>(null);
@@ -1567,6 +1587,20 @@ export function ArtifactBrowserPane({
   const activeArtifact = showNewTab
     ? null
     : openTabs.find(item => item.id === activeTabId) ?? openTabs.at(-1) ?? null;
+
+  useLayoutEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const measure = () => {
+      const width = viewer.getBoundingClientRect().width;
+      if (width > 0) setCompactToolbar(width <= COMPACT_VIEWER_TOOLBAR_WIDTH);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewer);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     setWebState(null);
@@ -1663,6 +1697,17 @@ export function ArtifactBrowserPane({
         && (viewMode === 'preview' || !activeArtifact.projectId))
     ),
   );
+  const canCaptureScreenshot = supportsAnnotate && Boolean(onAttachBrowserAnnotation);
+  const isMultiplayerGame = Boolean(activeArtifact?.kind === 'game-project' && (
+    activeArtifact.id === multiplayerArtifactId || isMultiplayerGameArtifact(activeArtifact)
+  ));
+  const toolbarGameAction = !showNewTab
+    && activeArtifact?.kind === 'game-project'
+    && !activeArtifact.projectId
+    && gameSourceKind !== 'mine'
+    && !isMultiplayerGame
+    ? onUseGameInAgent
+    : undefined;
 
   const webColorScheme: BrowserColorScheme = webState?.colorScheme ?? 'auto';
   const webZoom = webState?.zoom ?? 1;
@@ -1890,6 +1935,10 @@ export function ArtifactBrowserPane({
   );
 
   const normalizedNewTabQuery = newTabQuery.trim();
+  const displaySubtitle = (item: SuperAgentArtifact | SuperAgentResourceAttachment) =>
+    isPlayableAdArtifact(item) ? t('Playable ad') : item.subtitle;
+  const searchableSubtitle = (item: SuperAgentArtifact | SuperAgentResourceAttachment) =>
+    `${item.subtitle ?? ''} ${displaySubtitle(item) ?? ''}`;
 
   const matchesArtifactTab = (item: SuperAgentArtifact) => {
     if (newTabFilter === 'web-apps' && item.kind !== 'design-project' && item.kind !== 'game-project') return false;
@@ -1914,10 +1963,10 @@ export function ArtifactBrowserPane({
       rankSearchResults(artifacts.filter(matchesArtifactTab), normalizedNewTabQuery, item => ({
         id: item.id,
         title: item.title,
-        subtitle: item.subtitle,
+        subtitle: searchableSubtitle(item),
         aliases: [item.url ?? '', item.kind],
       })).map(r => r.item),
-    [artifacts, newTabFilter, normalizedNewTabQuery],
+    [artifacts, newTabFilter, normalizedNewTabQuery, t],
   );
 
   const filteredQuickOpen = useMemo(
@@ -1925,11 +1974,11 @@ export function ArtifactBrowserPane({
       rankSearchResults(quickOpenItems.filter(matchesResourceTab), normalizedNewTabQuery, item => ({
         id: item.id,
         title: item.title,
-        subtitle: item.subtitle,
+        subtitle: searchableSubtitle(item),
         tags: item.tags,
         aliases: [item.kind, item.scenario ?? '', item.modality ?? ''],
       })).slice(0, 12).map(r => r.item),
-    [quickOpenItems, newTabFilter, normalizedNewTabQuery],
+    [quickOpenItems, newTabFilter, normalizedNewTabQuery, t],
   );
 
   const shortcutTypes: {
@@ -1964,7 +2013,7 @@ export function ArtifactBrowserPane({
       : undefined);
 
   return (
-    <aside className="om-sa-viewer" aria-label={t('Artifact Viewer')}>
+    <aside ref={viewerRef} className="om-sa-viewer" aria-label={t('Artifact Viewer')}>
       <div className="om-sa-viewer-tabs-bar">
         <div className="om-sa-viewer-tabs-group">
           <div ref={tabStripRef} className="om-sa-viewer-tabs" role="tablist" aria-label={t('Viewer tabs')}>
@@ -2132,7 +2181,7 @@ export function ArtifactBrowserPane({
             const normalized = normalizeBrowserAddress(trimmed);
             const q = trimmed.toLowerCase();
             const matchedResources = quickOpenItems
-              .filter(item => `${item.title} ${item.subtitle ?? ''}`.toLowerCase().includes(q))
+              .filter(item => `${item.title} ${searchableSubtitle(item)}`.toLowerCase().includes(q))
               .slice(0, 3);
             return (
               <div className="om-sa-address-suggest" role="listbox" aria-label={t('Suggestions')}>
@@ -2184,7 +2233,7 @@ export function ArtifactBrowserPane({
                   >
                     <RemixIcon name={resourceIcon(item)} size={15} />
                     <span className="om-sa-suggest-query">{item.title}</span>
-                    <small>{item.subtitle || item.kind}</small>
+                    <small>{displaySubtitle(item) || item.kind}</small>
                   </Button>
                 ))}
               </div>
@@ -2211,11 +2260,6 @@ export function ArtifactBrowserPane({
             const isConstrainedViewport = activeArtifact?.kind === 'web'
               ? webDevicePreset !== 'responsive'
               : viewport !== 'desktop';
-            const showRemixGameAction = !showNewTab
-              && activeArtifact?.kind === 'game-project'
-              && Boolean(onUseGameInAgent)
-              && !activeArtifact.projectId
-              && gameSourceKind !== 'mine';
             const viewModeOptions: Array<{ id: 'preview' | 'code' | 'trailer'; label: string; icon: string }> = [
               { id: 'preview', label: t('Preview'), icon: 'eye-line' },
               { id: 'code', label: t('Code'), icon: 'code-s-slash-line' },
@@ -2413,16 +2457,18 @@ export function ArtifactBrowserPane({
                       </div>
                     </Popover>
 
-                    <Tooltip label={t('Screenshot')}>
-                      <IconButton
-                        variant="ghost"
-                        className="motion-icon-button om-sa-toolbar-secondary-tool"
-                        aria-label={t('Screenshot')}
-                        disabled={capturingScreenshot}
-                        onClick={() => void handleCaptureScreenshot()}
-                        icon={<RemixIcon name={capturingScreenshot ? 'loader-4-line' : 'camera-line'} size={15} />}
-                      />
-                    </Tooltip>
+                    {canCaptureScreenshot && !compactToolbar && (
+                      <Tooltip label={t('Capture screenshot to chat')}>
+                        <IconButton
+                          variant="ghost"
+                          className="motion-icon-button"
+                          aria-label={t('Capture screenshot to chat')}
+                          disabled={capturingScreenshot}
+                          onClick={() => void handleCaptureScreenshot()}
+                          icon={<RemixIcon name={capturingScreenshot ? 'loader-4-line' : 'camera-line'} size={15} />}
+                        />
+                      </Tooltip>
+                    )}
 
                     {(webErrorCount > 0 || consoleOpen) && (
                       <Tooltip label={t('Console & errors')}>
@@ -2444,7 +2490,7 @@ export function ArtifactBrowserPane({
                   </div>
                 )}
 
-                {showRemixGameAction && onUseGameInAgent && activeArtifact && (
+                {toolbarGameAction && activeArtifact && (
                   <>
                     {(hasModeSwitch || supportsAnnotate) && (
                       <span className="om-sa-toolbar-divider" aria-hidden="true" />
@@ -2455,7 +2501,7 @@ export function ArtifactBrowserPane({
                         type="button"
                         className="om-sa-toolbar-btn om-sa-game-use-btn"
                         aria-label={t('Remix')}
-                        onClick={() => onUseGameInAgent(activeArtifact)}
+                        onClick={() => toolbarGameAction(activeArtifact)}
                       >
                         <RemixIcon name="sparkling-line" size={14} />
                         <span>{t('Remix')}</span>
@@ -2464,7 +2510,7 @@ export function ArtifactBrowserPane({
                   </>
                 )}
 
-                {canCloudShare && (hasModeSwitch || supportsAnnotate || showRemixGameAction) && (
+                {canCloudShare && (hasModeSwitch || supportsAnnotate || toolbarGameAction) && (
                   <span className="om-sa-toolbar-divider" aria-hidden="true" />
                 )}
 
@@ -2525,42 +2571,42 @@ export function ArtifactBrowserPane({
                   </Button>
                 )}
 
+                {canCaptureScreenshot && compactToolbar && (
+                  <Button
+                    variant="plain"
+                    type="button"
+                    role="menuitem"
+                    className="om-sa-browser-menu-item"
+                    disabled={capturingScreenshot}
+                    onClick={() => {
+                      setBrowserMenuOpen(false);
+                      void handleCaptureScreenshot();
+                    }}
+                  >
+                    <RemixIcon name="camera-line" size={14} />
+                    <span>{t('Capture screenshot to chat')}</span>
+                  </Button>
+                )}
                 {supportsAnnotate && (
-                  <>
-                    <Button
-                      variant="plain"
-                      type="button"
-                      role="menuitem"
-                      className="om-sa-browser-menu-item"
-                      disabled={capturingScreenshot}
-                      onClick={() => {
-                        setBrowserMenuOpen(false);
-                        void handleCaptureScreenshot();
-                      }}
-                    >
-                      <RemixIcon name="camera-line" size={14} />
-                      <span>{t('Screenshot')}</span>
-                    </Button>
-                    <Button
-                      variant="plain"
-                      type="button"
-                      role="menuitem"
-                      className="om-sa-browser-menu-item"
-                      data-active={consoleOpen || undefined}
-                      onClick={() => {
-                        setBrowserMenuOpen(false);
-                        setConsoleOpen(v => !v);
-                      }}
-                    >
-                      <RemixIcon name="terminal-box-fill" size={14} />
-                      <span>{t('Console & errors')}</span>
-                      {(webErrorCount > 0 || consoleEntries.length > 0) && (
-                        <small className="om-sa-browser-menu-count" data-error={webErrorCount > 0 || undefined}>
-                          {webErrorCount > 0 ? webErrorCount : consoleEntries.length}
-                        </small>
-                      )}
-                    </Button>
-                  </>
+                  <Button
+                    variant="plain"
+                    type="button"
+                    role="menuitem"
+                    className="om-sa-browser-menu-item"
+                    data-active={consoleOpen || undefined}
+                    onClick={() => {
+                      setBrowserMenuOpen(false);
+                      setConsoleOpen(v => !v);
+                    }}
+                  >
+                    <RemixIcon name="terminal-box-fill" size={14} />
+                    <span>{t('Console & errors')}</span>
+                    {(webErrorCount > 0 || consoleEntries.length > 0) && (
+                      <small className="om-sa-browser-menu-count" data-error={webErrorCount > 0 || undefined}>
+                        {webErrorCount > 0 ? webErrorCount : consoleEntries.length}
+                      </small>
+                    )}
+                  </Button>
                 )}
 
                 {externalHref && (
@@ -2598,7 +2644,7 @@ export function ArtifactBrowserPane({
                       <div role="separator" />
                     )}
 
-                    {['game-project', 'asset-image', 'asset-video', 'asset-audio', 'brand-kit'].includes(activeArtifact.kind) && (
+                    {!toolbarGameAction && !isMultiplayerGame && ['game-project', 'asset-image', 'asset-video', 'asset-audio', 'brand-kit'].includes(activeArtifact.kind) && (
                       <Button
                         variant="plain"
                         type="button"
@@ -2896,7 +2942,7 @@ export function ArtifactBrowserPane({
                       <RemixIcon name={artifactTabIcon(item.kind)} size={16} />
                       <span>
                         <strong>{item.title}</strong>
-                        <small>{item.subtitle || artifactCanonicalAddress(item)}</small>
+                        <small>{displaySubtitle(item) || artifactCanonicalAddress(item)}</small>
                       </span>
                     </Button>
                   ))}
@@ -2919,7 +2965,7 @@ export function ArtifactBrowserPane({
                       <RemixIcon name={resourceIcon(item)} size={16} />
                       <span>
                         <strong>{item.title}</strong>
-                        <small>{item.subtitle || item.kind}</small>
+                        <small>{displaySubtitle(item) || item.kind}</small>
                       </span>
                     </Button>
                   ))}
@@ -3006,6 +3052,7 @@ export function ArtifactBrowserPane({
             onGameMeta={meta => {
               setGameTrailerUrl(meta.trailerUrl);
               setGameSourceKind(meta.source);
+              setMultiplayerArtifactId(meta.multiplayer ? activeArtifact.id : null);
             }}
           />
         ) : activeArtifact.kind === 'web' && activeArtifact.url && chatId ? (
@@ -3071,7 +3118,7 @@ export function ArtifactBrowserPane({
             filter={consoleFilter}
             onChangeFilter={setConsoleFilter}
             onAttachErrors={() => handleAttachConsoleErrors(false)}
-            onFixWithAgent={() => handleAttachConsoleErrors(true)}
+            onFixWithAgent={isMultiplayerGame ? undefined : () => handleAttachConsoleErrors(true)}
             onClear={handleClearConsole}
             onClose={() => setConsoleOpen(false)}
           />
