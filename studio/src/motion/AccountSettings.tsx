@@ -122,12 +122,19 @@ export function useAccountSignIn(area: GuideArea, showToast: ShowToast, provider
     return () => { if (pendingCheckout.current?.token === checkout.token) pendingCheckout.current = undefined; };
   });
   const refreshBilling = useCallback(async (checkoutEntryId?: string) => {
-    const prevPlan = account?.plan?.trim().toLowerCase();
+    const readPlan = (summary: AccountSummary | null | undefined) =>
+      summary?.state === 'signed-in' && !summary.billingUnavailable ? summary.plan?.trim().toLowerCase() || undefined : undefined;
+    const prevPlan = readPlan(account);
     const updated = await refresh(true);
-    const planChanged = Boolean(updated && (updated.state !== account?.state || updated.plan?.trim().toLowerCase() !== prevPlan
+    const nextPlan = readPlan(updated);
+    const billingOk = Boolean(updated && updated.state === 'signed-in' && !updated.billingUnavailable);
+    const stateOrBillingChanged = Boolean(updated && (updated.state !== account?.state || updated.plan?.trim().toLowerCase() !== account?.plan?.trim().toLowerCase()
       || Boolean(updated.billingUnavailable) !== Boolean(account?.billingUnavailable)));
-    if (planChanged) notifyProvidersChanged();
-    if (checkoutEntryId) tracking.reportEntitlementRefresh('settings', 'settings_subscription', checkoutEntryId, updated ? 'success' : 'failure', planChanged);
+    if (stateOrBillingChanged) notifyProvidersChanged();
+    if (checkoutEntryId) {
+      const planChanged = Boolean(billingOk && prevPlan && nextPlan && nextPlan !== prevPlan);
+      tracking.reportEntitlementRefresh('settings', 'settings_subscription', checkoutEntryId, billingOk ? 'success' : 'failure', planChanged);
+    }
   }, [account, refresh]);
   useEffect(() => {
     const onReturn = () => {

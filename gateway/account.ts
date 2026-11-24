@@ -746,11 +746,11 @@ export class OpenDesignAccount {
    * carries over. A one-time account intent makes the page confirm it is the account signed in here before any purchase.
    */
   async openSubscription(launch: (url: string) => Promise<void> = openSystemBrowser, attribution?: AccountAttribution) {
-    const hookId = validHookId(attribution?.hookId);
     const entryId = validEntryId(attribution?.entryId) ?? randomUUID();
+    // Preserve the AMR-registered entry source so AMR keeps the full attribution (including od_entry_id).
     const target = '/dashboard?' + new URLSearchParams({
       billing: 'plan', od_origin: 'openmotion',
-      od_entry_source: hookId ? `openmotion_${hookId}` : 'openmotion_manage_subscription',
+      od_entry_source: 'openmotion_manage_subscription',
       od_entry_id: entryId, od_entry_at: new Date().toISOString(),
     });
     let url = consoleUrl + target;

@@ -41,7 +41,7 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
 
   // The link's entry id is reported with the click and replaced afterwards, so each click is its own Pricing entry.
   const [entryId, setEntryId] = useState(newCampaignEntryId);
-  const pendingCheckout = useRef<string | undefined>(undefined);
+  const pendingCheckout = useRef<{ entryId: string; prevPlanPromise: Promise<string | undefined> } | undefined>(undefined);
   useEffect(() => {
     if (impressionReported) return;
     impressionReported = true;
@@ -49,16 +49,23 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
   }, [trackingPage]);
 
   useEffect(() => {
+    const readPlan = (summary: AccountSummary | null | undefined) =>
+      summary?.state === 'signed-in' && !summary.billingUnavailable ? summary.plan?.trim().toLowerCase() || undefined : undefined;
     const onReturn = () => {
       const pending = pendingCheckout.current;
       if (!pending || document.visibilityState !== 'visible') return;
       pendingCheckout.current = undefined;
-      void gatewayRequest<AccountSummary>('settings/account?refresh=true').then(() => {
-        reportEntitlementRefresh(trackingPage, 'bf_banner', pending, 'success', false);
-        notifyProvidersChanged();
-        window.dispatchEvent(new Event('motion:account-changed'));
+      void Promise.all([pending.prevPlanPromise, gatewayRequest<AccountSummary>('settings/account?refresh=true')]).then(([prevPlan, updated]) => {
+        const billingOk = updated.state === 'signed-in' && !updated.billingUnavailable;
+        const nextPlan = readPlan(updated);
+        const planChanged = Boolean(billingOk && prevPlan && nextPlan && nextPlan !== prevPlan);
+        reportEntitlementRefresh(trackingPage, 'bf_banner', pending.entryId, billingOk ? 'success' : 'failure', planChanged);
+        if (billingOk) {
+          notifyProvidersChanged();
+          window.dispatchEvent(new Event('motion:account-changed'));
+        }
       }).catch(() => {
-        reportEntitlementRefresh(trackingPage, 'bf_banner', pending, 'failure', false);
+        reportEntitlementRefresh(trackingPage, 'bf_banner', pending.entryId, 'failure', false);
       });
     };
     window.addEventListener('focus', onReturn);
@@ -106,7 +113,10 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
   const method = (event: MouseEvent) => event.detail === 0 ? 'keyboard' as const : 'pointer' as const;
   function claimOffer(event: MouseEvent<HTMLAnchorElement>) {
     const clickedEntryId = entryId;
-    pendingCheckout.current = clickedEntryId;
+    const prevPlanPromise = gatewayRequest<AccountSummary>('settings/account')
+      .then(summary => (summary.state === 'signed-in' && !summary.billingUnavailable ? summary.plan?.trim().toLowerCase() || undefined : undefined))
+      .catch(() => undefined);
+    pendingCheckout.current = { entryId: clickedEntryId, prevPlanPromise };
     void trackMotion('ui_click', { page_name: trackingPage, area: 'campaign_banner', element: 'claim_offer', campaign_id: BLACK_FRIDAY_CAMPAIGN, hook_id: 'bf_banner', entry_id: clickedEntryId, interaction_method: method(event) });
     // Stamp the click time on the address the browser is about to open, then replace the id for the next click.
     event.currentTarget.href = campaignPricingUrl(locale, 'openmotion_bf_banner', clickedEntryId);
