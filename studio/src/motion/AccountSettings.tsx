@@ -2,7 +2,7 @@ import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
 import * as tracking from './pageTracking';
 import { Tooltip } from "../components/ui/Tooltip";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AccountSummary } from '../../../shared/provider-directory';
 import { RemixIcon } from '../icons/RemixIcons';
 import { useI18n } from '../i18n/I18n';
@@ -232,7 +232,7 @@ function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary
     : <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('view_plans')}><RemixIcon name="sparkling-line" size={16} />{t('Upgrade')}</Button>);
   return <section className="om-card om-plan-usage" data-look={console ? 'console' : 'studio'}>
     {console
-      ? <div className="om-plan-usage-head" style={{ backgroundImage: `linear-gradient(#ffffff45, #ffffff45), url(${planCardBackground})` }}>
+      ? <div className="om-plan-usage-head" style={{ '--om-plan-art': `url(${planCardBackground})` } as CSSProperties}>
         <div className="om-plan-usage-identity">
           <h2>{planName}</h2>
           {period && <p>{period}</p>}
