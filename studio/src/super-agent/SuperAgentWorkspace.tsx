@@ -39,7 +39,7 @@ import { gatewayRequest } from '../motion/gatewayClient';
 import { openAgentRuntimesSettings, useAgentRuntimes } from '../motion/useAgentRuntimes';
 import { notifyAgentsChanged, useLocalAgents } from '../motion/useLocalAgents';
 import { preloadableLazyWithChunkReload } from '../utils/chunkReload';
-import { useFollowUpBehavior } from '../utils/superAgentPreferences';
+import { savedPermissionMode, savePermissionMode, useFollowUpBehavior } from '../utils/superAgentPreferences';
 import { ConversationSidebar } from './ConversationSidebar';
 import { useReadTaskResults } from './useReadTaskResults';
 import type { ComposerCommandId } from './ComposerMentionMenu';
@@ -369,7 +369,7 @@ export function SuperAgentWorkspace({
   });
   const userPickedEngineRef = useRef(false);
   const preflightCheckedRef = useRef(false);
-  const [permissionMode, setPermissionMode] = useState<SuperAgentPermissionMode>('on-request');
+  const [permissionMode, setPermissionMode] = useState<SuperAgentPermissionMode>(() => savedPermissionMode());
   const [followUpBehavior] = useFollowUpBehavior();
 
   const [narrow, setNarrow] = useState(() =>
@@ -910,6 +910,7 @@ export function SuperAgentWorkspace({
 
   const handleCreateConversation = () => {
     setActiveChat(null);
+    setPermissionMode(savedPermissionMode());
     previewArtifactIdsRef.current.clear();
     setPreviewArtifacts([]);
     setLoadingChat(false);
@@ -969,6 +970,7 @@ export function SuperAgentWorkspace({
 
   const handleChangePermissionMode = async (nextMode: SuperAgentPermissionMode) => {
     setPermissionMode(nextMode);
+    savePermissionMode(nextMode);
     if (!activeChat) return;
     try {
       const updated = await updateSuperAgentChat(activeChat.id, { permissionMode: nextMode });

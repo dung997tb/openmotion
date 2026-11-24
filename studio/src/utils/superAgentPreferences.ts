@@ -1,9 +1,22 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import type { SuperAgentFollowUpMode } from '../../../shared/super-agent';
+import type { SuperAgentFollowUpMode, SuperAgentPermissionMode } from '../../../shared/super-agent';
 import { readStudioUiPreferences, writeStudioUiPreferences } from './studioUiPreferences';
 
 const FOLLOW_UP_EVENT = 'motion:super-agent-follow-up-change';
 const DEFAULT_FOLLOW_UP_BEHAVIOR: SuperAgentFollowUpMode = 'steer';
+const DEFAULT_PERMISSION_MODE: SuperAgentPermissionMode = 'auto';
+
+/** Reads the persisted default approval mode (`auto` by default, or `on-request`). */
+export function savedPermissionMode(): SuperAgentPermissionMode {
+  const value = readStudioUiPreferences().superAgentPermissionMode;
+  return value === 'on-request' ? 'on-request' : DEFAULT_PERMISSION_MODE;
+}
+
+/** Updates the persisted default approval mode for new Super Agent conversations. */
+export function savePermissionMode(mode: SuperAgentPermissionMode): void {
+  const normalized: SuperAgentPermissionMode = mode === 'on-request' ? 'on-request' : 'auto';
+  writeStudioUiPreferences({ superAgentPermissionMode: normalized });
+}
 
 /** Reads the persisted default follow-up behavior (`steer` by default, or `queue`). */
 export function savedFollowUpBehavior(): SuperAgentFollowUpMode {

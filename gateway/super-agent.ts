@@ -956,7 +956,7 @@ export class SuperAgentConversations {
       : localAgents.some(a => a.id === input.engine)
         ? input.engine!
         : 'codex';
-    const permissionMode: SuperAgentPermissionMode = input.permissionMode === 'auto' ? 'auto' : 'on-request';
+    const permissionMode: SuperAgentPermissionMode = input.permissionMode === 'on-request' ? 'on-request' : 'auto';
     const explicitTitle = typeof input.title === 'string' && input.title.trim() ? normalizeSuperAgentTitle(input.title) : undefined;
     const workingDir = typeof input.workingDir === 'string' && input.workingDir.trim() && path.isAbsolute(input.workingDir.trim()) && !input.workingDir.includes('\0')
       ? input.workingDir.trim().slice(0, 1024)

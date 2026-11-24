@@ -777,17 +777,35 @@
 .om-capability-action-bar[data-variant="compact"] { gap: var(--motion-space-6); }
 
 /* Desktop platform shell chrome adjustments */
+[data-desktop="true"] .om-application {
+  grid-template-rows: var(--om-desktop-titlebar-height, 46px) minmax(0, 1fr);
+}
+[data-desktop="true"] .om-application[data-has-bf-banner="true"] {
+  grid-template-rows: var(--om-desktop-titlebar-height, 46px) auto minmax(0, 1fr);
+}
+[data-desktop="true"] .om-application > .om-app-header {
+  grid-row: 1;
+}
+[data-desktop="true"] .om-application[data-has-bf-banner="true"] > .motion-workspace {
+  grid-row: 3;
+}
 [data-desktop="true"] .om-app-header {
   -webkit-app-region: drag;
+  user-select: none;
+  height: var(--om-desktop-titlebar-height, 46px);
+  min-height: var(--om-desktop-titlebar-height, 46px);
+  box-sizing: border-box;
   padding-inline-start: calc(var(--motion-space-8) + var(--om-desktop-inset-left, 0px));
   padding-inline-end: calc(var(--motion-space-8) + var(--om-desktop-inset-right, 0px));
+  transition: padding-inline-start var(--motion-duration-fast) var(--motion-ease-out), padding-inline-end var(--motion-duration-fast) var(--motion-ease-out);
 }
-[data-desktop="true"] .om-application[data-has-bf-banner="true"] .om-app-header {
-  padding-inline-start: var(--motion-space-8);
-  padding-inline-end: var(--motion-space-8);
-}
-[data-desktop="true"] .om-app-header :is(button, a, input, select, [role="button"], [role="menuitem"], .om-nav-item, .om-app-header-actions, .om-desktop-window-controls) {
+[data-desktop="true"] .om-app-header :is(button, a, input, select, [role="button"], [role="menuitem"], .om-nav-item, .om-creative-split, .om-app-header-actions, .om-desktop-window-controls) {
   -webkit-app-region: no-drag;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-desktop="true"] .om-app-header {
+    transition: none;
+  }
 }
 .om-desktop-window-controls {
   display: inline-flex;
