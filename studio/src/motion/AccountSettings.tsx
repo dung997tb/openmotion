@@ -12,6 +12,7 @@ import { gatewayRequest } from './gatewayClient';
 import { GITHUB_REPOSITORY } from './githubRepository';
 import { notifyProvidersChanged } from './useProviderDirectory';
 import { activeAccountOffer, MULTIMODAL_CAPABILITIES } from './accountOffer';
+import { consumePendingAttribution, evaluateEntitlementRefresh, readAccountPlan } from './entitlementAttribution';
 import { SettingsError, SettingsLoading } from './settingsPrimitives';
 
 type GuideArea = 'account' | 'provider_detail';
@@ -19,17 +20,17 @@ type ShowToast = ReturnType<typeof useToast>['showToast'];
 // The local service opens the subscription page in the system browser, where sign-in happened, with a fresh entry
 // and a one-time account intent. When no browser could be launched, Studio tries the returned link itself; the
 // request has used up the click by then, so a blocked popup leaves a link that opens it on the next click.
-function useSubscriptionOpener(area: GuideArea, showToast: ShowToast, markCheckoutReturn: (entryId: string) => () => void) {
+function useSubscriptionOpener(area: GuideArea, showToast: ShowToast, markCheckoutReturn: (hookId: ReturnType<typeof consumePendingAttribution>['hookId'], entryId: string) => () => void) {
   const { t } = useI18n(), [subscriptionUrl, setSubscriptionUrl] = useState<string>();
-  const pendingEntryId = useRef<string | undefined>(undefined);
+  const pendingAttribution = useRef<{ hookId: ReturnType<typeof consumePendingAttribution>['hookId']; entryId: string } | undefined>(undefined);
   async function openSubscription(element: 'manage_subscription' | 'view_plans') {
-    const entryId = tracking.newTrackingId();
-    pendingEntryId.current = entryId;
-    tracking.reportSettingsClick(area, element, { hook_id: 'settings_subscription', entry_id: entryId });
+    const attribution = consumePendingAttribution('subscription', 'settings_subscription');
+    pendingAttribution.current = attribution;
+    tracking.reportSettingsClick(area, element, { hook_id: attribution.hookId, entry_id: attribution.entryId });
     setSubscriptionUrl(undefined);
-    const cancelCheckoutReturn = markCheckoutReturn(entryId);
+    const cancelCheckoutReturn = markCheckoutReturn(attribution.hookId, attribution.entryId);
     try {
-      const { url, opened } = await gatewayRequest<{ url: string; opened: boolean }>('settings/account/subscription', 'POST', { hookId: 'settings_subscription', entryId });
+      const { url, opened } = await gatewayRequest<{ url: string; opened: boolean }>('settings/account/subscription', 'POST', attribution);
       if (opened) return;
       const page = window.open(url, '_blank');
       if (page) page.opener = null;
@@ -41,7 +42,7 @@ function useSubscriptionOpener(area: GuideArea, showToast: ShowToast, markChecko
   }
   const button = (element: 'manage_subscription' | 'view_plans', primary = false) => <Button variant="ghost" className="om-button h-auto" data-primary={primary || undefined} onClick={() => void openSubscription(element)}>
     {element === 'view_plans' && <RemixIcon name="sparkling-line" size={16} />}{t(element === 'view_plans' ? 'Upgrade to Plus' : 'Manage subscription')}<RemixIcon name="external-link-line" size={15} /></Button>;
-  const link = subscriptionUrl && <a className="om-button" data-primary href={subscriptionUrl} target="_blank" rel="noreferrer" onClick={() => { markCheckoutReturn(pendingEntryId.current ?? tracking.newTrackingId()); setSubscriptionUrl(undefined); }}>{t('Continue in browser')}<RemixIcon name="external-link-line" size={15} /></a>;
+  const link = subscriptionUrl && <a className="om-button" data-primary href={subscriptionUrl} target="_blank" rel="noreferrer" onClick={() => { const current = pendingAttribution.current ?? { hookId: 'settings_subscription' as const, entryId: tracking.newTrackingId() }; markCheckoutReturn(current.hookId, current.entryId); setSubscriptionUrl(undefined); }}>{t('Continue in browser')}<RemixIcon name="external-link-line" size={15} /></a>;
   return { button, link };
 }
 
@@ -116,32 +117,28 @@ export function useAccountSignIn(area: GuideArea, showToast: ShowToast, provider
   const { t } = useI18n(), state = useAccountSummary(), [busy, setBusy] = useState(false), previous = useRef<string | undefined>(undefined);
   const { account, refresh } = state;
   const accountState = account?.state;
-  const pendingCheckout = useRef<{ token: symbol; entryId: string } | undefined>(undefined);
-  const subscription = useSubscriptionOpener(area, showToast, entryId => {
-    const checkout = pendingCheckout.current = { token: Symbol(), entryId };
+  const pendingCheckout = useRef<{ token: symbol; hookId: ReturnType<typeof consumePendingAttribution>['hookId']; entryId: string } | undefined>(undefined);
+  const subscription = useSubscriptionOpener(area, showToast, (hookId, entryId) => {
+    const checkout = pendingCheckout.current = { token: Symbol(), hookId, entryId };
     return () => { if (pendingCheckout.current?.token === checkout.token) pendingCheckout.current = undefined; };
   });
-  const refreshBilling = useCallback(async (checkoutEntryId?: string) => {
-    const readPlan = (summary: AccountSummary | null | undefined) =>
-      summary?.state === 'signed-in' && !summary.billingUnavailable ? summary.plan?.trim().toLowerCase() || undefined : undefined;
-    const prevPlan = readPlan(account);
+  const refreshBilling = useCallback(async (checkout?: { hookId: ReturnType<typeof consumePendingAttribution>['hookId']; entryId: string }) => {
+    const prevPlan = readAccountPlan(account);
     const updated = await refresh(true);
-    const nextPlan = readPlan(updated);
-    const billingOk = Boolean(updated && updated.state === 'signed-in' && !updated.billingUnavailable);
+    const { billingOk, planChanged } = evaluateEntitlementRefresh(prevPlan, updated);
     const stateOrBillingChanged = Boolean(updated && (updated.state !== account?.state || updated.plan?.trim().toLowerCase() !== account?.plan?.trim().toLowerCase()
       || Boolean(updated.billingUnavailable) !== Boolean(account?.billingUnavailable)));
     if (stateOrBillingChanged) notifyProvidersChanged();
-    if (checkoutEntryId) {
-      const planChanged = Boolean(billingOk && prevPlan && nextPlan && nextPlan !== prevPlan);
-      tracking.reportEntitlementRefresh('settings', 'settings_subscription', checkoutEntryId, billingOk ? 'success' : 'failure', planChanged);
+    if (checkout) {
+      tracking.reportEntitlementRefresh('settings', checkout.hookId, checkout.entryId, billingOk ? 'success' : 'failure', planChanged);
     }
   }, [account, refresh]);
   useEffect(() => {
     const onReturn = () => {
       if (!pendingCheckout.current || document.visibilityState !== 'visible') return;
-      const { entryId } = pendingCheckout.current;
+      const { hookId, entryId } = pendingCheckout.current;
       pendingCheckout.current = undefined;
-      void refreshBilling(entryId);
+      void refreshBilling({ hookId, entryId });
     };
     window.addEventListener('focus', onReturn);
     document.addEventListener('visibilitychange', onReturn);
@@ -159,12 +156,12 @@ export function useAccountSignIn(area: GuideArea, showToast: ShowToast, provider
   }, [accountState, t, showToast]);
   useEffect(() => { if (accountState === 'signed-in') void state.refresh(true); }, [accountState, state.refresh]);
   async function action(name: AccountAction) {
-    const entryId = name === 'login' ? tracking.newTrackingId() : undefined;
+    const attribution = name === 'login' ? consumePendingAttribution('sign_in', 'settings_signin') : undefined;
     tracking.reportSettingsClick(area, name === 'login' ? 'sign_in' : name === 'logout' ? 'sign_out' : 'cancel_sign_in',
-      { ...(provider ? { provider } : {}), ...(entryId ? { hook_id: 'settings_signin' as const, entry_id: entryId } : {}) });
+      { ...(provider ? { provider } : {}), ...(attribution ? { hook_id: attribution.hookId, entry_id: attribution.entryId } : {}) });
     setBusy(true);
     try {
-      const payload = name === 'login' && entryId ? { hookId: 'settings_signin', entryId } : {};
+      const payload = attribution ? { hookId: attribution.hookId, entryId: attribution.entryId } : {};
       state.setAccount(await gatewayRequest<AccountSummary>('settings/account/' + name, 'POST', payload)); notifyProvidersChanged(); window.dispatchEvent(new Event('motion:account-changed'));
     }
     catch (error) { showToast(error instanceof Error ? error.message : t('Could not update account'), 'error'); }

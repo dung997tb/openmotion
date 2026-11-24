@@ -31,6 +31,7 @@ import { attachableReferenceLimit, creationModels } from './creationModels';
 import { isOpenDesignProvider, modelFamilyLabel, providerDisplayName } from './imageMenuModels';
 import { registeredProvider } from '../../../shared/provider-registry';
 import { ProviderSetupNotice } from './ProviderSetupNotice';
+import { setPendingAttribution } from './entitlementAttribution';
 import { send } from './reporting';
 
 export interface AssetDraft { modality: Modality; prompt: string; capabilityOptions?: Record<string, string>; relight?: RelightChoices; videoChoices?: Record<string, string>; shotPreferences?: { aspect: string; duration?: number }; preferredModel?: string; model?: string; parameters?: Record<string, unknown>; target?: { asset: LibraryAsset; versionId: string }; references: { reference: AssetReference; name: string }[] }
@@ -322,7 +323,9 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
 
   const configureProvider = (providerId: string) => {
     if (providerId === 'account') {
-      send('ui_click', { page_name: trackingPage, area: 'asset_create', element: 'sign_in', hook_id: 'studio_generate', entry_id: tracking.newTrackingId(), ...(studioId ? { studio_id: studioId } : {}) });
+      const entryId = tracking.newTrackingId();
+      setPendingAttribution('sign_in', 'studio_generate', entryId);
+      send('ui_click', { page_name: trackingPage, area: 'asset_create', element: 'sign_in', hook_id: 'studio_generate', entry_id: entryId, ...(studioId ? { studio_id: studioId } : {}) });
       (openAccountSettings ?? openModelSettings)();
       return;
     }
@@ -367,7 +370,9 @@ export function AssetComposer({ active, studio, draft, setDraft, agentReferences
         <RemixIcon name="bank-card-line" size={20} />
         <p className="om-muted">{t('Signed in; multimodal generation requires OpenDesign Plus or above')}</p>
         <Button variant="ghost" className="om-button h-auto" onClick={() => {
-          send('ui_click', { page_name: trackingPage, area: 'asset_create', element: 'manage_subscription', hook_id: 'studio_free_gate', entry_id: tracking.newTrackingId(), ...(studioId ? { studio_id: studioId } : {}) });
+          const entryId = tracking.newTrackingId();
+          setPendingAttribution('subscription', 'studio_free_gate', entryId);
+          send('ui_click', { page_name: trackingPage, area: 'asset_create', element: 'manage_subscription', hook_id: 'studio_free_gate', entry_id: entryId, ...(studioId ? { studio_id: studioId } : {}) });
           (openSubscriptionSettings ?? openAccountSettings ?? openModelSettings)();
         }}>
           {t('Manage subscription')}

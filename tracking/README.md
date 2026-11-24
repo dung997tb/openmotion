@@ -629,8 +629,8 @@ Game detail openings report `surface_view` (`area=game_detail`, `element=detail`
 `surface_view` (`area=game_handoff`, `element=handoff`), settled market searches report `game_search_result`
 (`search_keyword`, `result_count`, optional category `filter_value`), trailer actions report `ui_click` (`create_trailer`,
 `regenerate_trailer`, `open_trailer_project`) paired with `game_action_result` (`start_trailer`, `regenerate_trailer`,
-`open_trailer_project`), iframe load errors report `game_action_result` (`action=play`, `outcome=failure`), and Assets
-game entries report `ui_click` (`page_name=assets`, `area=assets_library`, `element=open_game|view_all_games|open_game_studio`).
+`open_trailer_project`), and Assets game entries report `ui_click` (`page_name=assets`, `area=assets_library`,
+`element=open_game|view_all_games|open_game_studio`).
 
 The shared cloud-share popover (Design, Game and Super Agent artifacts) reports `ui_click`
 (`area=web_publish`, `element=open_publish`) when it opens and one `web_publish_result` per operation: `publish`,

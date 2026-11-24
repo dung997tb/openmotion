@@ -289,17 +289,18 @@ export function WebPublishPopover({
     }
   };
 
+  const accountResolved = account !== null || status !== null;
   const accountState = account?.state ?? status?.accountState ?? (status?.accountSignedIn ? 'signed-in' : 'signed-out');
   const signedIn = accountState === 'signed-in';
   const authorizing = accountState === 'authorizing';
   const signInGateReportedRef = useRef(false);
   useEffect(() => {
-    if (!open) { signInGateReportedRef.current = false; return; }
-    if (!signedIn && !authorizing && !signInGateReportedRef.current) {
+    if (!open || signedIn) { signInGateReportedRef.current = false; return; }
+    if (accountResolved && !authorizing && !signInGateReportedRef.current) {
       signInGateReportedRef.current = true;
       send('surface_view', { page_name: 'creative_studio', area: 'entitlement_gate', element: 'gate_card', hook_id: publishHookId, publish_target: targetKind });
     }
-  }, [open, signedIn, authorizing, publishHookId, targetKind]);
+  }, [open, accountResolved, signedIn, authorizing, publishHookId, targetKind]);
   const mutating = activeOp !== null;
   const pub = status?.active ?? null;
   const linkStatus = pub?.status ?? 'none';
