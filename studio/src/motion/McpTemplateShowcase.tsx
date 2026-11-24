@@ -40,6 +40,7 @@ export function McpTemplateShowcase({ enabled, initialCategory, onCopy, openLibr
   const [manualCopy, setManualCopy] = useState<{ id: string; instruction: string } | null>(null);
   const previewTrigger = useRef<HTMLButtonElement>(null);
   const latestCopy = useRef(0);
+  const copyPromptLabel = t(locale === 'en' ? 'Copy prompt' : 'Copy example prompt');
   const content = (card: McpGalleryCard) => localizedMcpExample(card.content, locale, t);
   const visible = mcpGalleryCards.filter(card => category === 'all' || card.category === category);
   const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
@@ -128,7 +129,7 @@ export function McpTemplateShowcase({ enabled, initialCategory, onCopy, openLibr
                 <p title={content(card).prompt}>{content(card).prompt}</p>
                 <div className="om-mcp-demo-actions">
                   <Button variant="plain" className="om-mcp-demo-copy" data-copied={copiedPrompt || undefined} onClick={() => void copyPrompt(card)}>
-                    {t(copiedPrompt ? 'Copied' : 'Copy example prompt')}
+                    {copiedPrompt ? t('Copied') : copyPromptLabel}
                   </Button>
                 </div>
                 {!preview && copyFallback(card)}

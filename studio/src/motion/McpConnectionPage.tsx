@@ -5,7 +5,7 @@ import { reviewCommentsPrompt } from '../../../shared/review-comments';
 import { findScenario, scenarioAgentPrompt } from '../../../shared/scenarios';
 import { findTechniqueStudio } from '../../../shared/studio-catalog';
 import { brand, designSystemAsset } from '../../../packages/design-system/index.js';
-import { Tabs, TabsList, Tab } from '../components/ui/Tabs';
+import { Tabs, TabsIndicator, TabsList, Tab } from '../components/ui/Tabs';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
 import { useI18n } from '../i18n/I18n';
@@ -352,6 +352,7 @@ export function McpConnectionPage({
                   <span>{t(item.name)}</span>
                 </Tab>
               ))}
+              <TabsIndicator className="om-mcp-client-indicator" aria-hidden="true" />
             </TabsList>
           </HorizontalRail>
         </div>

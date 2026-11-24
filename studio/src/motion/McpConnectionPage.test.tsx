@@ -160,6 +160,12 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   expect([...document.querySelectorAll('.om-mcp-client-dock [role=tab]')].map(button => button.textContent)).toEqual([
     'Codex', 'Claude Code', 'Claude Desktop', 'Cursor', 'DeepSeek Harness', 'Other MCP clients',
   ]);
+  const otherClients = tab('Other MCP clients');
+  await act(async () => otherClients.click());
+  const dockPlug = otherClients.querySelector('svg path');
+  expect(dockPlug).not.toBeNull();
+  expect(document.querySelector('#mcp-title .om-mcp-generic-icon svg path')?.getAttribute('d')).toBe(dockPlug?.getAttribute('d'));
+  await act(async () => tab('Codex').click());
   await act(async () => button('Manual setup').click());
   expect(button('Manual setup').getAttribute('aria-expanded')).toBe('true');
   await act(async () => tab('Claude Code').click());
@@ -187,7 +193,9 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   await act(async () => button('Manual setup').click());
   expect(document.querySelector('.om-mcp-manual-note a')?.getAttribute('href')).toContain('/integrations/dsh');
   await act(async () => tab('Claude Code').click());
-  await act(async () => button('Copy example prompt').click());
+  const galleryCopy = document.querySelector<HTMLButtonElement>('.om-mcp-demo-actions button')!;
+  expect(galleryCopy.textContent).toBe('Copy prompt');
+  await act(async () => galleryCopy.click());
   const example = copy.mock.calls[0][0];
   expect(example).toMatch(/^@OpenDesign Adapt template "Glean Agents Launch"/);
   expect(example).toContain('[OpenMotion template: motion-f6f244d1-c549-4081-8a5d-f0e1e3660044]');
@@ -219,7 +227,7 @@ it('explains unavailable remote connections for existing ChatGPT links', async (
   history.replaceState(null, '', '?page=mcp&host=chatgpt');
   try { await mount(); } finally { history.replaceState(null, '', previousUrl); }
   expect(document.body.textContent).toContain('Remote connection unavailable');
-  expect(button('Copy example prompt').disabled).toBe(false);
+  expect(document.querySelector<HTMLButtonElement>('.om-mcp-demo-actions button')?.disabled).toBe(false);
   expect(document.querySelector('a[download]')).toBeNull();
 
 });
@@ -459,6 +467,7 @@ it('renders the 4-step hero stage, 3 feature carousels, standalone 6-item FAQ an
   vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   await mount('zh-CN');
+  expect(document.querySelector('.om-mcp-demo-actions button')?.textContent).toBe('复制 Prompt');
   expect(document.querySelectorAll('.om-mcp-stage-step')).toHaveLength(4);
   const step2 = document.querySelectorAll<HTMLButtonElement>('.om-mcp-stage-step')[1];
   await act(async () => step2.click());

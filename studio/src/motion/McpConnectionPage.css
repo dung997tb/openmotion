@@ -33,8 +33,16 @@
   padding: 56px 20px 0;
 }
 .om-mcp-client-viewport { overflow-x: auto; max-width: 100%; }
-.om-mcp-client-dock { display: inline-flex; align-items: center; gap: 4px; padding: 4px; width: max-content; }
-.om-mcp-client-tab { height: 36px; padding-inline: 13px; display: inline-flex; align-items: center; gap: 7px; flex: none; white-space: nowrap; }
+.om-mcp-client-dock { position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 4px; padding: 4px; width: max-content; }
+.om-mcp-client-tab { position: relative; z-index: 1; height: 36px; padding-inline: 13px; display: inline-flex; align-items: center; gap: 7px; flex: none; white-space: nowrap; }
+.om-mcp-client-indicator {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: var(--active-tab-width);
+  height: var(--active-tab-height);
+  transform: translate(var(--active-tab-left), var(--active-tab-top));
+  pointer-events: none;
+}
 .om-mcp-client-ico { width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
 [data-motion-studio] .om-mcp-client-ico .om-avatar { width: 17px; height: 17px; }
 [data-motion-studio] .om-mcp-client-ico :is(svg, img) { width: 16px; height: 16px; display: block; }

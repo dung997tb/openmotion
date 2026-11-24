@@ -57,6 +57,13 @@
   color: var(--motion-mcp-dock-ink);
   font-weight: var(--motion-weight-semibold);
 }
+.om-mcp-client-indicator {
+  border-radius: var(--motion-radius-full);
+  background: var(--motion-mcp-dock-active);
+}
+[data-motion-studio] .om-mcp-client-dock:has(.om-mcp-client-indicator:not([hidden])) .om-mcp-client-tab[aria-selected=true] {
+  background: transparent;
+}
 [data-motion-studio] .om-mcp-client-ico { color: var(--motion-mcp-dock-ink); }
 [data-motion-studio] .om-mcp-client-ico .om-avatar { background: transparent; border: 0; }
 [data-motion-studio] .om-mcp-client-ico .om-mcp-generic-icon { color: inherit; border-radius: var(--motion-radius-sm); }
@@ -296,7 +303,7 @@
 .om-mcp-pillar h3 { font-size: 18px; font-weight: var(--motion-weight-semibold); color: var(--motion-strong); line-height: 1.35; }
 .om-mcp-pillar p { font-size: var(--motion-text-body); color: var(--motion-muted); line-height: 1.65; }
 @media (hover: hover) {
-  .om-mcp-pillar:hover h3 { color: color-mix(in srgb, var(--motion-strong) 50%, var(--motion-accent)); }
+  .om-mcp-pillar:hover h3 { color: var(--motion-accent); }
 }
 
 /* Standalone 6-Item FAQ Accordion */
@@ -374,7 +381,15 @@
 .om-mcp-contact .om-text-link { display: inline-flex; }
 [data-motion-studio] .om-mcp-contact .om-text-link[data-quiet] { color: var(--motion-muted); }
 
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .om-mcp-btn-primary svg { transition: translate var(--motion-duration-fast) var(--motion-ease-out); }
+  .om-mcp-btn-primary:hover svg { translate: 2px -1px; }
+}
+
 @media (prefers-reduced-motion: no-preference) {
+  .om-mcp-client-dock:not(:has(.om-mcp-client-tab:focus-visible)) .om-mcp-client-indicator {
+    transition: transform var(--motion-duration-normal) var(--motion-ease-out), width var(--motion-duration-normal) var(--motion-ease-out);
+  }
   [data-motion-studio] .om-mcp-btn-primary { transition: background-color var(--motion-duration-fast) var(--motion-ease-out); }
   .om-mcp-pillar h3 { transition: color var(--motion-duration-normal) var(--motion-ease-out); }
   .om-mcp-stage-slide { transition: opacity .7s ease; }
