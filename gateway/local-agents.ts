@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { access } from 'node:fs/promises';
+import { access, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import os from 'node:os';
 import { localAgents, type AgentChoice, type AgentDirectory, type AgentLaunch, type AgentModel, type LocalAgent } from '../shared/local-agents.ts';
@@ -52,21 +52,11 @@ export function clearLocalAgentResolveCache(): void {
   resolveCache.clear();
 }
 
-export async function resolveLocalAgent(bin: string): Promise<string | null> {
-  const pathKey = `${bin}\0${process.env.PATH || ''}`;
-  const now = Date.now();
-  const hit = resolveCache.get(pathKey);
-  if (hit && hit.expiresAt > now) {
-    return hit.resolved;
-  }
-
+async function findLocalAgent(bin: string): Promise<string | null> {
   const names = BIN_ALIASES[bin] ?? [bin];
   for (const name of names) {
     const found = await resolveAgent(name);
-    if (found) {
-      resolveCache.set(pathKey, { resolved: found, expiresAt: now + RESOLVE_CACHE_TTL_MS });
-      return found;
-    }
+    if (found) return found;
   }
   const home = os.homedir();
   const dirs = [
@@ -88,12 +78,62 @@ export async function resolveLocalAgent(bin: string): Promise<string | null> {
     const file = path.join(dir, name + suffix);
     try {
       await access(file, constants.X_OK);
-      resolveCache.set(pathKey, { resolved: file, expiresAt: now + RESOLVE_CACHE_TTL_MS });
       return file;
     } catch { /* next */ }
   }
-  resolveCache.set(pathKey, { resolved: null, expiresAt: now + RESOLVE_CACHE_TTL_MS });
   return null;
+}
+
+async function bundledCodex(hostBin: string | undefined): Promise<string | null> {
+  const candidates = [hostBin];
+  if (process.platform === 'darwin') {
+    const bundle = 'ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex';
+    candidates.push(path.join(os.homedir(), 'Applications', bundle), path.join('/Applications', bundle));
+  }
+  for (const candidate of candidates) {
+    if (!candidate || !path.isAbsolute(candidate)) continue;
+    try {
+      if (!(await stat(candidate)).isFile()) continue;
+      await access(candidate, constants.X_OK);
+      return candidate;
+    } catch { /* next */ }
+  }
+  return null;
+}
+
+async function codexReleaseVersion(bin: string): Promise<string | undefined> {
+  const { ok, text } = await probeAgent(bin, ['--version']);
+  return ok ? /^codex-cli (\d+\.\d+\.\d+)(?:\+[\w.-]+)?$/m.exec(text.trim())?.[1] : undefined;
+}
+
+async function preferNewerCodex(standalone: string | null, hostBin: string | undefined): Promise<string | null> {
+  const bundled = await bundledCodex(hostBin);
+  if (!standalone || !bundled || standalone === bundled) return standalone ?? bundled;
+
+  const [standaloneVersion, bundledVersion] = await Promise.all([
+    codexReleaseVersion(standalone),
+    codexReleaseVersion(bundled),
+  ]);
+  if (standaloneVersion && bundledVersion && bundledVersion.localeCompare(standaloneVersion, 'en', { numeric: true }) > 0) {
+    return bundled;
+  }
+  return standalone;
+}
+
+export async function resolveLocalAgent(bin: string): Promise<string | null> {
+  const hostCodex = bin === 'codex' ? process.env.CODEX_APP_RUNTIME_CLI_PATH : undefined;
+  const override = process.env[`${bin.toUpperCase()}_BIN`];
+  const pathKey = `${bin}\0${process.env.PATH || ''}\0${override ?? ''}\0${hostCodex ?? ''}`;
+  const now = Date.now();
+  const hit = resolveCache.get(pathKey);
+  if (hit && hit.expiresAt > now) return hit.resolved;
+
+  const installed = await findLocalAgent(bin);
+  const resolved = bin === 'codex' && installed !== override
+    ? await preferNewerCodex(installed, hostCodex)
+    : installed;
+  resolveCache.set(pathKey, { resolved, expiresAt: now + RESOLVE_CACHE_TTL_MS });
+  return resolved;
 }
 
 function antigravityAcpClientInfo(version?: string): { name: string; version: string } {
