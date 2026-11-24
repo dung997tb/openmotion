@@ -302,6 +302,15 @@ describe("buildTimelineMoveTimingPatch", () => {
 });
 
 describe("buildTimelineResizeTimingPatch", () => {
+  it("preserves the frame-aligned stationary edge when saving either trim", () => {
+    const source = '<div id="root"><div id="a" data-start="4.6666666667" data-duration="3.1"></div></div>';
+    const element = el({ id: "a", tag: "div", domId: "a", start: 4.6666666667, duration: 3.1 });
+    const head = buildTimelineResizeTimingPatch(source, { id: "a" }, element, { start: 5.77, duration: 1.9966666667 });
+    expect(head).toContain('data-duration="1.9966666667"');
+    const tail = buildTimelineResizeTimingPatch(source, { id: "a" }, element, { start: element.start, duration: 2 });
+    expect(tail).toContain('data-start="4.6666666667"');
+  });
+
   it("moves a source-only in-point by the caller's own start change", () => {
     const source = `<div id="root"><video id="a" class="clip" data-start="5" data-duration="3" data-media-start="0.337"></video></div>`;
     const element = el({ id: "a", tag: "video", domId: "a", start: 5, duration: 3 });

@@ -401,9 +401,9 @@ export function useTimelineGroupEditing({
         const liveAttrs: Array<[string, string]> = [
           [
             "data-start",
-            formatTimelineAttributeNumber(toAuthoredStart(change.element, change.start)),
+            String(toAuthoredStart(change.element, change.start)),
           ],
-          ["data-duration", formatTimelineAttributeNumber(change.duration)],
+          ["data-duration", String(change.duration)],
         ];
         if (change.playbackStart != null) {
           const liveAttr = playbackStartAttributeForElement(change.element);

@@ -523,6 +523,23 @@ describe("buildTimelineElementAgentPrompt", () => {
   });
 });
 describe("resolveTimelineResize", () => {
+  it("keeps the untouched frame boundary over alternating head trims", () => {
+    const end = 4.6666666667 + 3.1;
+    let clip = { start: 4.6666666667, duration: 3.1 };
+    const unchanged = resolveTimelineResize(
+      { ...clip, playbackStart: 0, originClientX: 0, pixelsPerSecond: 100, minStart: 0, maxEnd: 12 },
+      "start", -50,
+    );
+    expect(unchanged).toMatchObject(clip);
+    for (const offset of [54, -26, 28, -18]) {
+      clip = resolveTimelineResize(
+        { ...clip, originClientX: 0, pixelsPerSecond: 100, minStart: 0, maxEnd: 12 },
+        "start", offset,
+      );
+      expect(clip.start + clip.duration).toBeCloseTo(end, 11);
+    }
+  });
+
   it("shrinks clip duration from the right edge", () => {
     expect(
       resolveTimelineResize(

@@ -237,6 +237,11 @@ function resolveResizePlaybackStart(
 /** Below any centisecond step, above float noise from authored-start round trips. */
 const AUTHORED_START_EPSILON = 1e-6;
 
+function hasAuthoredStart(original: string, target: PatchTarget, start: number): boolean {
+  const value = readAttributeByTarget(original, target, "data-start");
+  return value != null && value.trim() !== "" && Math.abs(Number(value) - start) < AUTHORED_START_EPSILON;
+}
+
 export function applyTimelineMoveAttributes(
   original: string,
   target: PatchTarget,
@@ -254,11 +259,7 @@ export function applyTimelineMoveAttributes(
   // A clip that only changes lane keeps its authored start text: re-rounding an
   // unchanged start to centiseconds while data-duration keeps full precision
   // shifts its end past the next clip's start and makes the pair overlap.
-  const authoredStart = readAttributeByTarget(original, target, "data-start");
-  const startUnchanged = authoredStart != null
-    && authoredStart.trim() !== ""
-    && Math.abs(Number(authoredStart) - start) < AUTHORED_START_EPSILON;
-  let patched = startUnchanged ? original : applyPatchByTarget(original, target, {
+  let patched = hasAuthoredStart(original, target, start) ? original : applyPatchByTarget(original, target, {
     type: "attribute",
     property: "start",
     value: formatTimelineAttributeNumber(start),
@@ -327,15 +328,16 @@ export function applyTimelineResizeAttributes(
   updates: Pick<TimelineElement, "start" | "duration" | "playbackStart">,
 ): string {
   const pbs = resolveResizePlaybackStart(original, target, element, updates);
-  let patched = applyPatchByTarget(original, target, {
+  const start = toAuthoredStart(element, updates.start);
+  let patched = hasAuthoredStart(original, target, start) ? original : applyPatchByTarget(original, target, {
     type: "attribute",
     property: "start",
-    value: formatTimelineAttributeNumber(toAuthoredStart(element, updates.start)),
+    value: String(start),
   });
   patched = applyPatchByTarget(patched, target, {
     type: "attribute",
     property: "duration",
-    value: formatTimelineAttributeNumber(updates.duration),
+    value: String(updates.duration),
   });
   if (pbs) {
     patched = applyPatchByTarget(patched, target, {

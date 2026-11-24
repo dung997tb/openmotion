@@ -120,14 +120,11 @@ type SavedClip = RowClock & Pick<TimelineElement, "duration">;
 const authoredOffset = (element: RowClock) =>
   element.authoredStartIsMasterTime ? 0 : (element.parentCompositionStart ?? 0);
 
-/**
- * Where a clip's edges sit once saved: its file stores the local start to the centisecond, and the
- * duration too when a resize writes it; a move keeps the authored duration.
- */
+/** Resizes preserve the opposite edge. Moves quantize the authored start and retain the duration. */
 export function savedClipEdges(element: SavedClip, start: number, resizedDuration?: number) {
-  const savedStart = authoredOffset(element) + roundToCenti(toAuthoredStart(element, start));
-  const duration = resizedDuration === undefined ? element.duration : roundToCenti(resizedDuration);
-  return { start: savedStart, end: savedStart + duration };
+  const authoredStart = toAuthoredStart(element, start);
+  const savedStart = authoredOffset(element) + (resizedDuration === undefined ? roundToCenti(authoredStart) : authoredStart);
+  return { start: savedStart, end: savedStart + (resizedDuration ?? element.duration) };
 }
 
 /** The earliest master start this row can take: its host's start, or its own if already earlier. */
