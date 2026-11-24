@@ -177,6 +177,7 @@
 
 /* 3 Advantage Pillar Cards */
 .om-mcp-pillars { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.om-mcp-pillar-wrap { display: grid; min-width: 0; }
 .om-mcp-pillar { padding: 30px 28px; display: flex; flex-direction: column; gap: 10px; }
 .om-mcp-pillar-num { margin-bottom: 4px; }
 .om-mcp-pillar p { margin: 0; }

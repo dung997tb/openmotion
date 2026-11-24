@@ -1,6 +1,6 @@
 import { Collapsible } from '@base-ui/react/collapsible';
 import { Button } from 'open-design-ui/button';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { manualConnection, setupGuideUrl, setupPrompt, transcriptExamplePrompt, type IntegrationInfo } from '../../../shared/integration';
 import { reviewCommentsPrompt } from '../../../shared/review-comments';
 import { findScenario, scenarioAgentPrompt } from '../../../shared/scenarios';
@@ -36,6 +36,19 @@ import './McpConnectionPage.css';
 const primaryClients = clients.filter(supportsLocalConnection);
 
 const DSH_PLUGIN_URL = 'https://github.com/nexu-io/openmotion/tree/main/integrations/dsh';
+
+function movePillar(event: PointerEvent<HTMLDivElement>) {
+  if (event.pointerType !== 'mouse') return;
+  const { currentTarget, clientX, clientY } = event;
+  const { left, top, width, height } = currentTarget.getBoundingClientRect();
+  currentTarget.style.setProperty('--mcp-pillar-pointer-x', String((clientX - left) / width - 0.5));
+  currentTarget.style.setProperty('--mcp-pillar-pointer-y', String((clientY - top) / height - 0.5));
+}
+
+function resetPillar({ currentTarget }: PointerEvent<HTMLDivElement>) {
+  currentTarget.style.removeProperty('--mcp-pillar-pointer-x');
+  currentTarget.style.removeProperty('--mcp-pillar-pointer-y');
+}
 
 function buildCursorDeeplink(info: IntegrationInfo | null): string | null {
   if (!info || info.deployment?.type === 'docker') return null;
@@ -527,11 +540,19 @@ export function McpConnectionPage({
           </div>
           <div className="om-mcp-pillars">
             {mcpAdvantagePillars.map(pillar => (
-              <article key={pillar.num} className="om-mcp-pillar">
-                <div className="om-mcp-pillar-num">{pillar.num}</div>
-                <h3>{t(pillar.titleKey)}</h3>
-                <p>{t(pillar.bodyKey)}</p>
-              </article>
+              <div
+                key={pillar.num}
+                className="om-mcp-pillar-wrap"
+                onPointerMove={movePillar}
+                onPointerLeave={resetPillar}
+                onPointerCancel={resetPillar}
+              >
+                <article className="om-mcp-pillar">
+                  <div className="om-mcp-pillar-num">{pillar.num}</div>
+                  <h3>{t(pillar.titleKey)}</h3>
+                  <p>{t(pillar.bodyKey)}</p>
+                </article>
+              </div>
             ))}
           </div>
         </section>

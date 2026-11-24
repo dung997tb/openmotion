@@ -306,7 +306,16 @@
 .om-mcp-pillar h3 { font-size: 18px; font-weight: var(--motion-weight-semibold); color: var(--motion-strong); line-height: 1.35; }
 .om-mcp-pillar p { font-size: var(--motion-text-body); color: var(--motion-muted); line-height: 1.65; }
 @media (hover: hover) {
-  .om-mcp-pillar:hover h3 { color: var(--motion-accent); }
+  .om-mcp-pillar-wrap:hover h3 { color: var(--motion-accent); }
+}
+@media (any-hover: hover) and (any-pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .om-mcp-pillar-wrap { perspective: 900px; }
+  .om-mcp-pillar {
+    transform: rotateX(clamp(-5deg, calc(var(--mcp-pillar-pointer-y, 0) * -10deg), 5deg))
+      rotateY(clamp(-5deg, calc(var(--mcp-pillar-pointer-x, 0) * 10deg), 5deg));
+    transition: transform var(--motion-duration-normal) var(--motion-ease-out);
+  }
+  .om-mcp-pillar-wrap:hover .om-mcp-pillar { transition-duration: var(--motion-duration-fast); }
 }
 
 /* Standalone 6-Item FAQ Accordion */
