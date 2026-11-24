@@ -5,6 +5,7 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
 import { McpCopyFallback } from './McpCopyFallback';
+import { McpTiltCard } from './McpTiltCard';
 import { formatMcpAgentPrompt, localizedMcpExample, mcpHeroBeats } from './mcpShowcaseData';
 
 function nextBeat(index: number) {
@@ -69,20 +70,21 @@ export function McpHeroShowcaseStage({
             const copy = localizedMcpExample(beat.content, locale, t);
             const isActive = index === activeBeat;
             return (
-              <Button
-                key={beat.id}
-                variant="plain"
-                className="om-mcp-stage-step"
-                data-active={isActive || undefined}
-                aria-pressed={isActive}
-                onClick={() => selectBeat(index)}
-              >
-                <span className="om-mcp-stage-step-head">
-                  <span className="om-mcp-stage-step-num">{beat.num}</span>
-                  <span>{copy.title}</span>
-                </span>
-                <span className="om-mcp-stage-step-desc">{copy.desc}</span>
-              </Button>
+              <McpTiltCard key={beat.id}>
+                <Button
+                  variant="plain"
+                  className="om-mcp-stage-step"
+                  data-active={isActive || undefined}
+                  aria-pressed={isActive}
+                  onClick={() => selectBeat(index)}
+                >
+                  <span className="om-mcp-stage-step-head">
+                    <span className="om-mcp-stage-step-num">{beat.num}</span>
+                    <span>{copy.title}</span>
+                  </span>
+                  <span className="om-mcp-stage-step-desc">{copy.desc}</span>
+                </Button>
+              </McpTiltCard>
             );
           })}
         </div>

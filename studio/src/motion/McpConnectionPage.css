@@ -86,6 +86,8 @@
 .om-mcp-unavailable-hero { margin: 0 auto; max-width: 640px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .om-mcp-unavailable pre { white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; width: 100%; }
 
+.om-mcp-tilt { display: grid; min-width: 0; }
+
 /* Hero Lower: Left 4-step rail + right visual showcase + bottom prompt bar */
 .om-mcp-stage-section { padding: 6px 0 40px; max-width: 1120px; margin-inline: auto; }
 .om-mcp-stage-layout { display: grid; grid-template-columns: 310px minmax(0, 1fr); gap: 22px; align-items: start; }
@@ -177,7 +179,6 @@
 
 /* 3 Advantage Pillar Cards */
 .om-mcp-pillars { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
-.om-mcp-pillar-wrap { display: grid; min-width: 0; }
 .om-mcp-pillar { padding: 30px 28px; display: flex; flex-direction: column; gap: 10px; }
 .om-mcp-pillar-num { margin-bottom: 4px; }
 .om-mcp-pillar p { margin: 0; }
