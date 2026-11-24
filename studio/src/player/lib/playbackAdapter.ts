@@ -276,10 +276,12 @@ export function rememberBridgeTimelineState(
 const BRIDGE_SEEK_PAINT_TIMEOUT_MS = 4_500;
 
 export function createBridgePlaybackAdapter(preview: PreviewAdapter): BridgePlaybackAdapter {
-  const initial = preview.token ? bridgeTimelineStates.get(preview.iframe) : undefined;
-  let currentTime = initial?.token === preview.token ? initial.currentTime : 0;
-  let duration = initial?.token === preview.token ? initial.duration : 0;
-  let playing = initial?.token === preview.token ? initial.isPlaying : false;
+  const initial =
+    preview.token && preview.iframe ? bridgeTimelineStates.get(preview.iframe) : undefined;
+  const matched = initial && initial.token === preview.token ? initial : null;
+  let currentTime = matched ? matched.currentTime : 0;
+  let duration = matched ? matched.duration : 0;
+  let playing = matched ? matched.isPlaying : false;
   const onMessage = (event: MessageEvent) => {
     if (!preview.accepts(event)) return;
     if (event.data.type !== "timeline-state") return;
