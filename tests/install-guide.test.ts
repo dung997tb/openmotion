@@ -86,7 +86,7 @@ test('guide rendering pins the exact npm package, built source and hash while re
   assert(text.includes('`npm_config_registry` and `npm_config_fetch_retries=0` only for that attempt, including setup\'s npm child process'), 'Temporary registry settings must reach nested dependency installation');
   assert(text.includes('verify any mirrored tgz against the matching immutable guide\'s SHA256 before executing it'), 'Mirror recovery must preserve an independently recorded package identity');
   assert(text.includes('Permission or checksum failures stop immediately') && text.includes('terminal handoff') && text.includes('A local tgz still needs npm access'), 'Retain fail-closed recovery, terminal handoff and the online dependency boundary');
-  assert(text.includes(await installationInstructions(fileURLToPath(new URL('../', import.meta.url)))), 'Published guide must preserve the exact setup reply contract');
+  assert(text.includes(await installationInstructions(fileURLToPath(new URL('../', import.meta.url)), 'docs/templates/legacy-npm-install.md')), 'Published guide must preserve the exact setup reply contract');
   assert.match(text, /^# Install OpenMotion 0\.6\.4-test\.1\n/);
   assert(text.includes(`skills@1.9.0 add https://github.com/nexu-io/openmotion/tree/${manifest.commit} --skill openmotion`));
   assert(!text.includes('skills@1.9.0 add nexu-io/openmotion '), 'A release guide must not pair its app with main-branch Skill instructions');
