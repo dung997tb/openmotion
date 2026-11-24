@@ -227,7 +227,10 @@ function PlanUsagePanel({ account, upgradable, open }: { account: AccountSummary
         <h2 className="om-title">{planName}</h2>
         {periodEnd && <p className="om-muted">{t('Current period ends {date}', { date: periodEnd })}</p>}
       </div>
-      {upgradable && <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('view_plans')}><RemixIcon name="sparkling-line" size={16} />{t('Upgrade')}</Button>}
+      <div className="om-settings-actions">
+        <Button variant="ghost" className="om-button h-auto om-plan-usage-console" onClick={() => open('open_console')}>{t('Go to console')}<RemixIcon name="external-link-line" size={15} /></Button>
+        {upgradable && <Button variant="ghost" className="om-button h-auto" data-primary onClick={() => open('view_plans')}><RemixIcon name="sparkling-line" size={16} />{t('Upgrade')}</Button>}
+      </div>
     </div>
     <div className="om-plan-usage-quotas">
       <div className="om-plan-usage-quota" data-quota="pay-as-you-go">
@@ -266,7 +269,8 @@ export function AccountSettings({ subscription = false, openProviders }: { subsc
           {signedIn && !account.billingUnavailable && account.usage && <PlanUsagePanel account={account} upgradable={account.plan?.toLowerCase() !== 'max'} open={element => void subscriptionOpener.open(element)} />}
           {!(signedIn && account.billingUnavailable) && !(signedIn && account.usage) && <div className="om-account-metrics"><div className="om-card"><span className="om-muted">{t('Current plan')}</span><h3 className="om-title">{signedIn && account.plan ? account.plan === 'free' ? t('Free plan') : account.plan : '—'}</h3><p className="om-muted">{t(signedIn ? 'Managed by OpenDesign' : 'Sign in to view your plan')}</p></div><div className="om-card"><span className="om-muted">{t('Available balance')}</span><h3 className="om-title">{signedIn && account.balance != null ? `$${account.balance}` : '—'}</h3><p className="om-muted">{t(signedIn ? 'Account credits in USD' : 'Sign in to view usage')}</p></div></div>}
           {signedIn && account.billingUnavailable && <div className="om-settings-row"><p className="om-muted">{t(account.billingError?.status === 403 ? "The billing service declined this request. Open Manage subscription to check your plan in OpenDesign." : "Couldn't load your plan and balance. Account models are unaffected and can be used as usual.")}</p><Button variant="ghost" className="om-button h-auto" disabled={refreshing} aria-busy={refreshing} onClick={() => void refreshUsage()}><RemixIcon name={refreshing ? 'loader-4-line' : 'refresh-line'} size={15} className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined} />{t('Refresh')}</Button></div>}
-          {signedIn && !plan && <>{subscriptionOpener.button('manage_subscription')}{subscriptionOpener.link}</>}
+          {signedIn && !plan && !account.usage && <>{subscriptionOpener.button('manage_subscription')}{subscriptionOpener.link}</>}
+          {signedIn && account.usage && subscriptionOpener.link}
         </section>
       </> : <section className="om-card om-settings-row">
         <div className="om-account-models-copy">
