@@ -7,8 +7,8 @@ import { motionStudioCover } from './skillCatalog';
 import { useSkillPreview } from './useSkillPreview';
 import { destinationTarget, reportCreativeClick } from './exploreTracking';
 import type { ScenarioId } from '../../../shared/scenarios';
-import seedanceHeroPoster from './corridor-covers/cover-26.webp?no-inline';
-import gptImageHeroPoster from './scene-art/studio-glass-sculpture.jpg';
+import seedanceHeroPoster from './model-hubs/seedance-2-5/hero.webp?no-inline';
+import gptImageHeroPoster from './model-hubs/gpt-image-2-6/hero.webp?no-inline';
 import blackFridayHeroPoster from './scene-art/black-friday-spotlight.webp?no-inline';
 
 const track = (element: Parameters<typeof reportCreativeClick>[2], target: Parameters<typeof reportCreativeClick>[3]) => reportCreativeClick('explore', 'explore_spotlight', element, target);
@@ -55,8 +55,8 @@ const slides: FeaturedSlide[] = [{
   badge: '50% Off Annual',
   badgeZh: '黑五首年 5 折',
   badgeTone: 'top',
-  tagline: 'Cinema multi-shot video with Plus+ · 24 1-click templates',
-  taglineZh: 'Plus 及以上解锁电影级多镜头视频 · 24 套大片一键同款',
+  tagline: 'Cinema multi-shot video with Plus+ · 72 1-click templates',
+  taglineZh: 'Plus 及以上解锁电影级多镜头视频 · 72 套大片一键同款',
   icon: 'film-line',
   poster: seedanceHeroPoster,
   hub: seedanceHub.id,
