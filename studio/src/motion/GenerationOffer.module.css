@@ -166,13 +166,6 @@
   overflow-wrap: anywhere;
 }
 
-.dealTags li:first-child {
-  border-color: var(--motion-black-friday-amber);
-  background: linear-gradient(105deg, var(--motion-black-friday-peach), var(--motion-black-friday-amber));
-  color: var(--motion-neutral-n11);
-  box-shadow: 0 3px 14px color-mix(in srgb, var(--motion-black-friday-glow) 24%, transparent);
-}
-
 .dealTags strong {
   color: var(--motion-black-friday-peach);
   font-weight: var(--motion-weight-bold);

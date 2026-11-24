@@ -68,7 +68,6 @@ function SubscriptionUpgradeBenefits() {
   return <>
     <p className={offerStyles.modelSummary}>GPT image 2.0｜Nano banana 2｜Seedream5.0｜Seedream5.5</p>
     <ul className={offerStyles.dealTags} aria-label={t('Subscription offers')}>
-      <li>{t('Featured models')} {t('7-day unlimited')}</li>
       <li>{t('Go Max annual from')} <strong>{t('$100/mo')}</strong></li>
       <li>Claude / GPT <strong>{t('up to 20% off')}</strong></li>
     </ul>

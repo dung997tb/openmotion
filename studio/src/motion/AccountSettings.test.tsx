@@ -241,7 +241,7 @@ it('offers Free and Go accounts an upgrade through the registered entry source, 
     expect(page.querySelector('.om-account-metrics h3')?.textContent).toBe(plan === 'free' ? 'Free plan' : 'go');
     expect(actions(guide)).toEqual(['Upgrade to Plus']);
     expect([...guide.querySelectorAll('li')].map(item => item.textContent)).toEqual([
-      'Featured models 7-day unlimited', 'Go Max annual from $100/mo', 'Claude / GPT up to 20% off',
+      'Go Max annual from $100/mo', 'Claude / GPT up to 20% off',
     ]);
     expect(page.querySelector('.om-settings-section .om-button')).toBeNull();
     expect(page.querySelector('.om-account-summary')).toBeNull();
