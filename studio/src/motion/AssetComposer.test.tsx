@@ -903,6 +903,9 @@ it.each([
     if (state === 'guest') {
       expect(container.querySelector('[data-generation-offer="sign_in"] h3')?.textContent)
         .toBe(modality === 'image' ? '7 days of unlimited image generation' : 'Black Friday: up to 50% off your first year');
+    } else {
+      expect(container.querySelector('[data-generation-offer="upgrade"] h3')?.textContent)
+        .toBe(modality === 'image' ? '7 days of unlimited image generation' : 'Unlock popular AI models');
     }
     expect(container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.disabled).toBe(true);
     await click(picker('Provider'));
@@ -990,8 +993,8 @@ it.each(['free', 'go'])('previews locked account models and lets a %s account sw
   expect(optionNames()).toContain('GPT Image 2.6 Flare');
   expect([...document.querySelectorAll('[role="option"]')].every(el => el.querySelector('.om-account-offer-callout')?.textContent === badge)).toBe(true);
   await choose('GPT Image 2.6 Flare');
-  const offer = container.querySelector('section[aria-label="Unlock multimodal creation"]')!;
-  expect(offer.querySelector('h3')?.textContent).toBe('Unlock multimodal creation');
+  const offer = container.querySelector('section[data-generation-offer="upgrade"]')!;
+  expect(offer.querySelector('h3')?.textContent).toBe('7 days of unlimited image generation');
   expect(offer.querySelector('p')?.textContent).toBe('Black Friday’s lowest prices of the year! 7 days of unlimited use');
   expect(submit().disabled).toBe(true);
   gatewayRequest.mockResolvedValue({ opened: true });
@@ -1041,7 +1044,7 @@ it('keeps the default background removal model on the account after returning fr
   }
   await act(async () => root.render(<Harness upgraded={false} />));
   gatewayRequest.mockResolvedValue({ opened: true });
-  await act(async () => container.querySelector<HTMLButtonElement>('section[aria-label="Unlock multimodal creation"] button')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('section[data-generation-offer="upgrade"] button')!.click());
   await act(async () => { window.dispatchEvent(new Event('focus')); });
   expect(gatewayRequest).toHaveBeenCalledWith('settings/account?refresh=true');
   await act(async () => root.render(<Harness upgraded />));

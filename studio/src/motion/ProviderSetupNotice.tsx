@@ -24,6 +24,7 @@ export function ProviderSetupNotice({ message, children }: {
 }
 
 export function GenerationUpgradeNotice({ destination, onError, onUpgrade, visit }: { visit?: OfferVisit; destination: StudioDestination; onError: (message: string) => void; onUpgrade: () => void }) {
+  const { t } = useI18n();
   const subscription = useSubscriptionOpener(
     element => {
       onUpgrade();
@@ -33,7 +34,10 @@ export function GenerationUpgradeNotice({ destination, onError, onUpgrade, visit
     onError,
     () => { void gatewayRequest('settings/account?refresh=true').then(notifyProvidersChanged).catch((error: Error) => onError(error.message)); },
   );
-  return <MultimodalUpgradeCard subscription={subscription} visit={visit} />;
+  const title = destination.scene.modality === 'image'
+    ? t('7 days of unlimited image generation')
+    : t('Unlock popular AI models');
+  return <MultimodalUpgradeCard subscription={subscription} visit={visit} title={title} />;
 }
 
 export function GenerationSignInNotice({ destination, onSignIn, visit }: { visit?: OfferVisit; destination: StudioDestination; onSignIn: () => void }) {
