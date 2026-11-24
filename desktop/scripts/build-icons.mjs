@@ -253,6 +253,10 @@ function compileLiquidGlassAssetsCar(iconBundleDir, outDir) {
       copyFileSync(compiledCar, assetsCarPath);
       return assetsCarPath;
     }
+    const detail = `${res.stderr?.toString('utf8') ?? ''}\n${res.stdout?.toString('utf8') ?? ''}`.trim();
+    if (detail) {
+      console.warn(`actool failed to compile Liquid Glass Assets.car (exit=${res.status ?? 'null'}): ${detail.slice(0, 600)}`);
+    }
     return null;
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
@@ -298,31 +302,111 @@ function readPngWidth(pngBuffer) {
   return null;
 }
 
-function rasterizeSvgTargetsViaSharp(svgPath, targets) {
-  if (!Array.isArray(targets) || targets.length === 0) return false;
-  const sharpEntry = path.join(repoRoot, 'node_modules', 'sharp', 'lib', 'index.js');
-  if (!existsSync(sharpEntry)) return false;
-
-  const runner = `
-    import { pathToFileURL } from 'node:url';
-    import { readFileSync } from 'node:fs';
-    const { default: sharp } = await import(pathToFileURL(process.env.OM_SHARP_ENTRY).href);
-    const svg = readFileSync(process.env.OM_SVG_PATH);
-    const targets = JSON.parse(process.env.OM_TARGETS_JSON);
-    for (const target of targets) {
-      await sharp(svg).resize(target.size, target.size).png().toFile(target.outPath);
+function resolveSharpEntry() {
+  for (const baseDir of [repoRoot, desktopDir]) {
+    const pkgPath = path.join(baseDir, 'node_modules', 'sharp', 'package.json');
+    if (!existsSync(pkgPath)) continue;
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      const mainRel = typeof pkg.main === 'string' && pkg.main.trim() ? pkg.main.trim() : 'lib/index.js';
+      const entryPath = path.join(path.dirname(pkgPath), mainRel);
+      if (existsSync(entryPath)) return entryPath;
+    } catch {
+      // Ignore unreadable package metadata and continue searching.
     }
-  `;
-  const res = spawnSync(process.execPath, ['--input-type=module', '-e', runner], {
-    cwd: repoRoot,
+  }
+  return null;
+}
+
+export function rasterizeTargetsViaSharp(inputPath, targets) {
+  const sharpEntry = resolveSharpEntry();
+  if (!sharpEntry || !existsSync(inputPath) || !Array.isArray(targets) || targets.length === 0) {
+    return false;
+  }
+
+  const script = `
+import { pathToFileURL } from 'node:url';
+const [sharpEntry, inputPath, targetsJson] = process.argv.slice(1);
+const mod = await import(pathToFileURL(sharpEntry).href);
+const sharp = mod.default || mod;
+const targets = JSON.parse(targetsJson);
+await Promise.all(
+  targets.map(({ size, outPath }) =>
+    sharp(inputPath)
+      .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .png()
+      .toFile(outPath),
+  ),
+);
+`;
+  const res = spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', script, '--', sharpEntry, inputPath, JSON.stringify(targets)],
+    { stdio: 'pipe', timeout: 30_000 },
+  );
+  return res.status === 0 && targets.every(t => existsSync(t.outPath));
+}
+
+export function rasterizeTargetsViaImageMagick(inputPath, targets) {
+  if (!existsSync(inputPath) || !Array.isArray(targets) || targets.length === 0) {
+    return false;
+  }
+  const probe = spawnSync('magick', ['-version'], { stdio: 'pipe', timeout: 5_000 });
+  if (probe.status !== 0) return false;
+
+  for (const target of targets) {
+    const res = spawnSync(
+      'magick',
+      ['-background', 'none', inputPath, '-resize', `${target.size}x${target.size}`, `png32:${target.outPath}`],
+      { stdio: 'pipe', timeout: 20_000 },
+    );
+    if (res.status !== 0 || !existsSync(target.outPath)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function rasterizePngTargetsViaPowerShell(inputPngPath, targets) {
+  if (process.platform !== 'win32' || !existsSync(inputPngPath) || !Array.isArray(targets) || targets.length === 0) {
+    return false;
+  }
+  const psScript = `
+Add-Type -AssemblyName System.Drawing
+$src = [System.Drawing.Image]::FromFile($env:OM_ICON_SRC)
+try {
+  $targets = $env:OM_ICON_TARGETS | ConvertFrom-Json
+  foreach ($t in $targets) {
+    $size = [int]$t.size
+    $bmp = New-Object System.Drawing.Bitmap($size, $size)
+    try {
+      $g = [System.Drawing.Graphics]::FromImage($bmp)
+      try {
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.Clear([System.Drawing.Color]::Transparent)
+        $g.DrawImage($src, 0, 0, $size, $size)
+      } finally {
+        $g.Dispose()
+      }
+      $bmp.Save($t.outPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+      $bmp.Dispose()
+    }
+  }
+} finally {
+  $src.Dispose()
+}
+`;
+  const res = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript], {
     env: {
       ...process.env,
-      OM_SHARP_ENTRY: sharpEntry,
-      OM_SVG_PATH: svgPath,
-      OM_TARGETS_JSON: JSON.stringify(targets),
+      OM_ICON_SRC: inputPngPath,
+      OM_ICON_TARGETS: JSON.stringify(targets),
     },
     stdio: 'pipe',
-    timeout: 25_000,
+    timeout: 30_000,
   });
   return res.status === 0 && targets.every(t => existsSync(t.outPath));
 }
@@ -526,14 +610,18 @@ export function buildDesktopIcons({
   let rasterized = false;
   if (existsSync(targetSvg)) {
     if (process.platform === 'darwin') {
-      rasterized = rasterizeSvgViaQuickLook(targetSvg, targetPng, 1024) || rasterizeSvgViaElectron(targetSvg, targetPng, 1024);
+      rasterized =
+        rasterizeSvgViaQuickLook(targetSvg, targetPng, 1024) ||
+        rasterizeTargetsViaSharp(targetSvg, [{ size: 1024, outPath: targetPng }]) ||
+        rasterizeSvgViaElectron(targetSvg, targetPng, 1024);
     } else {
       const icoTempDir = mkdtempSync(path.join(os.tmpdir(), 'om-ico-frames-'));
       try {
         const icoTargets = ICO_SIZES.map(size => ({ size, outPath: path.join(icoTempDir, `ico-${size}.png`) }));
         const allTargets = [{ size: 1024, outPath: targetPng }, ...icoTargets];
         rasterized =
-          rasterizeSvgTargetsViaSharp(targetSvg, allTargets) ||
+          rasterizeTargetsViaSharp(targetSvg, allTargets) ||
+          rasterizeTargetsViaImageMagick(targetSvg, allTargets) ||
           rasterizeSvgTargetsViaElectron(targetSvg, allTargets);
         if (rasterized) {
           preRenderedIcoFrames = icoTargets.map(t => ({ size: t.size, data: readFileSync(t.outPath) }));
@@ -553,6 +641,20 @@ export function buildDesktopIcons({
       spawnSync('sips', ['-z', '1024', '1024', targetPng, '--out', targetPng], {
         stdio: 'ignore',
       });
+    } else {
+      const icoTempDir = mkdtempSync(path.join(os.tmpdir(), 'om-ico-fallback-'));
+      try {
+        const icoTargets = ICO_SIZES.map(size => ({ size, outPath: path.join(icoTempDir, `ico-${size}.png`) }));
+        const fallbackOk =
+          rasterizeTargetsViaSharp(fallbackPng, icoTargets) ||
+          rasterizeTargetsViaImageMagick(fallbackPng, icoTargets) ||
+          rasterizePngTargetsViaPowerShell(fallbackPng, icoTargets);
+        if (fallbackOk) {
+          preRenderedIcoFrames = icoTargets.map(t => ({ size: t.size, data: readFileSync(t.outPath) }));
+        }
+      } finally {
+        rmSync(icoTempDir, { recursive: true, force: true });
+      }
     }
   }
 

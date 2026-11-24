@@ -346,9 +346,9 @@ test('desktop/electron-builder.yml defines thin-shell packaging, openmotion prot
 
   // Thin shell: no bundled app-server; mac extraResources is strictly limited to compiled Assets.car icon catalog.
   assert.equal(builderYml.includes('app-server'), false);
-  assert.equal(builderYml.includes('studio/build'), false);
   assert.match(builderYml, /CFBundleIconName:\s*AppIcon/);
-  assert.match(builderYml, /-\s*Assets\.car/);
+  assert.match(builderYml, /-\s*Assets\.car\b/);
+  assert.match(builderYml, /afterPack:\s*scripts\/after-pack\.cjs/);
 
   // Protocol registration for openmotion://.
   assert.match(builderYml, /^protocols:\s*$/m);
@@ -430,14 +430,20 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /'packages\/local-atoms\/\*\*'/);
   assert.match(workflowYml, /'packages\/signed-config\/\*\*'/);
   assert.match(workflowYml, /'packages\/observability\/\*\*'/);
+
+  // Both packaging steps receive the build-time trust anchors and the Sentry DSN.
+  for (const name of [
+    'OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI',
+    'OPENMOTION_MURMUR_APPLE_TEAM_ID',
+    'OPENMOTION_MURMUR_WIN_THUMBPRINTS',
+    'SENTRY_DESKTOP_DSN',
+    'OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN',
+  ]) {
+    assert.equal(workflowYml.split(`          ${name}:`).length - 1, 2, `${name} must be set on both packaging steps`);
+  }
+  assert.match(workflowYml, /SENTRY_DESKTOP_DSN: \$\{\{ secrets\.SENTRY_DESKTOP_DSN \}\}/);
   assert.match(workflowYml, /'packages\/design-system\/brand\/\*\*'/);
-  assert.match(workflowYml, /'scripts\/diagnostics\.mjs'/);
-  assert.match(workflowYml, /'scripts\/zip\.mjs'/);
-  assert.match(workflowYml, /'scripts\/diagnostic-redaction\.mjs'/);
   assert.match(workflowYml, /'\.github\/workflows\/desktop-release\.yml'/);
-  assert.match(workflowYml, /OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI:/);
-  assert.match(workflowYml, /OPENMOTION_MURMUR_APPLE_TEAM_ID:/);
-  assert.match(workflowYml, /OPENMOTION_MURMUR_WIN_THUMBPRINTS:/);
   assert.match(workflowYml, /workflow_dispatch:/);
   assert.match(workflowYml, /default:\s*test/);
   assert.match(workflowYml, /-\s*test\b/);
@@ -452,29 +458,38 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /-c\.buildNumber=/);
   assert.match(workflowYml, /-c\.buildVersion=/);
 
-  // Per-architecture matrix jobs: macOS arm64, macOS x64, Windows x64.
-  assert.match(workflowYml, /label:\s*macOS arm64/);
-  assert.match(workflowYml, /label:\s*macOS x64/);
-  assert.match(workflowYml, /label:\s*Windows x64/);
-  assert.match(workflowYml, /os:\s*macos-15/);
-  assert.match(workflowYml, /os:\s*windows-latest/);
-  assert.match(workflowYml, /pack_script:\s*pack:mac:arm64/);
-  assert.match(workflowYml, /pack_script:\s*pack:mac:x64/);
-  assert.match(workflowYml, /pack_script:\s*pack:win:x64/);
+  // Per-architecture matrix definitions: macOS arm64, optional macOS x64, Windows x64.
+  assert.match(workflowYml, /label:\s*"?macOS arm64"?/);
+  assert.match(workflowYml, /label:\s*"?macOS x64"?/);
+  assert.match(workflowYml, /label:\s*"?Windows x64"?/);
+  assert.match(workflowYml, /os:\s*"?macos-26"?/);
+  assert.match(workflowYml, /Assets\.car/);
+  assert.match(workflowYml, /os:\s*"?windows-latest"?/);
+  assert.match(workflowYml, /pack_script:\s*"?pack:mac:arm64"?/);
+  assert.match(workflowYml, /pack_script:\s*"?pack:mac:x64"?/);
+  assert.match(workflowYml, /pack_script:\s*"?pack:win:x64"?/);
 
-  // Apple Developer ID signing & notarization env wiring (org-level secrets with fallback).
+  // Apple Developer ID signing & fast notarization hook wiring (org-level secrets with fallback).
   assert.match(workflowYml, /CSC_LINK:.*APPLE_SIGNING_CERTIFICATE_BASE64/);
   assert.match(workflowYml, /CSC_KEY_PASSWORD:.*APPLE_SIGNING_CERTIFICATE_PASSWORD/);
   assert.match(workflowYml, /APPLE_ID:/);
   assert.match(workflowYml, /APPLE_APP_SPECIFIC_PASSWORD:/);
   assert.match(workflowYml, /APPLE_TEAM_ID:/);
   assert.match(workflowYml, /APPLE_API_KEY:/);
+  assert.match(workflowYml, /-c\.afterSign=scripts\/notarize\.cjs/);
 
-  // Fast single-runner verification & Electron/electron-builder binary caching.
-  assert.match(workflowYml, /verify-desktop:/);
+  // Parallel DAG (prepare -> verify-desktop || build-desktop -> publish-manifests), sparse checkout, and binary caching.
+  assert.match(workflowYml, /^  prepare:/m);
+  assert.match(workflowYml, /^  verify-desktop:/m);
+  assert.match(workflowYml, /^  publish-manifests:/m);
+  assert.match(workflowYml, /needs:\s*\[prepare,\s*verify-desktop,\s*build-desktop\]/);
+  assert.match(workflowYml, /sparse-checkout:/);
   assert.match(workflowYml, /ELECTRON_SKIP_BINARY_DOWNLOAD:\s*'1'/);
   assert.match(workflowYml, /uses:\s*actions\/cache@v4/);
   assert.match(workflowYml, /desktop\/package-lock\.json/);
+  assert.match(workflowYml, /-c\.win\.target=nsis/);
+  assert.match(workflowYml, /\$\{EXTRA_BUILDER_ARGS\[@\]\+"\$\{EXTRA_BUILDER_ARGS\[@\]\}"\}/);
+  assert.match(workflowYml, /max_concurrent_requests/);
 
   // No GitHub Actions artifact upload or GitHub Release binary upload.
   assert.equal(workflowYml.includes('upload-artifact'), false);
@@ -497,6 +512,130 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /FEISHU_DESKTOP_NOTIFY_ENABLED/);
   assert.match(workflowYml, /latest-meta\.json/);
   assert.match(workflowYml, /notify-feishu-release\.mjs/);
+});
+
+test('desktop/scripts/notarize.cjs skips non-darwin or OM_SKIP_NOTARIZE and resolves Apple credentials', async () => {
+  const { createRequire } = await import('node:module');
+  const req = createRequire(import.meta.url);
+  const notarizeHook = req(path.join(desktopRoot, 'scripts', 'notarize.cjs'));
+
+  const nonDarwin = await notarizeHook({ electronPlatformName: 'win32' });
+  assert.deepEqual(nonDarwin, { skipped: true, reason: 'non-darwin' });
+
+  const prevSkip = process.env.OM_SKIP_NOTARIZE;
+  process.env.OM_SKIP_NOTARIZE = '1';
+  try {
+    const skipped = await notarizeHook({ electronPlatformName: 'darwin' });
+    assert.deepEqual(skipped, { skipped: true, reason: 'skip-env' });
+  } finally {
+    if (prevSkip === undefined) {
+      delete process.env.OM_SKIP_NOTARIZE;
+    } else {
+      process.env.OM_SKIP_NOTARIZE = prevSkip;
+    }
+  }
+
+  assert.equal(
+    notarizeHook.resolveNotaryCredentials({
+      APPLE_ID: 'dev@example.com',
+      APPLE_APP_SPECIFIC_PASSWORD: 'secret',
+      APPLE_TEAM_ID: 'TEAM123',
+    })?.mode,
+    'apple-id',
+  );
+  assert.equal(
+    notarizeHook.resolveNotaryCredentials({
+      APPLE_API_KEY: '/tmp/key.p8',
+      APPLE_API_KEY_ID: 'KEY123',
+      APPLE_API_ISSUER: 'ISSUER123',
+    })?.mode,
+    'api-key',
+  );
+  assert.equal(notarizeHook.resolveNotaryCredentials({}), null);
+});
+
+test('desktop/scripts/sign-mac.cjs detects Mach-O binaries, layers bottom-up, and caps concurrency at 6', async () => {
+  const { createRequire } = await import('node:module');
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const os = await import('node:os');
+  const req = createRequire(import.meta.url);
+  const signMac = req(path.join(desktopRoot, 'scripts', 'sign-mac.cjs'));
+
+  const builderYml = readFileSync(path.join(desktopRoot, 'electron-builder.yml'), 'utf8');
+  assert.match(builderYml, /^\s+sign:\s*scripts\/sign-mac\.cjs$/m);
+  assert.equal(signMac.resolveConcurrency({}), 6);
+  assert.equal(signMac.resolveConcurrency({ OM_CODESIGN_CONCURRENCY: '4' }), 4);
+
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'om-sign-mac-test-'));
+  try {
+    const macho64 = path.join(tmpDir, 'bin64');
+    writeFileSync(macho64, Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01]));
+    const fatMacho = path.join(tmpDir, 'fat');
+    writeFileSync(fatMacho, Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x02]));
+    const javaClass = path.join(tmpDir, 'Fake.class');
+    writeFileSync(javaClass, Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x37]));
+    const pakFile = path.join(tmpDir, 'locale.pak');
+    writeFileSync(pakFile, Buffer.from([0x05, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04]));
+
+    assert.equal(signMac.isMachOFile(macho64), true);
+    assert.equal(signMac.isMachOFile(fatMacho), true);
+    assert.equal(signMac.isMachOFile(javaClass), false);
+    assert.equal(signMac.isMachOFile(pakFile), false);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  const waves = signMac.groupSigningLayers([
+    '/App.app/Contents/Frameworks/Electron Framework.framework',
+    '/App.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib',
+    '/App.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler',
+    '/App.app/Contents/Frameworks/Squirrel.framework',
+    '/App.app/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt',
+    '/App.app/Contents/Frameworks/Helper.app',
+  ]);
+  assert.equal(waves.length, 2);
+  assert.deepEqual(waves[0], [
+    '/App.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler',
+    '/App.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib',
+    '/App.app/Contents/Frameworks/Helper.app',
+    '/App.app/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt',
+  ]);
+  assert.deepEqual(waves[1], [
+    '/App.app/Contents/Frameworks/Electron Framework.framework',
+    '/App.app/Contents/Frameworks/Squirrel.framework',
+  ]);
+
+  let active = 0;
+  let peak = 0;
+  const items = Array.from({ length: 18 }, (_, i) => i);
+  const out = await signMac.runWithConcurrency(items, 6, async (item) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    active--;
+    return item * 2;
+  });
+  assert.equal(peak <= 6 && peak >= 2, true, `expected bounded concurrency <=6, got peak=${peak}`);
+  assert.deepEqual(out, items.map((i) => i * 2));
+
+  const args = signMac.buildCodesignArgs(
+    '/App.app',
+    { identity: 'ABC123', keychain: '/tmp/build.keychain' },
+    { hardenedRuntime: true, entitlements: '/tmp/entitlements.mac.plist' },
+  );
+  assert.deepEqual(args, [
+    '--sign',
+    'ABC123',
+    '--force',
+    '--keychain',
+    '/tmp/build.keychain',
+    '--timestamp',
+    '--options',
+    'runtime',
+    '--entitlements',
+    '/tmp/entitlements.mac.plist',
+    '/App.app',
+  ]);
 });
 
 test('resolvePackagedReleaseChannel preserves test channel from bundle metadata even for clean semver versions', () => {
@@ -551,14 +690,12 @@ test('resolveDesktopReleaseVersion implements Scheme A monotonic SemVer and Wind
   assert.equal(stableNext.version, '0.2.2');
   assert.equal(stableNext.buildVersion, '0.2.2.11');
 
-  // Strict SemVer monotonicity: 0.2.1 < 0.2.2-test.1 < 0.2.2-test.1.2 < 0.2.2-test.2 < 0.2.2-test.10 < 0.2.2.
   assert.ok(compareSemver('0.2.1', test1.version) < 0);
   assert.ok(compareSemver(test1.version, test1Retry.version) < 0);
   assert.ok(compareSemver(test1Retry.version, test2.version) < 0);
   assert.ok(compareSemver(test2.version, test10.version) < 0);
   assert.ok(compareSemver(test10.version, stableNext.version) < 0);
 
-  // Rejects invalid base versions, channels, and runNumbers exceeding Windows PE 16-bit limit.
   assert.throws(() => resolveDesktopReleaseVersion({ baseVersion: '0.2.1-test.1', channel: 'test', runNumber: 1 }));
   assert.throws(() => resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'beta', runNumber: 1 }));
   assert.throws(() => resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 70000 }));
@@ -588,7 +725,216 @@ test('DesktopUpdaterController enables allowPrerelease on test channel and disab
   assert.equal(stableFake.updater.channel, 'stable');
 });
 
-test('notify-feishu-release builds signed interactive card payload, validates Feishu hosts, and handles responses', async () => {
+test('notify-feishu-release builds signed Card 2.0 payload, respects includeMacX64, and validates hosts', async () => {
+  assert.throws(() => validateFeishuWebhookUrl('https://evil.example.com/open-apis/bot/v2/hook/abc'));
+  assert.throws(() => validateFeishuWebhookUrl('http://open.feishu.cn/open-apis/bot/v2/hook/abc'));
+  assert.equal(
+    validateFeishuWebhookUrl('https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id'),
+    'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id',
+  );
+
+  const fullPayload = buildDesktopReleaseCardPayload({
+    channel: 'test',
+    version: '0.2.2-test.2',
+    buildVersion: '0.2.2.2',
+    branch: 'desktop-test',
+    commitSha: '5cdd6dec555422fc',
+    commitSubject: 'fix(desktop-ci): guard bash 3.2 empty arrays',
+    actor: 'heggria',
+    runUrl: 'https://github.com/nexu-io/openmotion/actions/runs/45325228402',
+    includeMacX64: true,
+    secret: 'test-secret',
+    timestampSeconds: 1700000000,
+  });
+  assert.equal(fullPayload.msg_type, 'interactive');
+  assert.equal(fullPayload.card.schema, '2.0');
+  assert.equal(fullPayload.card.header.template, 'blue');
+  assert.equal(fullPayload.card.header.text_tag_list[0].text.content, 'TEST');
+  assert.equal(fullPayload.sign, signFeishuWebhook('test-secret', '1700000000'));
+  const fullText = JSON.stringify(fullPayload.card);
+  assert.equal(fullText.includes('`'), false);
+  assert.match(fullText, /OpenDesign-0\.2\.2-test\.2-mac-arm64\.dmg/);
+  assert.match(fullText, /OpenDesign-0\.2\.2-test\.2-mac-x64\.dmg/);
+  assert.match(fullText, /OpenDesign-Setup-0\.2\.2-test\.2-win-x64\.exe/);
+  assert.match(fullText, /OpenDesign-Portable-0\.2\.2-test\.2-win-x64\.exe/);
+  assert.match(fullText, /内网极速下载（Mirror）/);
+  assert.match(
+    fullText,
+    /https:\/\/mirror\.inner\.nexu\.space\/f\/od-next\/test\/0\.2\.2-test\.2\/OpenDesign-0\.2\.2-test\.2-mac-arm64\.dmg/,
+  );
+  assert.match(
+    fullText,
+    /https:\/\/mirror\.inner\.nexu\.space\/f\/od-next\/test\/0\.2\.2-test\.2\/OpenDesign-Setup-0\.2\.2-test\.2-win-x64\.exe/,
+  );
+  assert.match(fullText, /https:\/\/ops\.inner\.nexu\.space\/mirror\/search\?q=od-next%20test/);
+
+  const armOnlyPayload = buildDesktopReleaseCardPayload({
+    channel: 'test',
+    version: '0.2.2-test.3',
+    includeMacX64: false,
+  });
+  const armOnlyText = JSON.stringify(armOnlyPayload.card);
+  assert.match(armOnlyText, /OpenDesign-0\.2\.2-test\.3-mac-arm64\.dmg/);
+  assert.equal(armOnlyText.includes('mac-x64.dmg'), false);
+  assert.match(
+    armOnlyText,
+    /mirror\.inner\.nexu\.space\/f\/od-next\/test\/0\.2\.2-test\.3\/OpenDesign-0\.2\.2-test\.3-mac-arm64\.dmg/,
+  );
+
+  const noMirrorText = JSON.stringify(
+    buildDesktopReleaseCardPayload({
+      channel: 'test',
+      version: '0.2.2-test.3',
+      mirrorOrigin: 'none',
+      mirrorConsoleUrl: '',
+    }).card,
+  );
+  assert.equal(noMirrorText.includes('内网极速下载'), false);
+  assert.throws(() =>
+    buildDesktopReleaseCardPayload({
+      channel: 'test',
+      version: '0.2.2-test.3',
+      mirrorOrigin: 'http://mirror.inner.nexu.space',
+    }),
+  );
+
+  const result = await sendFeishuReleaseNotification({
+    webhookUrl: 'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id',
+    channel: 'test',
+    version: '0.2.2-test.2',
+    fetchImpl: async () => new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 }),
+  });
+  assert.equal(result.ok, true);
+});
+
+test('formatStructuredReleaseChangelog groups conventional commits and honors manual release notes', () => {
+  const grouped = formatStructuredReleaseChangelog({
+    commits: [
+      'Merge branch main into desktop-test',
+      'fix(desktop-auth): repair IPC sign-in serialization',
+      'feat(desktop): structured changelog block',
+      'perf(desktop): parallel macOS signing',
+      'test(desktop): noise test',
+    ],
+  });
+  assert.equal(grouped.source, 'commits');
+  assert.match(grouped.markdown, /\*\*新增\*\*/);
+  assert.match(grouped.markdown, /\*\*修复\*\*/);
+  assert.match(grouped.markdown, /\*\*优化\*\*/);
+  assert.equal(grouped.markdown.includes('Merge branch'), false);
+  assert.equal(grouped.markdown.includes('noise test'), false);
+
+  const manual = formatStructuredReleaseChangelog({
+    commits: ['fix(desktop): internal'],
+    manualNotes: '- 修复客户端登录\n- 优化启动体验',
+  });
+  assert.equal(manual.source, 'manual');
+  assert.match(manual.markdown, /修复客户端登录/);
+});
+
+test('resolveBuildTrustAnchors embeds a validated Sentry DSN and can require one', () => {
+  const empty = resolveBuildTrustAnchors({});
+  assert.equal(empty.sentryDsn, '');
+  assert.equal(JSON.parse(empty.define.__OPENMOTION_DESKTOP_SENTRY_DSN__), '');
+
+  const dsn = 'https://publickey123@o1.ingest.example.com/42';
+  const resolved = resolveBuildTrustAnchors({ SENTRY_DESKTOP_DSN: ` ${dsn} ` });
+  assert.equal(resolved.sentryDsn, dsn);
+  assert.equal(JSON.parse(resolved.define.__OPENMOTION_DESKTOP_SENTRY_DSN__), dsn);
+
+  for (const bad of [
+    'not-a-dsn',
+    'http://key@example.com/42',
+    'https://example.com/42',
+    'https://key@example.com/project',
+    'https://key@example.com/42?x=1',
+  ]) {
+    assert.throws(
+      () => resolveBuildTrustAnchors({ SENTRY_DESKTOP_DSN: bad }),
+      error => {
+        assert.match(error.message, /Invalid SENTRY_DESKTOP_DSN/);
+        assert.ok(!error.message.includes(bad));
+        return true;
+      },
+    );
+  }
+
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN: '1' }),
+    /SENTRY_DESKTOP_DSN is required/,
+  );
+  assert.equal(
+    resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN: '1', SENTRY_DESKTOP_DSN: dsn }).sentryDsn,
+    dsn,
+  );
+});
+
+test('resolveBuildTrustAnchors validates and normalizes Ed25519 root key, Apple Team ID, and Windows thumbprints', () => {
+  const empty = resolveBuildTrustAnchors({});
+  assert.equal(empty.rootPublicKeySpki, '');
+  assert.equal(empty.murmurAppleTeamId, '');
+  assert.equal(empty.murmurWinThumbprints, '');
+
+  const pair = generateEd25519KeyPair();
+  const sha1 = 'a'.repeat(40);
+  const sha256 = 'B'.repeat(64);
+  const fromPem = resolveBuildTrustAnchors({
+    OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: pair.publicKeyPem,
+    OPENMOTION_MURMUR_APPLE_TEAM_ID: 'AB12CD34EF',
+    OPENMOTION_MURMUR_WIN_THUMBPRINTS: ` ${sha1}, ${sha256} `,
+  });
+  assert.equal(fromPem.rootPublicKeySpki, pair.publicKeySpkiBase64);
+  assert.equal(fromPem.murmurAppleTeamId, 'AB12CD34EF');
+  assert.equal(fromPem.murmurWinThumbprints, `${sha1.toUpperCase()},${sha256}`);
+  assert.equal(
+    JSON.parse(fromPem.define.__OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__),
+    pair.publicKeySpkiBase64,
+  );
+
+  const fromBase64 = resolveBuildTrustAnchors({
+    OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: pair.publicKeySpkiBase64,
+  });
+  assert.equal(fromBase64.rootPublicKeySpki, pair.publicKeySpkiBase64);
+
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: 'not-a-key' }),
+    /Invalid OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI/,
+  );
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_MURMUR_APPLE_TEAM_ID: 'invalid-id' }),
+    /Invalid OPENMOTION_MURMUR_APPLE_TEAM_ID/,
+  );
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_MURMUR_WIN_THUMBPRINTS: '1234' }),
+    /Invalid OPENMOTION_MURMUR_WIN_THUMBPRINTS/,
+  );
+});
+
+test('desktop/config channel payloads pass bounds validation and desktop-signed-config.yml enforces sign-verify-publish', () => {
+  for (const channel of ['test', 'stable']) {
+    const payloadPath = path.join(desktopRoot, 'config', `${channel}.payload.json`);
+    const payload = JSON.parse(readFileSync(payloadPath, 'utf8'));
+    assert.deepEqual(
+      validateSignedConfigPayloadBounds(payload, { channel }),
+      [],
+      `${channel}.payload.json must pass shell security bounds`,
+    );
+  }
+
+  const workflowYml = readFileSync(
+    path.join(repoRoot, '.github', 'workflows', 'desktop-signed-config.yml'),
+    'utf8',
+  );
+  assert.match(workflowYml, /desktop\/config\/test\.payload\.json/);
+  assert.match(workflowYml, /refs\/heads\/main/);
+  assert.match(workflowYml, /refs\/heads\/desktop-test/);
+  assert.match(workflowYml, /scripts\/sign-desktop-config\.mjs sign-config/);
+  assert.match(workflowYml, /scripts\/sign-desktop-config\.mjs verify-config/);
+  assert.match(workflowYml, /open-motion\/desktop\/config\/\$\{CHANNEL\}\.json/);
+  assert.match(workflowYml, /no-cache, max-age=0/);
+});
+
+test('notify-feishu-release groups a structured changelog and links the previous version', async () => {
   assert.throws(() => validateFeishuWebhookUrl('https://evil.example.com/open-apis/bot/v2/hook/abc'));
   assert.throws(() => validateFeishuWebhookUrl('http://open.feishu.cn/open-apis/bot/v2/hook/abc'));
   assert.equal(
@@ -712,106 +1058,4 @@ test('notify-feishu-release builds signed interactive card payload, validates Fe
       }),
     /sign match fail/,
   );
-});
-
-test('resolveBuildTrustAnchors embeds a validated Sentry DSN and can require one', () => {
-  const empty = resolveBuildTrustAnchors({});
-  assert.equal(empty.sentryDsn, '');
-  assert.equal(JSON.parse(empty.define.__OPENMOTION_DESKTOP_SENTRY_DSN__), '');
-
-  const dsn = 'https://publickey123@o1.ingest.example.com/42';
-  const resolved = resolveBuildTrustAnchors({ SENTRY_DESKTOP_DSN: ` ${dsn} ` });
-  assert.equal(resolved.sentryDsn, dsn);
-  assert.equal(JSON.parse(resolved.define.__OPENMOTION_DESKTOP_SENTRY_DSN__), dsn);
-
-  for (const bad of [
-    'not-a-dsn',
-    'http://key@example.com/42',
-    'https://example.com/42',
-    'https://key@example.com/project',
-    'https://key@example.com/42?x=1',
-  ]) {
-    assert.throws(
-      () => resolveBuildTrustAnchors({ SENTRY_DESKTOP_DSN: bad }),
-      error => {
-        assert.match(error.message, /Invalid SENTRY_DESKTOP_DSN/);
-        assert.ok(!error.message.includes(bad));
-        return true;
-      },
-    );
-  }
-
-  assert.throws(
-    () => resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN: '1' }),
-    /SENTRY_DESKTOP_DSN is required/,
-  );
-  assert.equal(
-    resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_REQUIRE_SENTRY_DSN: '1', SENTRY_DESKTOP_DSN: dsn }).sentryDsn,
-    dsn,
-  );
-});
-
-test('resolveBuildTrustAnchors validates and normalizes Ed25519 root key, Apple Team ID, and Windows thumbprints', () => {
-  const empty = resolveBuildTrustAnchors({});
-  assert.equal(empty.rootPublicKeySpki, '');
-  assert.equal(empty.murmurAppleTeamId, '');
-  assert.equal(empty.murmurWinThumbprints, '');
-
-  const pair = generateEd25519KeyPair();
-  const sha1 = 'a'.repeat(40);
-  const sha256 = 'B'.repeat(64);
-  const fromPem = resolveBuildTrustAnchors({
-    OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: pair.publicKeyPem,
-    OPENMOTION_MURMUR_APPLE_TEAM_ID: 'AB12CD34EF',
-    OPENMOTION_MURMUR_WIN_THUMBPRINTS: ` ${sha1}, ${sha256} `,
-  });
-  assert.equal(fromPem.rootPublicKeySpki, pair.publicKeySpkiBase64);
-  assert.equal(fromPem.murmurAppleTeamId, 'AB12CD34EF');
-  assert.equal(fromPem.murmurWinThumbprints, `${sha1.toUpperCase()},${sha256}`);
-  assert.equal(
-    JSON.parse(fromPem.define.__OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__),
-    pair.publicKeySpkiBase64,
-  );
-
-  const fromBase64 = resolveBuildTrustAnchors({
-    OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: pair.publicKeySpkiBase64,
-  });
-  assert.equal(fromBase64.rootPublicKeySpki, pair.publicKeySpkiBase64);
-
-  assert.throws(
-    () => resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: 'not-a-key' }),
-    /Invalid OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI/,
-  );
-  assert.throws(
-    () => resolveBuildTrustAnchors({ OPENMOTION_MURMUR_APPLE_TEAM_ID: 'invalid-id' }),
-    /Invalid OPENMOTION_MURMUR_APPLE_TEAM_ID/,
-  );
-  assert.throws(
-    () => resolveBuildTrustAnchors({ OPENMOTION_MURMUR_WIN_THUMBPRINTS: '1234' }),
-    /Invalid OPENMOTION_MURMUR_WIN_THUMBPRINTS/,
-  );
-});
-
-test('desktop/config channel payloads pass bounds validation and desktop-signed-config.yml enforces sign-verify-publish', () => {
-  for (const channel of ['test', 'stable']) {
-    const payloadPath = path.join(desktopRoot, 'config', `${channel}.payload.json`);
-    const payload = JSON.parse(readFileSync(payloadPath, 'utf8'));
-    assert.deepEqual(
-      validateSignedConfigPayloadBounds(payload, { channel }),
-      [],
-      `${channel}.payload.json must pass shell security bounds`,
-    );
-  }
-
-  const workflowYml = readFileSync(
-    path.join(repoRoot, '.github', 'workflows', 'desktop-signed-config.yml'),
-    'utf8',
-  );
-  assert.match(workflowYml, /desktop\/config\/test\.payload\.json/);
-  assert.match(workflowYml, /refs\/heads\/main/);
-  assert.match(workflowYml, /refs\/heads\/desktop-test/);
-  assert.match(workflowYml, /scripts\/sign-desktop-config\.mjs sign-config/);
-  assert.match(workflowYml, /scripts\/sign-desktop-config\.mjs verify-config/);
-  assert.match(workflowYml, /open-motion\/desktop\/config\/\$\{CHANNEL\}\.json/);
-  assert.match(workflowYml, /no-cache, max-age=0/);
 });

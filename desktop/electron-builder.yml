@@ -13,6 +13,11 @@ files:
 
 asar: true
 afterPack: scripts/after-pack.cjs
+npmRebuild: false
+electronLanguages:
+  - en
+  - zh_CN
+  - ja
 
 protocols:
   - name: OpenDesign
@@ -38,6 +43,7 @@ mac:
       to: .
       filter:
         - Assets.car
+  sign: scripts/sign-mac.cjs
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -48,6 +54,7 @@ mac:
     - target: zip
 
 dmg:
+  format: ULFO
   contents:
     - x: 130
       y: 220

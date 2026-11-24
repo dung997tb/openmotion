@@ -135,6 +135,7 @@ export async function buildDesktop(options = {}) {
   const anchors = resolveBuildTrustAnchors(options.env ?? process.env);
   const distDir = path.join(desktopDir, 'dist');
   const distBrandDir = path.join(distDir, 'brand');
+  const desktopNodeModules = path.join(desktopDir, 'node_modules');
   mkdirSync(distDir, { recursive: true });
   mkdirSync(distBrandDir, { recursive: true });
 
@@ -147,6 +148,7 @@ export async function buildDesktop(options = {}) {
       format: 'esm',
       target: 'node22',
       sourcemap: true,
+      nodePaths: [desktopNodeModules],
       external: ['electron', 'electron-updater'],
       define: anchors.define,
       banner: {
@@ -161,6 +163,7 @@ export async function buildDesktop(options = {}) {
       format: 'cjs',
       target: 'node22',
       sourcemap: true,
+      nodePaths: [desktopNodeModules],
       external: ['electron'],
     }),
   ]);
