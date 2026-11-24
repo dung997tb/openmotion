@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, nativeTheme, safeStorage, shell } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,6 +35,7 @@ import {
 import { SignedConfigManager } from '../../packages/signed-config/index.ts';
 import { DesktopAuthHandoffManager } from './auth-handoff.ts';
 import { createElectronSafeSecretStore } from './safe-secret-store.ts';
+import { createDesktopSentryReporter } from './sentry.ts';
 import { DesktopTelemetryCollector } from './telemetry.ts';
 import { validateHostMethodParams } from '../../shared/desktop-schemas.ts';
 import type { DesktopTelemetryRecordInput } from '../../shared/desktop-telemetry.ts';
@@ -167,6 +168,18 @@ const telemetry = new DesktopTelemetryCollector({
   allowLocalDevLoopback,
 });
 const appStartupStartedAt = Date.now();
+
+const desktopSentry = createDesktopSentryReporter({
+  dsn: process.env.SENTRY_DESKTOP_DSN ?? process.env.OPENMOTION_DESKTOP_SENTRY_DSN,
+  environment: process.env.SENTRY_ENVIRONMENT,
+  release: `openmotion-desktop@${app.getVersion()}`,
+  channel: releaseChannel,
+  platform,
+  arch: process.arch,
+  shellVersion: app.getVersion(),
+  redactPaths: [distDir, dataDir, logDir, os.homedir()],
+});
+desktopSentry.startCrashReporter(crashReporter);
 
 logger.markSessionStarted({
   version: app.getVersion(),
@@ -324,6 +337,10 @@ const registry = new CapabilityRegistry({
   onInternalError: ({ capability, method, error }) => {
     logger.error('main', `Capability error in ${capability}.${method}`, {
       error: error instanceof Error ? error.message : String(error),
+    });
+    void desktopSentry.captureException(error, {
+      area: 'capability',
+      tags: { capability, method },
     });
   },
 });
@@ -774,6 +791,7 @@ function registerCapabilities(): void {
             params,
           );
           if (!checked.ok) return checked;
+          desktopSentry.setEnabled(checked.data.enabled);
           return hostOk(telemetry.setEnabled(checked.data.enabled));
         },
       },
@@ -1027,6 +1045,10 @@ function createMainWindow(): BrowserWindow {
       exitCode: details.exitCode,
     });
     logger.writeCrashMarker('renderer-gone', details);
+    void desktopSentry.captureMessage(`Renderer process gone: ${details.reason}`, 'fatal', {
+      area: 'renderer',
+      extra: { reason: details.reason, exitCode: details.exitCode },
+    });
   });
 
   return win;
@@ -1123,12 +1145,14 @@ async function requestQuitWithConfirmation(): Promise<void> {
 process.on('uncaughtException', error => {
   logger.error('main', 'Uncaught exception', { message: error.message, stack: error.stack });
   logger.writeCrashMarker('uncaught-exception', error);
+  void desktopSentry.captureException(error, { area: 'uncaughtException' });
 });
 
 process.on('unhandledRejection', reason => {
   const message = reason instanceof Error ? reason.message : String(reason);
   logger.error('main', 'Unhandled rejection', { message });
   logger.writeCrashMarker('unhandled-rejection', reason);
+  void desktopSentry.captureException(reason, { area: 'unhandledRejection' });
 });
 
 app.on('open-url', (event, rawUrl) => {

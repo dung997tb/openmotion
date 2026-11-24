@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { setObservabilityContext } from '@openmotion/observability/browser';
 import {
   HOST_CAPABILITIES,
   hostErr,
@@ -414,15 +415,54 @@ export function notifyDesktopRendererReady(): void {
     .catch(() => {});
 }
 
+function syncHostObservabilityContext(info: HostRuntimeInfo | null): void {
+  if (!info) {
+    setObservabilityContext({
+      hostKind: 'web',
+      shellVersion: null,
+      hostPlatform: null,
+      releaseChannel: null,
+    });
+    return;
+  }
+  setObservabilityContext({
+    hostKind: info.hostKind,
+    shellVersion: info.shellVersion,
+    hostPlatform: info.platform,
+    releaseChannel: info.releaseChannel,
+  });
+}
+
 export function bindDesktopHost(options?: { deferReady?: boolean }): () => void {
   const bridge = getDesktopHostBridge();
   if (!bridge) {
-    return () => {};
+    const syncConnectScriptContext = () => {
+      const localBridge = getLocalConnectBridge();
+      if (!localBridge) {
+        syncHostObservabilityContext(null);
+        return;
+      }
+      void localBridge
+        .info()
+        .then(info => syncHostObservabilityContext(info))
+        .catch(() => {});
+    };
+    syncConnectScriptContext();
+    return subscribeLocalConnectBridge(syncConnectScriptContext);
   }
   let active = true;
   let unsubscribe = () => {};
   desktopReadyGeneration += 1;
   const generation = desktopReadyGeneration;
+
+  void bridge
+    .info()
+    .then(info => {
+      if (active) {
+        syncHostObservabilityContext(info);
+      }
+    })
+    .catch(() => {});
 
   void hasHostCapability(HOST_CAPABILITIES.WINDOW, '1.0.0', bridge)
     .then(supported => {
