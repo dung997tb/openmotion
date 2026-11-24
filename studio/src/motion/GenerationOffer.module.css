@@ -91,6 +91,10 @@
   background-image: linear-gradient(90deg, var(--motion-black-friday-night) 4%, transparent 90%), var(--offer-art);
 }
 
+.subscriptionCard[data-guide='upgrade'] {
+  padding: var(--motion-space-32) clamp(var(--motion-space-20), 5%, var(--motion-space-32));
+}
+
 .subscriptionHeading {
   display: flex;
   flex-wrap: wrap;
