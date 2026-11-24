@@ -8,6 +8,7 @@ vi.mock('./AccountSettings', () => ({ useAccountSummary: () => ({ account: { sta
 vi.mock('./useMediaCatalog', () => ({ useMediaCatalog: () => ({ catalog: { models: [], status: { providers: [{ id: 'gemini', label: 'Gemini', available: false }] } }, failed: false, retry: () => {} }) }));
 vi.mock('./tracking', () => ({ trackMotion: vi.fn(async () => 'queued') }));
 import { ModelHub } from './ModelHub';
+import { findModelHub } from './modelHubs';
 import { I18nProvider } from '../i18n/I18n';
 import modelHubUi from '../i18n/model-hub-ui.json';
 
@@ -128,5 +129,41 @@ it('localizes Seedance 2.5 and GPT Image 2.6 hubs across all 10 non-English loca
     }
   } finally {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+  }
+});
+
+it('only mounts showcase card video playback on hover/focus and stops when leaving', async () => {
+  const seedance = findModelHub('seedance-2-5')!;
+  const firstCase = seedance.cases![0];
+  const originalVideo = firstCase.video;
+  const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+  const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  firstCase.video = 'https://example.com/seedance-preview.mp4';
+  try {
+    container = document.createElement('div'); document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(
+      <I18nProvider initialLocale="zh-CN">
+        <ModelHub id="seedance-2-5" onExplore={() => {}} onProvider={() => {}} onModel={() => {}} onUse={() => {}} onSettings={() => {}} />
+      </I18nProvider>,
+    ));
+
+    const firstCard = container.querySelector<HTMLElement>('.om-hub-showcase-card')!;
+    // Resting state: never autoplays video
+    expect(firstCard.querySelector('video')).toBeNull();
+
+    // Hover/focus mounts and plays the preview video
+    await act(async () => firstCard.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    const hoverVideo = firstCard.querySelector<HTMLVideoElement>('video.om-hub-showcase-video');
+    expect(hoverVideo).not.toBeNull();
+    expect(hoverVideo!.getAttribute('src')).toBe('https://example.com/seedance-preview.mp4');
+
+    // Leaving unmounts the video and returns to the static poster
+    await act(async () => firstCard.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
+    expect(firstCard.querySelector('video')).toBeNull();
+  } finally {
+    firstCase.video = originalVideo;
+    playSpy.mockRestore();
+    pauseSpy.mockRestore();
   }
 });

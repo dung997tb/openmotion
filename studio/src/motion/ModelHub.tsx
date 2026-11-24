@@ -63,6 +63,35 @@ function aspectRatioLabel(ratio: number): string {
   return '16:9';
 }
 
+function ShowcaseHoverVideo({ src, poster }: { src: string; poster: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video || failed) return;
+    void video.play().catch(() => { /* Static poster stays visible if autoplay is blocked. */ });
+    return () => {
+      video.pause();
+    };
+  }, [src, failed]);
+  if (failed) return null;
+  return (
+    <video
+      ref={ref}
+      className="om-hub-showcase-video"
+      src={src}
+      poster={poster}
+      muted
+      loop
+      playsInline
+      autoPlay
+      preload="metadata"
+      aria-hidden="true"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 /** Aggregates one model family: what it is, what to make with it, and whether this installation can use it. */
 export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, onSettings, onStartScenario, hasProject = false }: {
   id: string; hasProject?: boolean; onExplore: () => void; onProvider: (provider: string) => void; onModel: (id: string) => void;
@@ -74,6 +103,12 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
   const [query, setQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
+  const [hoveredCaseId, setHoveredCaseId] = useState<string | null>(null);
+  const [reducedMotion, setReducedMotion] = useState(() => (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ));
   const [lightboxPrompt, setLightboxPrompt] = useState('');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const showcaseRef = useRef<HTMLElement>(null);
@@ -92,7 +127,15 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
   useEffect(() => {
     setSelectedTag('all');
     setActiveCaseId(null);
+    setHoveredCaseId(null);
   }, [id]);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const pref = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = () => setReducedMotion(pref.matches);
+    pref.addEventListener('change', onChange);
+    return () => pref.removeEventListener('change', onChange);
+  }, []);
   useEffect(() => {
     if (!activeCaseId || !hub?.cases) return;
     const found = hub.cases.find(item => item.id === activeCaseId);
@@ -326,13 +369,25 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                     const itemTitle = t(item.title);
                     const isVideo = item.destination.scene.modality === 'video';
                     const kindLabel = t(isVideo ? 'Video template' : 'Image template');
+                    const playingHoverVideo = Boolean(
+                      isVideo && item.video && hoveredCaseId === item.id && !activeCaseId && !reducedMotion,
+                    );
                     return (
                       <div
                         key={item.id}
                         role="button"
                         tabIndex={0}
                         className="om-hub-showcase-card"
+                        data-playing={playingHoverVideo ? 'true' : undefined}
                         aria-label={itemTitle}
+                        onMouseEnter={() => setHoveredCaseId(item.id)}
+                        onMouseLeave={() => setHoveredCaseId(prev => (prev === item.id ? null : prev))}
+                        onFocus={() => setHoveredCaseId(item.id)}
+                        onBlur={event => {
+                          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                            setHoveredCaseId(prev => (prev === item.id ? null : prev));
+                          }
+                        }}
                         onClick={() => setActiveCaseId(item.id)}
                         onKeyDown={event => {
                           if (event.key === 'Enter' || event.key === ' ') {
@@ -343,6 +398,9 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                       >
                         <div className="om-hub-showcase-media" style={{ aspectRatio: String(item.aspectRatio) }}>
                           <img src={item.poster} alt={itemTitle} loading="lazy" />
+                          {playingHoverVideo && item.video && (
+                            <ShowcaseHoverVideo src={item.video} poster={item.poster} />
+                          )}
                           <span
                             className="om-hub-showcase-kind"
                             data-kind={isVideo ? 'video' : 'image'}
@@ -438,7 +496,20 @@ export function ModelHub({ id, onExplore, onProvider, onModel, onUse, onScene, o
                       data-portrait={activeCase.aspectRatio < 0.9 ? 'true' : undefined}
                       style={{ aspectRatio: String(activeCase.aspectRatio) }}
                     >
-                      <img src={activeCase.poster} alt={activeTitle} />
+                      {activeCase.video ? (
+                        <video
+                          key={activeCase.id}
+                          src={activeCase.video}
+                          poster={activeCase.poster}
+                          controls
+                          autoPlay={!reducedMotion}
+                          loop
+                          muted
+                          playsInline
+                        />
+                      ) : (
+                        <img src={activeCase.poster} alt={activeTitle} />
+                      )}
                     </div>
                   </div>
 

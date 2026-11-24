@@ -40,6 +40,8 @@ export interface HubShowcaseCase {
   tag: string;
   tagZh: string;
   poster: string;
+  /** Optional preview video URL; plays strictly on hover/focus in the showcase grid and inside the lightbox. */
+  video?: string;
   /** Natural width/height ratio used for staggered masonry layout (e.g. 9/16, 4/3, 16/9, 1). */
   aspectRatio: number;
   prompt: string;
