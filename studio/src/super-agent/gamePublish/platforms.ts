@@ -288,9 +288,6 @@ export const GAME_PUBLISH_PLATFORMS: readonly GamePublishPlatform[] = [
   },
 ];
 
-/** Shown once, under the platform list. App Store: Apple guideline 4.2.6; TikTok Mini Games: company accounts only, no HTML games. */
-export const UNSUPPORTED_PLATFORMS_NOTE = 'Not supported: App Store (Apple does not allow submission by app builders) and TikTok Mini Games (company accounts only)';
-
 export const LINK_PUBLISH_STEPS = ['Packaged the game (2.6 MB)', 'Created the share card and cover', 'Published the link'];
 
 export function gamePublishPlatform(id: GamePublishPlatformId | undefined): GamePublishPlatform | undefined {

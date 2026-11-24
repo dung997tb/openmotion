@@ -7,7 +7,7 @@ import { useSyncExternalStore } from 'react';
 import { completeUserStep, prepareForPlatform, publishGameLink } from './gamePublishAdapter';
 import { LINK_PUBLISH_STEPS, gamePublishPlatform, type GamePublishPlatformId } from './platforms';
 
-export type GamePublishView = 'home' | 'list' | 'step' | 'working' | 'result' | 'link-result';
+export type GamePublishView = 'list' | 'step' | 'working' | 'result';
 
 export interface GamePublishStatus {
   tone: 'idle' | 'running' | 'done';
@@ -31,6 +31,8 @@ export interface GamePublishSession {
   status: GamePublishStatus;
   linkUrl?: string;
   linkPublishing: boolean;
+  /** Also publish the game on OpenDesign (a play link) when publishing elsewhere. On by default. */
+  alsoPublishLink: boolean;
   published: GamePublishPlatformId[];
 }
 
@@ -115,23 +117,23 @@ export const gamePublishActions = {
     if (existing) {
       // The game moved to another conversation: cards left in the old one can no longer act on it.
       if (input.chatId && input.chatId !== existing.chatId) closeOpenNeedCards(existing);
-      // Reopening returns to the step in progress; a finished platform returns to the link result.
-      const home: GamePublishView = existing.linkUrl ? 'link-result' : 'home';
+      // Reopening returns to the step in progress; otherwise to the platform list.
       const view: GamePublishView = existing.view === 'result'
-        ? home
-        : existing.view === 'list' ? (stepInProgress(existing) ? 'step' : home) : existing.view;
+        ? 'list'
+        : existing.view === 'list' && stepInProgress(existing) ? 'step' : existing.view;
       update(input.artifactId, { open: true, view, chatId: input.chatId ?? existing.chatId });
       return;
     }
     sessions.set(input.artifactId, {
       ...input,
       open: true,
-      view: 'home',
+      view: 'list',
       stepIndex: 0,
       inputs: {},
       preparing: false,
       status: { tone: 'idle', key: 'Agent is ready' },
       linkPublishing: false,
+      alsoPublishLink: true,
       published: [],
     });
     emit();
@@ -153,28 +155,20 @@ export const gamePublishActions = {
     else gamePublishActions.open(input);
   },
   showList(artifactId: string) { update(artifactId, { view: 'list' }); },
-  showHome(artifactId: string) {
-    const session = sessions.get(artifactId);
-    update(artifactId, { view: session?.linkUrl ? 'link-result' : 'home' });
-  },
+  setAlsoPublishLink(artifactId: string, value: boolean) { update(artifactId, { alsoPublishLink: value }); },
   async publishLink(artifactId: string) {
     const session = sessions.get(artifactId);
     if (!session || session.linkPublishing) return;
     update(artifactId, { linkPublishing: true });
-    pushEntry(session, { kind: 'user', key: 'Publish the game link' });
     let url = '';
-    await runAgent(artifactId, 'Publishing the game link', undefined, async onLine => {
+    // Runs alongside the chosen platform: progress goes to the conversation only, never to the panel's status line or view.
+    await runAgent(artifactId, 'Also publishing on OpenDesign', undefined, async onLine => {
       ({ url } = await publishGameLink(session.gameId, LINK_PUBLISH_STEPS, { onLine }));
-    });
+    }, () => false);
     const latest = sessions.get(artifactId);
     if (!latest) return;
-    // Only move to the link result if the user is still on the link screen; never pull them out of a platform step.
-    update(artifactId, {
-      linkUrl: url,
-      linkPublishing: false,
-      ...(latest.view === 'home' ? { view: 'link-result' as const, status: { tone: 'done' as const, key: 'Agent: all done' } } : {}),
-    });
-    pushEntry(latest, { kind: 'result', title: 'Live', detail: url, action: 'Copy link', link: true });
+    update(artifactId, { linkUrl: url, linkPublishing: false });
+    pushEntry(latest, { kind: 'result', title: 'Live on OpenDesign', detail: url, action: 'Copy link', link: true });
   },
   choose(artifactId: string, platformId: GamePublishPlatformId) {
     const session = sessions.get(artifactId);
@@ -196,6 +190,8 @@ export const gamePublishActions = {
     const latest = sessions.get(artifactId)!;
     pushEntry(latest, { kind: 'user', key: 'Publish to {name}', name: platform.name });
     pushEntry(latest, { kind: 'need', platformId, stepIndex: 0, closed: false });
+    // Publishing elsewhere also publishes on OpenDesign unless the user unticked it.
+    if (latest.alsoPublishLink && !latest.linkUrl && !latest.linkPublishing) void gamePublishActions.publishLink(artifactId);
     if (platform.prepare.length) {
       void runAgent(artifactId, 'Preparing for {name}', platform.name, onLine =>
         prepareForPlatform(session.gameId, platformId, platform.prepare, { onLine }),

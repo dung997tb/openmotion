@@ -5,7 +5,7 @@ import { RemixIcon } from '../../icons/RemixIcons';
 import { copyGamePublishLink, gamePublishActions, useGamePublishSession, type GamePublishSession } from './gamePublishStore';
 import { GamePublishResultAction } from './GamePublishThread';
 import { MOCK_PLAYABLE_SIZE_MB, playableNetwork } from './playableNetworks';
-import { GAME_PUBLISH_PLATFORMS, UNSUPPORTED_PLATFORMS_NOTE, gamePublishPlatform, type GamePublishPlatform } from './platforms';
+import { GAME_PUBLISH_PLATFORMS, gamePublishPlatform, type GamePublishPlatform } from './platforms';
 import './gamePublish.css';
 
 /**
@@ -68,71 +68,30 @@ export function GamePublishPanel({ artifactId, coverUrl, onNotify }: {
 
   const groups = (['China', 'Global', 'Ads'] as const).map(group => ({ group, list: GAME_PUBLISH_PLATFORMS.filter(item => item.group === group) }));
   const groupLabel = { China: 'China', Global: 'Global', Ads: 'Export package (no account needed)' } as const;
-  const unsupported = <p className="om-gp-note">{t(UNSUPPORTED_PLATFORMS_NOTE)}</p>;
 
   let body: ReactNode;
   let foot: ReactNode;
   let head: ReactNode;
   let showStatus = true;
 
-  if (session.view === 'home') {
-    showStatus = false;
-    head = header(t('Publish'));
+  if (session.view === 'list') {
+    head = header(t('Choose a platform'));
     body = (
       <>
         <div className="om-gp-hero">
           {coverUrl ? <img src={coverUrl} alt="" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} /> : <span className="om-gp-hero-placeholder"><RemixIcon name="gamepad-line" size={22} /></span>}
           <div>
             <strong>{session.gameTitle}</strong>
-            <span className="om-gp-prefilled">{t('Filled in for you')}</span>
-            <p>{t('Cover, title and description come from the game. You can change them later.')}</p>
+            <p>{t('Pick one to start. Steps only you can do are shown one at a time; the Agent does the rest.')}</p>
           </div>
         </div>
-        <h3 className="om-gp-h3">{t('Start with a game link')}</h3>
-        <p className="om-gp-muted">{t('Anyone can play it. Then use the link to publish to WeChat, Xiaohongshu, itch.io and more, one at a time.')}</p>
-      </>
-    );
-    foot = (
-      <>
-        <Button variant="plain" type="button" className="om-gp-text-btn" onClick={() => gamePublishActions.showList(artifactId)}>
-          {t('Publish to another platform')}
-        </Button>
-        <span className="om-gp-spacer" />
-        <Button variant="plain" type="button" className="om-gp-primary" disabled={session.linkPublishing} onClick={() => void gamePublishActions.publishLink(artifactId)}>
-          {session.linkPublishing ? t('Publishing…') : t('Publish link')}
-        </Button>
-      </>
-    );
-    if (session.linkPublishing) showStatus = true;
-  } else if (session.view === 'link-result') {
-    head = header(t('Publish'));
-    body = (
-      <>
-        <div className="om-gp-result">
-          <RemixIcon name="checkbox-circle-fill" size={30} className="om-gp-result-icon" />
-          <strong>{t('Live')}</strong>
-          <span className="om-gp-muted">{session.linkUrl}</span>
-          <Button variant="plain" type="button" className="om-gp-primary" onClick={() => void copyGamePublishLink(session.linkUrl, onNotify, t)}>{t('Copy link')}</Button>
-        </div>
-        <h3 className="om-gp-h3">{t('Also publish to (one at a time)')}</h3>
-        {tiles(GAME_PUBLISH_PLATFORMS)}
-        {unsupported}
-      </>
-    );
-    showStatus = false;
-    foot = <><span className="om-gp-spacer" /><Button variant="plain" type="button" className="om-gp-secondary" onClick={close}>{t('Close')}</Button></>;
-  } else if (session.view === 'list') {
-    head = header(t('Choose a platform'), { label: t('Game link'), onClick: () => gamePublishActions.showHome(artifactId) });
-    body = (
-      <>
-        <p className="om-gp-muted">{t('Pick one to start. Steps only you can do are shown one at a time; the Agent does the rest.')}</p>
+        <OpenDesignLinkOption session={session} onNotify={onNotify} />
         {groups.map(({ group, list }) => (
           <section key={group}>
             <h3 className="om-gp-group">{t(groupLabel[group])}</h3>
             {tiles(list)}
           </section>
         ))}
-        {unsupported}
       </>
     );
     showStatus = false;
@@ -219,6 +178,7 @@ export function GamePublishPanel({ artifactId, coverUrl, onNotify }: {
             <RemixIcon name="checkbox-circle-fill" size={30} className="om-gp-result-icon" />
             <strong>{t(platform.resultTitle)}</strong>
             <span className="om-gp-muted">{t(platform.resultDetail)}</span>
+            {session.linkUrl && <span className="om-gp-muted">{t('Live on OpenDesign')} · {session.linkUrl}</span>}
             <GamePublishResultAction action={platform.resultAction} href={platform.resultHref} onNotify={onNotify} />
           </div>
         </>
@@ -312,5 +272,36 @@ function PlayableDownload({ networkName, onNotify }: { networkName?: string; onN
         </a>
       )}
     </div>
+  );
+}
+
+/** Default-on option: publishing to any platform also publishes the game on OpenDesign. */
+function OpenDesignLinkOption({ session, onNotify }: { session: GamePublishSession; onNotify?: (message: string, tone?: 'info' | 'error') => void }) {
+  const { t } = useI18n();
+  if (session.linkUrl) {
+    return (
+      <div className="om-gp-option" data-done>
+        <RemixIcon name="checkbox-circle-fill" size={16} className="om-gp-result-icon" />
+        <span className="om-gp-option-text">
+          <strong>{t('Live on OpenDesign')}</strong>
+          <small>{session.linkUrl}</small>
+        </span>
+        <Button variant="plain" type="button" className="om-gp-secondary" onClick={() => void copyGamePublishLink(session.linkUrl, onNotify, t)}>{t('Copy link')}</Button>
+      </div>
+    );
+  }
+  return (
+    <label className="om-gp-option">
+      <input
+        type="checkbox"
+        checked={session.alsoPublishLink}
+        disabled={session.linkPublishing}
+        onChange={event => gamePublishActions.setAlsoPublishLink(session.artifactId, event.target.checked)}
+      />
+      <span className="om-gp-option-text">
+        <strong>{session.linkPublishing ? t('Publishing on OpenDesign…') : t('Also publish on OpenDesign')}</strong>
+        <small>{t('Creates a game link anyone can play')}</small>
+      </span>
+    </label>
   );
 }

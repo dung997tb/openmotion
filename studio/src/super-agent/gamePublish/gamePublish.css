@@ -105,7 +105,6 @@
 }
 
 .om-gp-muted { color: var(--motion-muted); margin: 0; }
-.om-gp-note { color: var(--motion-muted); font-size: var(--motion-text-xs); margin: var(--motion-space-12) 0 0; }
 .om-gp-need { color: var(--motion-warning); font-size: var(--motion-text-xs); margin: var(--motion-space-6) 0 0; }
 
 .om-gp-primary,
@@ -325,6 +324,22 @@
   .om-gp-spin,
   .om-gp-status[data-tone='running'] .om-gp-status-dot { animation: none; }
 }
+
+/* Default-on "also publish on OpenDesign" option above the platform list */
+.om-gp-option {
+  display: flex;
+  align-items: center;
+  gap: var(--motion-space-10);
+  margin-top: var(--motion-space-10);
+  padding: var(--motion-space-8) var(--motion-space-12);
+  border-radius: var(--motion-radius-lg);
+  background: color-mix(in srgb, var(--motion-success) 10%, var(--motion-inset));
+  cursor: pointer;
+}
+.om-gp-option input { width: 16px; height: 16px; accent-color: var(--motion-success); flex: none; }
+.om-gp-option-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.om-gp-option-text strong { font-weight: var(--motion-weight-medium); }
+.om-gp-option-text small { color: var(--motion-muted); font-size: var(--motion-text-xs); overflow-wrap: anywhere; }
 
 /* Playable ad: check results and download guidance */
 .om-gp-checks { margin-top: var(--motion-space-12); padding: var(--motion-space-10) var(--motion-space-12); border-radius: var(--motion-radius-xl); background: var(--motion-inset); }

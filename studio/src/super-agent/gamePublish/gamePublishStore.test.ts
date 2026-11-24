@@ -11,15 +11,26 @@ describe('gamePublishStore', () => {
   beforeEach(() => { vi.useFakeTimers(); resetGamePublishStore(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('opens on the game link first and publishes it', async () => {
+  it('opens on the platform list and also publishes on OpenDesign by default', async () => {
     gamePublishActions.open(input);
-    expect(gamePublishSessionFor(input.artifactId)?.view).toBe('home');
-    const done = gamePublishActions.publishLink(input.artifactId);
+    expect(gamePublishSessionFor(input.artifactId)).toMatchObject({ view: 'list', alsoPublishLink: true });
+    gamePublishActions.choose(input.artifactId, 'telegram');
+    expect(gamePublishSessionFor(input.artifactId)?.linkPublishing).toBe(true);
     await flush(5000);
-    await done;
     const session = gamePublishSessionFor(input.artifactId)!;
-    expect(session.view).toBe('link-result');
     expect(session.linkUrl).toContain('abc12345');
+    // The link runs alongside; the user stays on the platform step.
+    expect(session).toMatchObject({ view: 'step', platformId: 'telegram' });
+  });
+
+  it('skips the OpenDesign link when the user unticks it', async () => {
+    gamePublishActions.open(input);
+    gamePublishActions.setAlsoPublishLink(input.artifactId, false);
+    gamePublishActions.choose(input.artifactId, 'telegram');
+    await flush(5000);
+    const session = gamePublishSessionFor(input.artifactId)!;
+    expect(session.linkPublishing).toBe(false);
+    expect(session.linkUrl).toBeUndefined();
   });
 
   it('walks a platform one user step at a time and finishes from either surface', async () => {
