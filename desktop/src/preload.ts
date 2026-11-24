@@ -35,20 +35,28 @@ function isAllowedBridgeLocation(): boolean {
   return false;
 }
 
-function isAllowedLocalPageLocation(): boolean {
-  if (typeof window === 'undefined' || !window.location) return false;
-  if (window.location.protocol !== 'file:') return false;
+function getAllowedLocalPageBasename(): string | null {
+  if (typeof window === 'undefined' || !window.location) return null;
+  if (window.location.protocol !== 'file:') return null;
   let decodedPath: string;
   try {
     decodedPath = decodeURIComponent(window.location.pathname || '');
   } catch {
-    return false;
+    return null;
   }
   const normalized = decodedPath.replace(/\\/g, '/');
   const segments = normalized.split('/');
-  if (segments.some(segment => segment === '..')) return false;
-  const basename = segments[segments.length - 1] ?? '';
+  if (segments.some(segment => segment === '..')) return null;
+  return segments[segments.length - 1] ?? null;
+}
+
+function isAllowedLocalPageLocation(): boolean {
+  const basename = getAllowedLocalPageBasename();
   return basename === 'retry.html' || basename === 'splash.html';
+}
+
+function isAllowedEnvSwitcherLocation(): boolean {
+  return getAllowedLocalPageBasename() === 'env-switcher.html';
 }
 
 if (isTopLevelFrame() && isAllowedBridgeLocation()) {
@@ -96,12 +104,50 @@ if (isTopLevelFrame() && isAllowedBridgeLocation()) {
     window.addEventListener('fullscreenchange', () => {
       ipcRenderer.send(HOST_IPC_CHANNELS.DOM_FULLSCREEN, Boolean(document.fullscreenElement));
     });
+
+    const clearResizingFlag = () => {
+      document.documentElement?.removeAttribute('data-om-resizing');
+    };
+    ipcRenderer.on(HOST_IPC_CHANNELS.EVENT, (_ipcEvent, message: unknown) => {
+      if (!message || typeof message !== 'object') return;
+      const envelope = message as HostEventEnvelope;
+      if (envelope.capability !== 'window' || envelope.event !== 'resizing') return;
+      const active = Boolean(
+        envelope.payload &&
+          typeof envelope.payload === 'object' &&
+          (envelope.payload as { active?: unknown }).active,
+      );
+      if (active) {
+        document.documentElement?.setAttribute('data-om-resizing', 'true');
+      } else {
+        clearResizingFlag();
+      }
+    });
+    window.addEventListener('pointerdown', clearResizingFlag, { passive: true, capture: true });
   }
 } else if (isTopLevelFrame() && isAllowedLocalPageLocation()) {
   const localPageBridge = Object.freeze({
     retryStartup: () => ipcRenderer.invoke(HOST_IPC_CHANNELS.SPLASH_RETRY) as Promise<HostInvokeResult>,
     exportDiagnostics: () =>
       ipcRenderer.invoke(HOST_IPC_CHANNELS.SPLASH_EXPORT_DIAGNOSTICS) as Promise<HostInvokeResult>,
+    windowControl: (action: 'minimize' | 'toggleMaximize' | 'close') =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.SPLASH_WINDOW_CONTROL, action) as Promise<HostInvokeResult>,
+    resetEnvironment: () =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.SPLASH_RESET_ENV) as Promise<HostInvokeResult>,
+    openEnvironmentSwitcher: () =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.SPLASH_OPEN_ENV_SWITCHER) as Promise<HostInvokeResult>,
   });
   contextBridge.exposeInMainWorld('__OPENMOTION_LOCAL_PAGE__', localPageBridge);
+} else if (isTopLevelFrame() && isAllowedEnvSwitcherLocation()) {
+  const envSwitcherBridge = Object.freeze({
+    getState: () =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.ENV_SWITCHER_GET_STATE) as Promise<HostInvokeResult>,
+    select: (url: string) =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.ENV_SWITCHER_SELECT, { url }) as Promise<HostInvokeResult>,
+    reset: () =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.ENV_SWITCHER_RESET) as Promise<HostInvokeResult>,
+    close: () =>
+      ipcRenderer.invoke(HOST_IPC_CHANNELS.ENV_SWITCHER_CLOSE) as Promise<HostInvokeResult>,
+  });
+  contextBridge.exposeInMainWorld('__OPENMOTION_ENV_SWITCHER__', envSwitcherBridge);
 }

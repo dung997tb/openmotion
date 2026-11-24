@@ -1,3 +1,4 @@
+import { createPublicKey } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -8,6 +9,83 @@ const __filename = fileURLToPath(import.meta.url);
 const desktopDir = path.resolve(path.dirname(__filename), '..');
 const repoRoot = path.resolve(desktopDir, '..');
 const require = createRequire(import.meta.url);
+
+const APPLE_TEAM_ID_RE = /^[A-Z0-9]{10}$/;
+const WIN_THUMBPRINT_RE = /^[0-9A-F]{40}$|^[0-9A-F]{64}$/;
+
+/**
+ * Resolves and validates optional build-time trust anchors injected into the
+ * bundled Electron main process via esbuild `define`.
+ *
+ * - `OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI`: Ed25519 SPKI DER (base64 or PEM)
+ * - `OPENMOTION_MURMUR_APPLE_TEAM_ID`: 10-char Apple Developer Team ID
+ * - `OPENMOTION_MURMUR_WIN_THUMBPRINTS`: comma-separated SHA-1 (40-hex) / SHA-256 (64-hex) cert thumbprints
+ */
+export function resolveBuildTrustAnchors(env = process.env) {
+  let rootPublicKeySpki = '';
+  const rawRootKey = env.OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI?.trim();
+  if (rawRootKey) {
+    let keyObj;
+    try {
+      keyObj = rawRootKey.includes('BEGIN PUBLIC KEY')
+        ? createPublicKey(rawRootKey)
+        : createPublicKey({
+            key: Buffer.from(rawRootKey, 'base64'),
+            format: 'der',
+            type: 'spki',
+          });
+    } catch (error) {
+      throw new Error(
+        `Invalid OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (keyObj.asymmetricKeyType !== 'ed25519') {
+      throw new Error(
+        `OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI must be an Ed25519 public key (got ${keyObj.asymmetricKeyType ?? 'unknown'})`,
+      );
+    }
+    rootPublicKeySpki = keyObj.export({ format: 'der', type: 'spki' }).toString('base64');
+  }
+
+  let murmurAppleTeamId = '';
+  const rawTeamId = env.OPENMOTION_MURMUR_APPLE_TEAM_ID?.trim();
+  if (rawTeamId) {
+    if (!APPLE_TEAM_ID_RE.test(rawTeamId)) {
+      throw new Error(
+        `Invalid OPENMOTION_MURMUR_APPLE_TEAM_ID "${rawTeamId}" (must be a 10-character uppercase alphanumeric Apple Team ID)`,
+      );
+    }
+    murmurAppleTeamId = rawTeamId;
+  }
+
+  let murmurWinThumbprints = '';
+  const rawThumbprints = env.OPENMOTION_MURMUR_WIN_THUMBPRINTS?.trim();
+  if (rawThumbprints) {
+    const parsed = rawThumbprints
+      .split(',')
+      .map(item => item.trim().toUpperCase())
+      .filter(Boolean);
+    for (const thumb of parsed) {
+      if (!WIN_THUMBPRINT_RE.test(thumb)) {
+        throw new Error(
+          `Invalid OPENMOTION_MURMUR_WIN_THUMBPRINTS entry "${thumb}" (expected 40-char SHA-1 or 64-char SHA-256 hex digest)`,
+        );
+      }
+    }
+    murmurWinThumbprints = parsed.join(',');
+  }
+
+  return {
+    rootPublicKeySpki,
+    murmurAppleTeamId,
+    murmurWinThumbprints,
+    define: {
+      __OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__: JSON.stringify(rootPublicKeySpki),
+      __OPENMOTION_MURMUR_APPLE_TEAM_ID__: JSON.stringify(murmurAppleTeamId),
+      __OPENMOTION_MURMUR_WIN_THUMBPRINTS__: JSON.stringify(murmurWinThumbprints),
+    },
+  };
+}
 
 async function loadEsbuild() {
   const candidates = [
@@ -22,8 +100,9 @@ async function loadEsbuild() {
   return await import(require.resolve('esbuild', { paths: [repoRoot, desktopDir] }));
 }
 
-export async function buildDesktop() {
+export async function buildDesktop(options = {}) {
   const esbuild = await loadEsbuild();
+  const anchors = resolveBuildTrustAnchors(options.env ?? process.env);
   const distDir = path.join(desktopDir, 'dist');
   const distBrandDir = path.join(distDir, 'brand');
   mkdirSync(distDir, { recursive: true });
@@ -39,6 +118,7 @@ export async function buildDesktop() {
       target: 'node22',
       sourcemap: true,
       external: ['electron', 'electron-updater'],
+      define: anchors.define,
       banner: {
         js: "import { createRequire as __desktopCreateRequire } from 'node:module'; const require = __desktopCreateRequire(import.meta.url);",
       },
@@ -55,7 +135,7 @@ export async function buildDesktop() {
     }),
   ]);
 
-  for (const htmlFile of ['splash.html', 'retry.html']) {
+  for (const htmlFile of ['splash.html', 'retry.html', 'env-switcher.html']) {
     const src = path.join(desktopDir, 'src', htmlFile);
     if (existsSync(src)) {
       copyFileSync(src, path.join(distDir, htmlFile));

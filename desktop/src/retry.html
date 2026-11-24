@@ -8,6 +8,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';"
+    />
     <title>OpenDesign — Connection Unavailable</title>
     <style>
       :root {
@@ -93,7 +97,7 @@
       body {
         margin: 0;
         width: 100%;
-        height: 100%;
+        min-height: 100%;
         background: var(--rt-bg);
         color: var(--rt-text);
         font-family: var(--rt-font-sans);
@@ -104,9 +108,9 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
-        min-height: 100vh;
-        padding: 56px 24px 48px;
+        min-height: 100dvh;
+        overflow-y: auto;
+        padding: 58px 24px 36px;
       }
 
       .rt-drag-bar {
@@ -115,17 +119,55 @@
         left: 0;
         right: 0;
         height: 46px;
+        background: var(--rt-bg);
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 0 8px;
         -webkit-app-region: drag;
         z-index: 10;
+      }
+
+      .rt-window-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        -webkit-app-region: no-drag;
+      }
+
+      .rt-win-btn {
+        appearance: none;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--rt-muted);
+        width: 32px;
+        height: 30px;
+        display: inline-grid;
+        place-items: center;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+      }
+
+      .rt-win-btn:hover {
+        background: var(--rt-hover);
+        color: var(--rt-strong);
+      }
+
+      .rt-win-btn[data-action="close"]:hover {
+        background: var(--rt-danger-soft);
+        color: var(--rt-danger);
       }
 
       .rt-stage {
         width: 100%;
         max-width: 460px;
+        margin: auto;
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 28px;
+        gap: 24px;
       }
 
       .rt-wordmark {
@@ -279,7 +321,13 @@
     </style>
   </head>
   <body>
-    <div class="rt-drag-bar" aria-hidden="true"></div>
+    <div class="rt-drag-bar">
+      <div class="rt-window-controls" id="retry-window-controls" role="group" aria-label="Window controls" hidden>
+        <button type="button" class="rt-win-btn" data-action="minimize" aria-label="Minimize window">&#x2212;</button>
+        <button type="button" class="rt-win-btn" data-action="toggleMaximize" aria-label="Maximize window">&#x25A1;</button>
+        <button type="button" class="rt-win-btn" data-action="close" aria-label="Close window">&#x00D7;</button>
+      </div>
+    </div>
 
     <main class="rt-stage">
       <svg
@@ -356,6 +404,12 @@
           <button type="button" class="rt-btn rt-btn-primary" id="retry-btn">
             Retry
           </button>
+          <button type="button" class="rt-btn" id="switch-env-btn" hidden>
+            Switch environment
+          </button>
+          <button type="button" class="rt-btn" id="reset-env-btn" hidden>
+            Reset to default Test
+          </button>
           <button type="button" class="rt-btn" id="export-diagnostics-btn">
             Export diagnostics
           </button>
@@ -373,13 +427,73 @@
           document.documentElement.setAttribute('data-theme', requestedTheme);
         }
 
+        const windowControlsEl = document.getElementById('retry-window-controls');
+        if (windowControlsEl && params.get('customWindowControls') === '1') {
+          windowControlsEl.hidden = false;
+          windowControlsEl.addEventListener('click', event => {
+            const target = event.target instanceof Element ? event.target.closest('button[data-action]') : null;
+            const action = target ? target.getAttribute('data-action') : null;
+            if (!action) return;
+            const bridge = window.__OPENMOTION_LOCAL_PAGE__;
+            if (bridge && typeof bridge.windowControl === 'function') {
+              void bridge.windowControl(action);
+            }
+          });
+        }
+
+        const badgeEl = document.getElementById('retry-badge');
         const titleEl = document.getElementById('retry-title');
         const messageEl = document.getElementById('retry-message');
         const detailEl = document.getElementById('retry-detail');
         const retryBtn = document.getElementById('retry-btn');
+        const switchEnvBtn = document.getElementById('switch-env-btn');
+        const resetEnvBtn = document.getElementById('reset-env-btn');
         const exportBtn = document.getElementById('export-diagnostics-btn');
         const toastEl = document.getElementById('retry-toast');
         let toastTimer = null;
+
+        const isZh = (params.get('locale') || navigator.language || '').toLowerCase().startsWith('zh');
+        if (switchEnvBtn && params.get('canSwitchEnv') === '1') {
+          switchEnvBtn.hidden = false;
+          if (isZh) switchEnvBtn.textContent = '切换测试环境';
+          switchEnvBtn.addEventListener('click', async () => {
+            try {
+              const res = await window.__OPENMOTION_LOCAL_PAGE__?.openEnvironmentSwitcher?.();
+              if (res && res.ok === false) {
+                showToast(res.error?.message || (isZh ? '无法打开环境切换器。' : 'Could not open environment switcher.'));
+              }
+            } catch (error) {
+              showToast(error instanceof Error ? error.message : String(error));
+            }
+          });
+        }
+        if (resetEnvBtn && params.get('canResetEnv') === '1') {
+          resetEnvBtn.hidden = false;
+          if (isZh) resetEnvBtn.textContent = '恢复默认 Test 环境';
+          resetEnvBtn.addEventListener('click', async () => {
+            resetEnvBtn.disabled = true;
+            try {
+              const res = await window.__OPENMOTION_LOCAL_PAGE__?.resetEnvironment?.();
+              if (res && res.ok === false) {
+                showToast(res.error?.message || (isZh ? '无法重置环境。' : 'Could not reset environment.'));
+                resetEnvBtn.disabled = false;
+              }
+            } catch (error) {
+              showToast(error instanceof Error ? error.message : String(error));
+              resetEnvBtn.disabled = false;
+            }
+          });
+        }
+        let activeErrorCode = '';
+        let retryInFlight = false;
+        let onlineRetryTimer = null;
+
+        function setTheme(theme) {
+          if (theme === 'light' || theme === 'dark') {
+            document.documentElement.setAttribute('data-theme', theme);
+          }
+        }
+        window.__setDesktopTheme = setTheme;
 
         function showToast(text) {
           if (!toastEl) return;
@@ -393,6 +507,12 @@
 
         function setRetryError(info) {
           if (!info || typeof info !== 'object') return;
+          if (typeof info.code === 'string') {
+            activeErrorCode = info.code.trim();
+          }
+          if (typeof info.badge === 'string' && info.badge.trim() && badgeEl) {
+            badgeEl.textContent = info.badge.trim();
+          }
           if (typeof info.title === 'string' && info.title.trim() && titleEl) {
             titleEl.textContent = info.title.trim();
           }
@@ -419,20 +539,28 @@
 
         window.__setDesktopRetryError = setRetryError;
 
+        const initialBadge = params.get('badge');
+        const initialTitle = params.get('title');
         const initialCode = params.get('code');
         const initialMessage = params.get('message');
         const initialDetail = params.get('detail');
-        if (initialCode || initialMessage || initialDetail) {
+        if (initialBadge || initialTitle || initialCode || initialMessage || initialDetail) {
           setRetryError({
+            badge: initialBadge || undefined,
+            title: initialTitle || undefined,
             code: initialCode || undefined,
             message: initialMessage || undefined,
             detail: initialDetail || undefined,
           });
         }
 
-        retryBtn?.addEventListener('click', async () => {
-          retryBtn.disabled = true;
-          retryBtn.textContent = 'Retrying…';
+        async function triggerRetry() {
+          if (retryInFlight) return;
+          retryInFlight = true;
+          if (retryBtn) {
+            retryBtn.disabled = true;
+            retryBtn.textContent = 'Retrying…';
+          }
           try {
             if (window.__OPENMOTION_LOCAL_PAGE__?.retryStartup) {
               const result = await window.__OPENMOTION_LOCAL_PAGE__.retryStartup();
@@ -452,9 +580,34 @@
           } catch (error) {
             showToast(error instanceof Error ? error.message : 'Retry failed. Please try again.');
           } finally {
-            retryBtn.disabled = false;
-            retryBtn.textContent = 'Retry';
+            retryInFlight = false;
+            if (retryBtn) {
+              retryBtn.disabled = false;
+              retryBtn.textContent = 'Retry';
+            }
           }
+        }
+
+        retryBtn?.addEventListener('click', () => {
+          if (onlineRetryTimer) {
+            clearTimeout(onlineRetryTimer);
+            onlineRetryTimer = null;
+          }
+          void triggerRetry();
+        });
+
+        window.addEventListener('online', () => {
+          const isNetworkError =
+            !activeErrorCode ||
+            activeErrorCode.startsWith('NET_') ||
+            activeErrorCode === 'LOAD_FAILED';
+          if (!isNetworkError || retryInFlight) return;
+          showToast('Connection restored. Reconnecting…');
+          if (onlineRetryTimer) clearTimeout(onlineRetryTimer);
+          onlineRetryTimer = setTimeout(() => {
+            onlineRetryTimer = null;
+            void triggerRetry();
+          }, 1200);
         });
 
         exportBtn?.addEventListener('click', async () => {

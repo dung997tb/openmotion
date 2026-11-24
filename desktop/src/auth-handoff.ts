@@ -56,8 +56,76 @@ export type DesktopAuthExchangeInit = {
   method: 'POST';
   headers: Record<string, string>;
   body: string;
+  credentials?: 'include' | 'same-origin' | 'omit';
   signal?: AbortSignal;
 };
+
+export type DesktopHandoffProbeFetch = (
+  url: string,
+  init: { method: 'GET'; redirect: 'manual'; signal?: AbortSignal },
+) => Promise<{ status: number }>;
+
+export function sanitizeAuthReturnPath(rawPath: string | null | undefined): string | undefined {
+  if (typeof rawPath !== 'string') return undefined;
+  const trimmed = rawPath.trim();
+  if (!trimmed || /[\r\n\0]/.test(trimmed)) return undefined;
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return undefined;
+  if (trimmed === '/auth' || trimmed.startsWith('/auth/')) return undefined;
+  return trimmed;
+}
+
+export function parseStudioAuthNavigationUrl(
+  rawUrl: string,
+  studioOrigin: string,
+): { returnPath?: string; switchAccount: boolean } | null {
+  try {
+    const parsed = new URL(rawUrl);
+    const expectedOrigin = new URL(studioOrigin).origin;
+    if (parsed.origin !== expectedOrigin) return null;
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '') || '/';
+    if (normalizedPath !== '/auth/login') return null;
+    const returnPath = sanitizeAuthReturnPath(parsed.searchParams.get('returnTo'));
+    const switchAccount = parsed.searchParams.get('switch') === '1';
+    return {
+      ...(returnPath ? { returnPath } : {}),
+      switchAccount,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Probes whether the target Studio origin has mounted `GET /auth/desktop/start`.
+ * Mounted servers validate query params and return HTTP 400 (no side effects).
+ * Older servers without desktop handoff routes return 404/405/501.
+ */
+export async function probeDesktopHandoffSupport(
+  studioOrigin: string,
+  fetchImpl: DesktopHandoffProbeFetch,
+  options?: { timeoutMs?: number },
+): Promise<boolean> {
+  const timeoutMs = options?.timeoutMs ?? 2500;
+  const probeUrl = new URL(DESKTOP_HANDOFF_START_PATH, studioOrigin).toString();
+  const abortController = new AbortController();
+  const timer = setTimeout(() => abortController.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(probeUrl, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: abortController.signal,
+    });
+    if (res.status === 404 || res.status === 405 || res.status === 501) {
+      return false;
+    }
+    return true;
+  } catch {
+    // Do not downgrade on transient network/timeout errors.
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export type DesktopAuthExchangeResponseLike = {
   ok: boolean;
@@ -384,10 +452,14 @@ export class DesktopAuthHandoffManager {
    * Returns the Studio in-window login fallback URL (`${studioOrigin}/auth/login`)
    * for environments where system-browser handoff cannot complete.
    */
-  openInWindowFallback(options?: { switchAccount?: boolean }): string {
+  openInWindowFallback(options?: { returnPath?: string; switchAccount?: boolean }): string {
     const url = new URL('/auth/login', this.resolveCurrentStudioOrigin());
     if (options?.switchAccount) {
       url.searchParams.set('switch', '1');
+    }
+    const safeReturnPath = sanitizeAuthReturnPath(options?.returnPath);
+    if (safeReturnPath) {
+      url.searchParams.set('returnTo', safeReturnPath);
     }
     return url.toString();
   }
@@ -701,6 +773,7 @@ export class DesktopAuthHandoffManager {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(requestBody),
+        credentials: 'include',
         signal: abortController.signal,
       });
 

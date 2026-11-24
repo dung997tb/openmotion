@@ -4,6 +4,17 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_UPDATE_BASE_URL } from '../../shared/desktop-builtin-rules.ts';
+import { validateSignedConfigPayloadBounds } from '../../shared/signed-config.ts';
+import { generateEd25519KeyPair } from '../../packages/signed-config/index.ts';
+import { resolveBuildTrustAnchors } from '../scripts/build.mjs';
+import {
+  buildDesktopReleaseCardPayload,
+  formatStructuredReleaseChangelog,
+  sendFeishuReleaseNotification,
+  signFeishuWebhook,
+  validateFeishuWebhookUrl,
+} from '../scripts/notify-feishu-release.mjs';
+import { resolveDesktopReleaseVersion } from '../scripts/resolve-release-version.mjs';
 import {
   compareSemver,
   DesktopUpdaterController,
@@ -333,9 +344,11 @@ test('desktop/electron-builder.yml defines thin-shell packaging, openmotion prot
   assert.match(builderYml, /^appId:\s*io\.nexu\.openmotion\.desktop$/m);
   assert.match(builderYml, /^productName:\s*OpenDesign$/m);
 
-  // Thin shell: no bundled app-server extraResources.
-  assert.equal(builderYml.includes('extraResources'), false);
+  // Thin shell: no bundled app-server; mac extraResources is strictly limited to compiled Assets.car icon catalog.
   assert.equal(builderYml.includes('app-server'), false);
+  assert.equal(builderYml.includes('studio/build'), false);
+  assert.match(builderYml, /CFBundleIconName:\s*AppIcon/);
+  assert.match(builderYml, /-\s*Assets\.car/);
 
   // Protocol registration for openmotion://.
   assert.match(builderYml, /^protocols:\s*$/m);
@@ -407,15 +420,37 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
     'utf8',
   );
 
-  // Manual workflow_dispatch only with channel (test | stable, default test) and publish (default false).
+  // Manual workflow_dispatch plus automatic push trigger on desktop-test branch for desktop & coupled shared paths.
+  assert.match(workflowYml, /push:\s*\n\s+branches:\s*\n\s+-\s*desktop-test\b/);
+  assert.match(workflowYml, /'desktop\/\*\*'/);
+  assert.match(workflowYml, /'shared\/desktop-\*\.ts'/);
+  assert.match(workflowYml, /'shared\/platform-host\.ts'/);
+  assert.match(workflowYml, /'shared\/signed-config\.ts'/);
+  assert.match(workflowYml, /'shared\/engine-command-contract\.ts'/);
+  assert.match(workflowYml, /'packages\/local-atoms\/\*\*'/);
+  assert.match(workflowYml, /'packages\/signed-config\/\*\*'/);
+  assert.match(workflowYml, /'packages\/observability\/\*\*'/);
+  assert.match(workflowYml, /'packages\/design-system\/brand\/\*\*'/);
+  assert.match(workflowYml, /'scripts\/diagnostics\.mjs'/);
+  assert.match(workflowYml, /'scripts\/zip\.mjs'/);
+  assert.match(workflowYml, /'scripts\/diagnostic-redaction\.mjs'/);
+  assert.match(workflowYml, /'\.github\/workflows\/desktop-release\.yml'/);
+  assert.match(workflowYml, /OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI:/);
+  assert.match(workflowYml, /OPENMOTION_MURMUR_APPLE_TEAM_ID:/);
+  assert.match(workflowYml, /OPENMOTION_MURMUR_WIN_THUMBPRINTS:/);
   assert.match(workflowYml, /workflow_dispatch:/);
   assert.match(workflowYml, /default:\s*test/);
   assert.match(workflowYml, /-\s*test\b/);
   assert.match(workflowYml, /-\s*stable\b/);
   assert.match(workflowYml, /default:\s*false/);
 
-  // Main-only guard.
+  // Branch & channel release guards + Scheme A release version resolution.
   assert.match(workflowYml, /refs\/heads\/main/);
+  assert.match(workflowYml, /refs\/heads\/desktop-test/);
+  assert.match(workflowYml, /resolve-release-version\.mjs/);
+  assert.match(workflowYml, /-c\.extraMetadata\.version=/);
+  assert.match(workflowYml, /-c\.buildNumber=/);
+  assert.match(workflowYml, /-c\.buildVersion=/);
 
   // Per-architecture matrix jobs: macOS arm64, macOS x64, Windows x64.
   assert.match(workflowYml, /label:\s*macOS arm64/);
@@ -427,25 +462,41 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /pack_script:\s*pack:mac:x64/);
   assert.match(workflowYml, /pack_script:\s*pack:win:x64/);
 
-  // Apple Developer ID signing & notarization env wiring.
-  assert.match(workflowYml, /CSC_LINK:/);
-  assert.match(workflowYml, /CSC_KEY_PASSWORD:/);
+  // Apple Developer ID signing & notarization env wiring (org-level secrets with fallback).
+  assert.match(workflowYml, /CSC_LINK:.*APPLE_SIGNING_CERTIFICATE_BASE64/);
+  assert.match(workflowYml, /CSC_KEY_PASSWORD:.*APPLE_SIGNING_CERTIFICATE_PASSWORD/);
   assert.match(workflowYml, /APPLE_ID:/);
   assert.match(workflowYml, /APPLE_APP_SPECIFIC_PASSWORD:/);
   assert.match(workflowYml, /APPLE_TEAM_ID:/);
   assert.match(workflowYml, /APPLE_API_KEY:/);
 
+  // Fast single-runner verification & Electron/electron-builder binary caching.
+  assert.match(workflowYml, /verify-desktop:/);
+  assert.match(workflowYml, /ELECTRON_SKIP_BINARY_DOWNLOAD:\s*'1'/);
+  assert.match(workflowYml, /uses:\s*actions\/cache@v4/);
+  assert.match(workflowYml, /desktop\/package-lock\.json/);
+
   // No GitHub Actions artifact upload or GitHub Release binary upload.
   assert.equal(workflowYml.includes('upload-artifact'), false);
   assert.equal(workflowYml.includes('gh release upload'), false);
 
-  // Direct object-storage upload targeting releases.open-design.ai / open-motion/desktop/<channel>/.
+  // Direct Cloudflare R2 / S3 upload targeting releases.open-design.ai / open-motion/desktop/<channel>/.
+  assert.match(workflowYml, /CLOUDFLARE_R2_RELEASES_BUCKET/);
+  assert.match(workflowYml, /CLOUDFLARE_R2_RELEASES_URL/);
+  assert.match(workflowYml, /CLOUDFLARE_R2_RELEASES_AK/);
+  assert.match(workflowYml, /CLOUDFLARE_R2_RELEASES_SK/);
+  assert.match(workflowYml, /AWS_DEFAULT_REGION:\s*auto/);
+  assert.match(workflowYml, /AWS_REQUEST_CHECKSUM_CALCULATION:\s*when_required/);
   assert.match(workflowYml, /releases\.open-design\.ai/);
   assert.match(workflowYml, /open-motion\/desktop\//);
   assert.match(workflowYml, /aws\s+.*s3 cp/);
   assert.match(workflowYml, /extraMetadata\.openmotionChannel=/);
   assert.match(workflowYml, /npm --prefix desktop ci/);
   assert.match(workflowYml, /npm --prefix desktop test/);
+  assert.match(workflowYml, /FEISHU_DESKTOP_NOTIFY_WEBHOOK/);
+  assert.match(workflowYml, /FEISHU_DESKTOP_NOTIFY_ENABLED/);
+  assert.match(workflowYml, /latest-meta\.json/);
+  assert.match(workflowYml, /notify-feishu-release\.mjs/);
 });
 
 test('resolvePackagedReleaseChannel preserves test channel from bundle metadata even for clean semver versions', () => {
@@ -482,4 +533,248 @@ test('resolvePackagedReleaseChannel preserves test channel from bundle metadata 
     }),
     'dev',
   );
+});
+
+test('resolveDesktopReleaseVersion implements Scheme A monotonic SemVer and Windows PE buildVersion', () => {
+  const test1 = resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 1 });
+  const test1Retry = resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 1, runAttempt: 2 });
+  const test2 = resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 2 });
+  const test10 = resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 10 });
+  const stableNext = resolveDesktopReleaseVersion({ baseVersion: '0.2.2', channel: 'stable', runNumber: 11 });
+
+  assert.equal(test1.version, '0.2.2-test.1');
+  assert.equal(test1.buildNumber, '1');
+  assert.equal(test1.buildVersion, '0.2.2.1');
+  assert.equal(test1Retry.version, '0.2.2-test.1.2');
+  assert.equal(test1Retry.buildVersion, '0.2.2.1');
+  assert.equal(test10.version, '0.2.2-test.10');
+  assert.equal(stableNext.version, '0.2.2');
+  assert.equal(stableNext.buildVersion, '0.2.2.11');
+
+  // Strict SemVer monotonicity: 0.2.1 < 0.2.2-test.1 < 0.2.2-test.1.2 < 0.2.2-test.2 < 0.2.2-test.10 < 0.2.2.
+  assert.ok(compareSemver('0.2.1', test1.version) < 0);
+  assert.ok(compareSemver(test1.version, test1Retry.version) < 0);
+  assert.ok(compareSemver(test1Retry.version, test2.version) < 0);
+  assert.ok(compareSemver(test2.version, test10.version) < 0);
+  assert.ok(compareSemver(test10.version, stableNext.version) < 0);
+
+  // Rejects invalid base versions, channels, and runNumbers exceeding Windows PE 16-bit limit.
+  assert.throws(() => resolveDesktopReleaseVersion({ baseVersion: '0.2.1-test.1', channel: 'test', runNumber: 1 }));
+  assert.throws(() => resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'beta', runNumber: 1 }));
+  assert.throws(() => resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 70000 }));
+});
+
+test('DesktopUpdaterController enables allowPrerelease on test channel and disables it on stable', async () => {
+  const testFake = createFakeAutoUpdater();
+  const testController = new DesktopUpdaterController({
+    currentVersion: '0.2.1',
+    isPackaged: true,
+    channel: 'test',
+    loadAutoUpdater: async () => testFake.updater,
+  });
+  await testController.checkForUpdates();
+  assert.equal(testFake.updater.allowPrerelease, true);
+  assert.equal(testFake.updater.channel, 'test');
+
+  const stableFake = createFakeAutoUpdater();
+  const stableController = new DesktopUpdaterController({
+    currentVersion: '0.2.1',
+    isPackaged: true,
+    channel: 'stable',
+    loadAutoUpdater: async () => stableFake.updater,
+  });
+  await stableController.checkForUpdates();
+  assert.equal(stableFake.updater.allowPrerelease, false);
+  assert.equal(stableFake.updater.channel, 'stable');
+});
+
+test('notify-feishu-release builds signed interactive card payload, validates Feishu hosts, and handles responses', async () => {
+  assert.throws(() => validateFeishuWebhookUrl('https://evil.example.com/open-apis/bot/v2/hook/abc'));
+  assert.throws(() => validateFeishuWebhookUrl('http://open.feishu.cn/open-apis/bot/v2/hook/abc'));
+  assert.equal(
+    validateFeishuWebhookUrl('https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id'),
+    'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id',
+  );
+
+  const payload = buildDesktopReleaseCardPayload({
+    channel: 'test',
+    version: '0.2.2-test.7',
+    buildVersion: '0.2.2.7',
+    previousVersion: '0.2.2-test.6',
+    branch: 'desktop-test',
+    commitSha: '9de1322862fab5b4',
+    commits: [
+      'Merge branch main into desktop-test',
+      'fix(desktop-auth): repair IPC sign-in serialization and OIDC fallback',
+      'feat(desktop): send Card 2.0 release notifications to Feishu group',
+      'perf(desktop): add 6-way parallel macOS codesign script',
+      'test(desktop): add extra unit tests',
+    ],
+    compareUrl: 'https://github.com/nexu-io/openmotion/compare/dee8da6f...9de13228',
+    actor: 'heggria',
+    runUrl: 'https://github.com/nexu-io/openmotion/actions/runs/45333446561',
+    secret: 'test-secret',
+    timestampSeconds: 1700000000,
+  });
+
+  assert.equal(payload.msg_type, 'interactive');
+  assert.equal(payload.card.schema, '2.0');
+  assert.equal(payload.card.header.template, 'blue');
+  assert.match(payload.card.header.subtitle.content, /0\.2\.2-test\.7/);
+  assert.equal(payload.card.header.text_tag_list[0].text.content, 'TEST');
+  assert.equal(payload.timestamp, '1700000000');
+  assert.equal(payload.sign, signFeishuWebhook('test-secret', '1700000000'));
+  const cardText = JSON.stringify(payload.card);
+  assert.equal(cardText.includes('`'), false, 'Card markdown must not emit literal backticks');
+  assert.match(cardText, /对比 v0\.2\.2-test\.6/);
+  assert.match(cardText, /\*\*新增\*\*/);
+  assert.match(cardText, /\*\*修复\*\*/);
+  assert.match(cardText, /\*\*优化\*\*/);
+  assert.equal(cardText.includes('Merge branch'), false);
+  assert.equal(cardText.includes('add extra unit tests'), false);
+  assert.match(cardText, /compare\/dee8da6f\.\.\.9de13228/);
+  assert.match(cardText, /primary_filled/);
+  assert.match(cardText, /OpenDesign-0\.2\.2-test\.7-mac-arm64\.dmg/);
+  assert.match(cardText, /OpenDesign-0\.2\.2-test\.7-mac-x64\.dmg/);
+  assert.match(cardText, /OpenDesign-Setup-0\.2\.2-test\.7-win-x64\.exe/);
+  assert.match(cardText, /OpenDesign-Portable-0\.2\.2-test\.7-win-x64\.exe/);
+  assert.match(cardText, /内网极速下载（Mirror）/);
+  assert.match(
+    cardText,
+    /https:\/\/mirror\.inner\.nexu\.space\/f\/od-next\/test\/0\.2\.2-test\.7\/OpenDesign-0\.2\.2-test\.7-mac-arm64\.dmg/,
+  );
+  assert.match(
+    cardText,
+    /https:\/\/mirror\.inner\.nexu\.space\/f\/od-next\/test\/0\.2\.2-test\.7\/OpenDesign-Setup-0\.2\.2-test\.7-win-x64\.exe/,
+  );
+  assert.match(cardText, /https:\/\/ops\.inner\.nexu\.space\/mirror\/search\?q=od-next%20test/);
+
+  // Mirror section can be disabled explicitly and omits macOS Intel when includeMacX64=false.
+  const noX64Card = JSON.stringify(
+    buildDesktopReleaseCardPayload({
+      channel: 'test',
+      version: '0.2.2-test.8',
+      includeMacX64: false,
+    }).card,
+  );
+  assert.equal(noX64Card.includes('mac-x64.dmg'), false);
+  assert.match(noX64Card, /mirror\.inner\.nexu\.space\/f\/od-next\/test\/0\.2\.2-test\.8\/OpenDesign-0\.2\.2-test\.8-mac-arm64\.dmg/);
+
+  const noMirrorCard = JSON.stringify(
+    buildDesktopReleaseCardPayload({
+      channel: 'test',
+      version: '0.2.2-test.8',
+      mirrorOrigin: 'none',
+      mirrorConsoleUrl: '',
+    }).card,
+  );
+  assert.equal(noMirrorCard.includes('内网极速下载'), false);
+  assert.throws(() =>
+    buildDesktopReleaseCardPayload({
+      channel: 'test',
+      version: '0.2.2-test.8',
+      mirrorOrigin: 'http://mirror.inner.nexu.space',
+    }),
+  );
+
+  // Manual release notes override commit grouping cleanly.
+  const manual = formatStructuredReleaseChangelog({
+    commits: ['fix(desktop): internal refactor'],
+    manualNotes: '- 修复客户端登录跳转\n- 优化启动速度',
+  });
+  assert.equal(manual.source, 'manual');
+  assert.match(manual.markdown, /修复客户端登录跳转/);
+  assert.equal(manual.markdown.includes('internal refactor'), false);
+
+  let postedUrl = '';
+  let postedBody = null;
+  const result = await sendFeishuReleaseNotification({
+    webhookUrl: 'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id',
+    channel: 'test',
+    version: '0.2.2-test.2',
+    fetchImpl: async (url, init) => {
+      postedUrl = url;
+      postedBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 });
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(postedUrl, 'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id');
+  assert.equal(postedBody.msg_type, 'interactive');
+
+  await assert.rejects(
+    () =>
+      sendFeishuReleaseNotification({
+        webhookUrl: 'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id',
+        channel: 'test',
+        version: '0.2.2-test.2',
+        fetchImpl: async () => new Response(JSON.stringify({ code: 19021, msg: 'sign match fail' }), { status: 200 }),
+      }),
+    /sign match fail/,
+  );
+});
+
+test('resolveBuildTrustAnchors validates and normalizes Ed25519 root key, Apple Team ID, and Windows thumbprints', () => {
+  const empty = resolveBuildTrustAnchors({});
+  assert.equal(empty.rootPublicKeySpki, '');
+  assert.equal(empty.murmurAppleTeamId, '');
+  assert.equal(empty.murmurWinThumbprints, '');
+
+  const pair = generateEd25519KeyPair();
+  const sha1 = 'a'.repeat(40);
+  const sha256 = 'B'.repeat(64);
+  const fromPem = resolveBuildTrustAnchors({
+    OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: pair.publicKeyPem,
+    OPENMOTION_MURMUR_APPLE_TEAM_ID: 'AB12CD34EF',
+    OPENMOTION_MURMUR_WIN_THUMBPRINTS: ` ${sha1}, ${sha256} `,
+  });
+  assert.equal(fromPem.rootPublicKeySpki, pair.publicKeySpkiBase64);
+  assert.equal(fromPem.murmurAppleTeamId, 'AB12CD34EF');
+  assert.equal(fromPem.murmurWinThumbprints, `${sha1.toUpperCase()},${sha256}`);
+  assert.equal(
+    JSON.parse(fromPem.define.__OPENMOTION_EMBEDDED_ROOT_PUBLIC_KEY_SPKI__),
+    pair.publicKeySpkiBase64,
+  );
+
+  const fromBase64 = resolveBuildTrustAnchors({
+    OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: pair.publicKeySpkiBase64,
+  });
+  assert.equal(fromBase64.rootPublicKeySpki, pair.publicKeySpkiBase64);
+
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI: 'not-a-key' }),
+    /Invalid OPENMOTION_DESKTOP_ROOT_PUBLIC_KEY_SPKI/,
+  );
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_MURMUR_APPLE_TEAM_ID: 'invalid-id' }),
+    /Invalid OPENMOTION_MURMUR_APPLE_TEAM_ID/,
+  );
+  assert.throws(
+    () => resolveBuildTrustAnchors({ OPENMOTION_MURMUR_WIN_THUMBPRINTS: '1234' }),
+    /Invalid OPENMOTION_MURMUR_WIN_THUMBPRINTS/,
+  );
+});
+
+test('desktop/config channel payloads pass bounds validation and desktop-signed-config.yml enforces sign-verify-publish', () => {
+  for (const channel of ['test', 'stable']) {
+    const payloadPath = path.join(desktopRoot, 'config', `${channel}.payload.json`);
+    const payload = JSON.parse(readFileSync(payloadPath, 'utf8'));
+    assert.deepEqual(
+      validateSignedConfigPayloadBounds(payload, { channel }),
+      [],
+      `${channel}.payload.json must pass shell security bounds`,
+    );
+  }
+
+  const workflowYml = readFileSync(
+    path.join(repoRoot, '.github', 'workflows', 'desktop-signed-config.yml'),
+    'utf8',
+  );
+  assert.match(workflowYml, /desktop\/config\/test\.payload\.json/);
+  assert.match(workflowYml, /refs\/heads\/main/);
+  assert.match(workflowYml, /refs\/heads\/desktop-test/);
+  assert.match(workflowYml, /scripts\/sign-desktop-config\.mjs sign-config/);
+  assert.match(workflowYml, /scripts\/sign-desktop-config\.mjs verify-config/);
+  assert.match(workflowYml, /open-motion\/desktop\/config\/\$\{CHANNEL\}\.json/);
+  assert.match(workflowYml, /no-cache, max-age=0/);
 });

@@ -3,11 +3,17 @@ import {
   HOST_CAPABILITY_VERSIONS,
   hostErr,
   hostOk,
+  type DesktopPickDownloadDirResult,
+  type DesktopPreferenceResetParams,
+  type DesktopPreferenceSetParams,
+  type DesktopPreferenceSetResult,
+  type DesktopPreferencesSnapshot,
   type HostCapabilityDescriptor,
   type HostCapabilityStatus,
   type HostInvokeResult,
   type HostRuntimeInfo,
 } from '../../shared/desktop-contract.ts';
+import { validateHostMethodParams } from '../../shared/desktop-schemas.ts';
 import type {
   DesktopAppInfo,
   DesktopChromeInsets,
@@ -275,12 +281,126 @@ const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['https:', 'http:', 'mailto:']);
 
 function validateThemeParams(
   params: Record<string, unknown>,
-): CapabilityValidationResult<{ theme: 'light' | 'dark' }> {
+): CapabilityValidationResult<{ theme: 'light' | 'dark' | 'system' }> {
   const theme = params.theme;
-  if (theme !== 'light' && theme !== 'dark') {
-    return { ok: false, message: 'Parameter "theme" must be "light" or "dark"' };
+  if (theme !== 'light' && theme !== 'dark' && theme !== 'system') {
+    return { ok: false, message: 'Parameter "theme" must be "light", "dark", or "system"' };
   }
   return { ok: true, value: { theme } };
+}
+
+function validateTaskId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 256 || /[\r\n\0]/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function validateSetTaskProgressParams(
+  params: Record<string, unknown>,
+): CapabilityValidationResult<{ taskId: string; progress: number | 'indeterminate' | null }> {
+  const taskId = validateTaskId(params.taskId);
+  if (!taskId) {
+    return { ok: false, message: 'Parameter "taskId" must be a non-empty single-line string' };
+  }
+  const progress = params.progress;
+  if (
+    progress === null ||
+    progress === 'indeterminate' ||
+    (typeof progress === 'number' && Number.isFinite(progress) && progress >= -1 && progress <= 1)
+  ) {
+    return { ok: true, value: { taskId, progress } };
+  }
+  return {
+    ok: false,
+    message: 'Parameter "progress" must be a number in [-1, 1], "indeterminate", or null',
+  };
+}
+
+function validateAcquireWakeLockParams(
+  params: Record<string, unknown>,
+): CapabilityValidationResult<{ taskId: string; reason?: string; ttlMs?: number }> {
+  const taskId = validateTaskId(params.taskId);
+  if (!taskId) {
+    return { ok: false, message: 'Parameter "taskId" must be a non-empty single-line string' };
+  }
+  let reason: string | undefined;
+  if (params.reason !== undefined) {
+    const validReason = validateTaskId(params.reason);
+    if (!validReason) {
+      return { ok: false, message: 'Parameter "reason" must be a non-empty single-line string' };
+    }
+    reason = validReason;
+  }
+  let ttlMs: number | undefined;
+  if (params.ttlMs !== undefined) {
+    if (
+      typeof params.ttlMs !== 'number' ||
+      !Number.isInteger(params.ttlMs) ||
+      params.ttlMs < 5_000 ||
+      params.ttlMs > 3_600_000
+    ) {
+      return { ok: false, message: 'Parameter "ttlMs" must be an integer between 5000 and 3600000' };
+    }
+    ttlMs = params.ttlMs;
+  }
+  return {
+    ok: true,
+    value: {
+      taskId,
+      ...(reason !== undefined ? { reason } : {}),
+      ...(ttlMs !== undefined ? { ttlMs } : {}),
+    },
+  };
+}
+
+function validateReleaseWakeLockParams(
+  params: Record<string, unknown>,
+): CapabilityValidationResult<{ taskId: string }> {
+  const taskId = validateTaskId(params.taskId);
+  if (!taskId) {
+    return { ok: false, message: 'Parameter "taskId" must be a non-empty single-line string' };
+  }
+  return { ok: true, value: { taskId } };
+}
+
+function validateNotifyParams(
+  params: Record<string, unknown>,
+): CapabilityValidationResult<{
+  title: string;
+  body?: string;
+  bounce?: boolean;
+  silent?: boolean;
+  whenUnfocusedOnly?: boolean;
+}> {
+  const title = validateTaskId(params.title);
+  if (!title) {
+    return { ok: false, message: 'Parameter "title" must be a non-empty single-line string' };
+  }
+  let body: string | undefined;
+  if (params.body !== undefined) {
+    if (typeof params.body !== 'string' || params.body.length > 512 || /[\0]/.test(params.body)) {
+      return { ok: false, message: 'Parameter "body" must be a string up to 512 characters' };
+    }
+    body = params.body.trim();
+  }
+  for (const key of ['bounce', 'silent', 'whenUnfocusedOnly'] as const) {
+    if (params[key] !== undefined && typeof params[key] !== 'boolean') {
+      return { ok: false, message: `Parameter "${key}" must be a boolean` };
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      title,
+      ...(body !== undefined ? { body } : {}),
+      ...(typeof params.bounce === 'boolean' ? { bounce: params.bounce } : {}),
+      ...(typeof params.silent === 'boolean' ? { silent: params.silent } : {}),
+      ...(typeof params.whenUnfocusedOnly === 'boolean'
+        ? { whenUnfocusedOnly: params.whenUnfocusedOnly }
+        : {}),
+    },
+  };
 }
 
 function validateExternalUrlParams(
@@ -330,7 +450,7 @@ function validateStartSignInParams(
 
 export type WindowCapabilityDeps = {
   getChromeState: () => DesktopChromeInsets | Promise<DesktopChromeInsets>;
-  setTheme: (theme: 'light' | 'dark') => void | Promise<void>;
+  setTheme: (theme: 'light' | 'dark' | 'system') => void | Promise<void>;
   minimize: () => void | Promise<void>;
   toggleMaximize: () => void | Promise<void>;
   close: () => void | Promise<void>;
@@ -338,6 +458,25 @@ export type WindowCapabilityDeps = {
   notifyRendererReady: () => void | Promise<void>;
   retryStartup?: () => void | Promise<void>;
   continueToStudio?: () => void | Promise<void>;
+  setTaskProgress?: (input: {
+    taskId: string;
+    progress: number | 'indeterminate' | null;
+  }) => { progress: number } | Promise<{ progress: number }>;
+  acquireWakeLock?: (input: {
+    taskId: string;
+    reason?: string;
+    ttlMs?: number;
+  }) => { active: boolean; leaseCount: number } | Promise<{ active: boolean; leaseCount: number }>;
+  releaseWakeLock?: (input: {
+    taskId: string;
+  }) => { active: boolean; leaseCount: number } | Promise<{ active: boolean; leaseCount: number }>;
+  notify?: (input: {
+    title: string;
+    body?: string;
+    bounce?: boolean;
+    silent?: boolean;
+    whenUnfocusedOnly?: boolean;
+  }) => { delivered: boolean; bounced?: boolean } | Promise<{ delivered: boolean; bounced?: boolean }>;
   status?: HostCapabilityStatus;
   reason?: string;
 };
@@ -348,14 +487,14 @@ export function createWindowCapabilityModule(deps: WindowCapabilityDeps): Capabi
     version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.WINDOW],
     status: deps.status ?? 'available',
     ...(deps.reason !== undefined ? { reason: deps.reason } : {}),
-    events: ['chromeState', 'menuAction'],
+    events: ['chromeState', 'menuAction', 'themeChanged'],
     methods: {
       getChromeState: {
         handler: async () => hostOk(await deps.getChromeState()),
       },
       setTheme: {
         validate: validateThemeParams,
-        handler: async ({ theme }: { theme: 'light' | 'dark' }) => {
+        handler: async ({ theme }: { theme: 'light' | 'dark' | 'system' }) => {
           await deps.setTheme(theme);
           return hostOk({ theme });
         },
@@ -410,6 +549,48 @@ export function createWindowCapabilityModule(deps: WindowCapabilityDeps): Capabi
           }
           await deps.continueToStudio();
           return hostOk({ ok: true });
+        },
+      },
+      setTaskProgress: {
+        validate: validateSetTaskProgressParams,
+        handler: async (input: { taskId: string; progress: number | 'indeterminate' | null }) => {
+          if (!deps.setTaskProgress) {
+            return hostErr('UNSUPPORTED', 'Task progress reporting is not supported in this host');
+          }
+          return hostOk(await deps.setTaskProgress(input));
+        },
+      },
+      acquireWakeLock: {
+        validate: validateAcquireWakeLockParams,
+        handler: async (input: { taskId: string; reason?: string; ttlMs?: number }) => {
+          if (!deps.acquireWakeLock) {
+            return hostErr('UNSUPPORTED', 'Wake lock control is not supported in this host');
+          }
+          return hostOk(await deps.acquireWakeLock(input));
+        },
+      },
+      releaseWakeLock: {
+        validate: validateReleaseWakeLockParams,
+        handler: async (input: { taskId: string }) => {
+          if (!deps.releaseWakeLock) {
+            return hostErr('UNSUPPORTED', 'Wake lock control is not supported in this host');
+          }
+          return hostOk(await deps.releaseWakeLock(input));
+        },
+      },
+      notify: {
+        validate: validateNotifyParams,
+        handler: async (input: {
+          title: string;
+          body?: string;
+          bounce?: boolean;
+          silent?: boolean;
+          whenUnfocusedOnly?: boolean;
+        }) => {
+          if (!deps.notify) {
+            return hostErr('UNSUPPORTED', 'Desktop notifications are not supported in this host');
+          }
+          return hostOk(await deps.notify(input));
         },
       },
     },
@@ -515,8 +696,14 @@ export function createAccountCapabilityModule(deps: AccountCapabilityDeps): Capa
     events: ['state', 'login-state'],
     methods: {
       startSignIn: {
-        validate: validateStartSignInParams,
-        handler: async (params: { returnPath?: string }) => hostOk(await deps.startSignIn(params)),
+        validate: params => {
+          const base = validateStartSignInParams(params);
+          if (!base.ok) return base;
+          const switchAccount = params.switchAccount === true;
+          return { ok: true, value: { ...base.value, switchAccount } };
+        },
+        handler: async (params: { returnPath?: string; switchAccount?: boolean }) =>
+          hostOk(await deps.startSignIn(params)),
       },
       startBrowserLogin: {
         validate: params => {
@@ -525,7 +712,17 @@ export function createAccountCapabilityModule(deps: AccountCapabilityDeps): Capa
             candidate !== undefined ? { returnPath: candidate } : {},
           );
           if (!base.ok) return base;
-          const switchAccount = params.switchAccount === true;
+          let switchAccount = params.switchAccount === true;
+          if (!switchAccount && typeof params.loginUrl === 'string') {
+            try {
+              const parsed = new URL(params.loginUrl, 'https://example.invalid');
+              if (parsed.searchParams.get('switch') === '1') {
+                switchAccount = true;
+              }
+            } catch {
+              // Ignore malformed loginUrl hint.
+            }
+          }
           return { ok: true, value: { ...base.value, switchAccount } };
         },
         handler: async (params: { returnPath?: string; switchAccount?: boolean }) =>
@@ -568,6 +765,95 @@ export function createAccountCapabilityModule(deps: AccountCapabilityDeps): Capa
             return hostErr('UNSUPPORTED', 'Sign-out is not supported in this host');
           }
           return hostOk(await deps.signOut());
+        },
+      },
+    },
+  };
+}
+
+export type PreferencesCapabilityDeps = {
+  getAll: () => DesktopPreferencesSnapshot | Promise<DesktopPreferencesSnapshot>;
+  set: (
+    params: DesktopPreferenceSetParams,
+  ) =>
+    | HostInvokeResult<DesktopPreferenceSetResult>
+    | Promise<HostInvokeResult<DesktopPreferenceSetResult>>;
+  reset: (
+    params: DesktopPreferenceResetParams,
+  ) =>
+    | HostInvokeResult<DesktopPreferencesSnapshot>
+    | Promise<HostInvokeResult<DesktopPreferencesSnapshot>>;
+  pickDownloadDir?: () =>
+    | HostInvokeResult<DesktopPickDownloadDirResult>
+    | Promise<HostInvokeResult<DesktopPickDownloadDirResult>>;
+  relaunch?: () =>
+    | HostInvokeResult<{ relaunching: boolean }>
+    | Promise<HostInvokeResult<{ relaunching: boolean }>>;
+  status?: HostCapabilityStatus;
+  reason?: string;
+};
+
+export function createPreferencesCapabilityModule(
+  deps: PreferencesCapabilityDeps,
+): CapabilityModule {
+  return {
+    name: HOST_CAPABILITIES.PREFERENCES,
+    version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.PREFERENCES],
+    status: deps.status ?? 'available',
+    ...(deps.reason !== undefined ? { reason: deps.reason } : {}),
+    events: ['changed'],
+    methods: {
+      getAll: {
+        handler: async params => {
+          const checked = validateHostMethodParams(HOST_CAPABILITIES.PREFERENCES, 'getAll', params);
+          if (!checked.ok) return checked;
+          return hostOk(await deps.getAll());
+        },
+      },
+      set: {
+        handler: async params => {
+          const checked = validateHostMethodParams<DesktopPreferenceSetParams>(
+            HOST_CAPABILITIES.PREFERENCES,
+            'set',
+            params,
+          );
+          if (!checked.ok) return checked;
+          return deps.set(checked.data);
+        },
+      },
+      reset: {
+        handler: async params => {
+          const checked = validateHostMethodParams<DesktopPreferenceResetParams>(
+            HOST_CAPABILITIES.PREFERENCES,
+            'reset',
+            params,
+          );
+          if (!checked.ok) return checked;
+          return deps.reset(checked.data);
+        },
+      },
+      pickDownloadDir: {
+        handler: async params => {
+          const checked = validateHostMethodParams(
+            HOST_CAPABILITIES.PREFERENCES,
+            'pickDownloadDir',
+            params,
+          );
+          if (!checked.ok) return checked;
+          if (!deps.pickDownloadDir) {
+            return hostErr('UNSUPPORTED', 'Folder picker is not supported in this host');
+          }
+          return deps.pickDownloadDir();
+        },
+      },
+      relaunch: {
+        handler: async params => {
+          const checked = validateHostMethodParams(HOST_CAPABILITIES.PREFERENCES, 'relaunch', params);
+          if (!checked.ok) return checked;
+          if (!deps.relaunch) {
+            return hostErr('UNSUPPORTED', 'App relaunch is not supported in this host');
+          }
+          return deps.relaunch();
         },
       },
     },

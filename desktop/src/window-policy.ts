@@ -46,6 +46,11 @@ export type WindowPolicyConfig = {
   channel?: HostReleaseChannel;
   /** Allow http://127.0.0.1 / http://localhost ONLY when channel === "dev". */
   allowLocalDevLoopback?: boolean;
+  /**
+   * Optional user-selected test/dev Studio origin (explicitly validated by the
+   * test/dev environment switcher). Strictly ignored when `channel === 'stable'`.
+   */
+  explicitTestStudioOrigin?: string;
   /** Optional extra origins from signed config; filtered through built-in domain scope. */
   allowedOrigins?: readonly string[];
   /** Signed config `windowPolicy` section. */
@@ -128,6 +133,30 @@ const DEFAULT_ACCOUNT_PORTAL_HOSTS = new Set([
   'account.open-design.ai',
   'accounts.open-design.ai',
 ]);
+
+export const DEFAULT_FALLBACK_AUTH_ORIGINS_STABLE: readonly string[] = [
+  'https://accounts.open-design.ai',
+  'https://open-design.ai',
+  'https://www.open-design.ai',
+  'https://api.open-design.ai',
+] as const;
+
+export const DEFAULT_FALLBACK_AUTH_ORIGINS_TEST: readonly string[] = [
+  'https://vela-api.powerformer.net',
+  'https://open-design.powerformer.net',
+  'https://sso.powerformer.com',
+  ...DEFAULT_FALLBACK_AUTH_ORIGINS_STABLE,
+] as const;
+
+/**
+ * Built-in first-party OIDC / login origins permitted in the main BrowserWindow
+ * ONLY while `inWindowAuthFallbackActive` is true (with privileged IPC disabled).
+ */
+export function resolveDefaultFallbackAuthOrigins(channel: HostReleaseChannel): readonly string[] {
+  return channel === 'stable'
+    ? DEFAULT_FALLBACK_AUTH_ORIGINS_STABLE
+    : DEFAULT_FALLBACK_AUTH_ORIGINS_TEST;
+}
 
 const DEFAULT_BILLING_EXACT_HOSTS = new Set([
   ...DEFAULT_EXPLICIT_BILLING_HOSTS,
@@ -343,6 +372,10 @@ export function evaluateNavigationPolicy(
   const channel = config.channel ?? 'stable';
   const allowLocalDevLoopback = Boolean(config.allowLocalDevLoopback && channel === 'dev');
   const scopeOptions = { channel, allowLocalDevLoopback };
+  const explicitTestOrigin =
+    channel !== 'stable' && config.explicitTestStudioOrigin
+      ? normalizeOrigin(config.explicitTestStudioOrigin)
+      : null;
 
   const billingOptions = {
     extraHostnames: config.billingHostnames,
@@ -395,6 +428,14 @@ export function evaluateNavigationPolicy(
   }
 
   const studioOrigin = normalizeOrigin(config.studioOrigin);
+  if (explicitTestOrigin && parsed.origin === explicitTestOrigin) {
+    return {
+      action: 'allow',
+      reason: 'same-origin-studio',
+      openExternal: false,
+      isBillingOrAccountPortal: false,
+    };
+  }
   if (studioOrigin && parsed.origin === studioOrigin) {
     return {
       action: 'allow',
@@ -515,8 +556,21 @@ export function evaluateWindowOpenPolicy(
   const channel = config.channel ?? 'stable';
   const allowLocalDevLoopback = Boolean(config.allowLocalDevLoopback && channel === 'dev');
   const scopeOptions = { channel, allowLocalDevLoopback };
+  const explicitTestOrigin =
+    channel !== 'stable' && config.explicitTestStudioOrigin
+      ? normalizeOrigin(config.explicitTestStudioOrigin)
+      : null;
 
   const studioOrigin = normalizeOrigin(config.studioOrigin);
+  if (explicitTestOrigin && parsed.origin === explicitTestOrigin) {
+    return {
+      action: 'allow',
+      reason: 'same-origin-popup',
+      openExternal: false,
+      isBillingOrAccountPortal: false,
+      overrideBrowserWindowOptions: buildPopupOverrideOptions(),
+    };
+  }
   if (studioOrigin && parsed.origin === studioOrigin) {
     return {
       action: 'allow',

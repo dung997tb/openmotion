@@ -16,6 +16,7 @@ export type GenericUpdateFeedOptions = {
 export type AutoUpdaterLike = {
   autoDownload: boolean;
   autoInstallOnAppQuit: boolean;
+  allowPrerelease?: boolean;
   channel?: string | null;
   setFeedURL: (options: GenericUpdateFeedOptions) => void;
   on: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -64,7 +65,29 @@ export function compareSemver(a: string, b: string): number {
   }
   if (!left.pre && right.pre) return 1;
   if (left.pre && !right.pre) return -1;
-  return left.pre.localeCompare(right.pre);
+  if (!left.pre && !right.pre) return 0;
+  const leftParts = left.pre.split('.');
+  const rightParts = right.pre.split('.');
+  const len = Math.max(leftParts.length, rightParts.length);
+  for (let i = 0; i < len; i++) {
+    const segA = leftParts[i];
+    const segB = rightParts[i];
+    if (segA === undefined) return -1;
+    if (segB === undefined) return 1;
+    if (segA === segB) continue;
+    const isNumA = /^\d+$/.test(segA);
+    const isNumB = /^\d+$/.test(segB);
+    if (isNumA && isNumB) {
+      const diff = Number.parseInt(segA, 10) - Number.parseInt(segB, 10);
+      if (diff !== 0) return diff;
+    } else if (isNumA !== isNumB) {
+      return isNumA ? -1 : 1;
+    } else {
+      const cmp = segA.localeCompare(segB);
+      if (cmp !== 0) return cmp;
+    }
+  }
+  return 0;
 }
 
 export function normalizeUpdateChannel(channel?: HostReleaseChannel): UpdateFeedChannel {
@@ -275,6 +298,7 @@ export class DesktopUpdaterController {
       this.attached = true;
       updater.autoDownload = this.isPackaged ? this.autoDownload : false;
       updater.autoInstallOnAppQuit = this.isPackaged ? this.autoInstallOnAppQuit : false;
+      updater.allowPrerelease = this.feedConfig.channel === 'test';
       updater.channel = this.feedConfig.channel;
       updater.setFeedURL({
         provider: 'generic',

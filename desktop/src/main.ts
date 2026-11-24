@@ -1,4 +1,4 @@
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, nativeTheme, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, clipboard, crashReporter, dialog, Menu, nativeTheme, Notification, powerSaveBlocker, safeStorage, screen, session, shell } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,10 +13,10 @@ import {
 } from '../../shared/desktop-builtin-rules.ts';
 import {
   HOST_CAPABILITIES,
-  HOST_CAPABILITY_VERSIONS,
   HOST_CONTRACT_VERSION,
-  hostErr,
-  hostOk,
+  type DesktopPreferenceDescriptor,
+  type DesktopPreferenceKey,
+  type DesktopPreferencesSnapshot,
   type HostConfirmationRequest,
   type HostPlatform,
   type HostReleaseChannel,
@@ -33,33 +33,33 @@ import {
   createMacOsKeychainSecretStore,
 } from '../../packages/local-atoms/index.ts';
 import { SignedConfigManager } from '../../packages/signed-config/index.ts';
-import { DesktopAuthHandoffManager } from './auth-handoff.ts';
+import {
+  DesktopAuthHandoffManager,
+  parseStudioAuthNavigationUrl,
+  probeDesktopHandoffSupport,
+  sanitizeAuthReturnPath,
+} from './auth-handoff.ts';
 import { createElectronSafeSecretStore } from './safe-secret-store.ts';
 import { createDesktopSentryReporter } from './sentry.ts';
 import { DesktopTelemetryCollector } from './telemetry.ts';
-import { validateHostMethodParams } from '../../shared/desktop-schemas.ts';
-import type { DesktopTelemetryRecordInput } from '../../shared/desktop-telemetry.ts';
 import {
   CapabilityRegistry,
-  createAccountCapabilityModule,
-  createDiagnosticsCapabilityModule,
-  createUpdaterCapabilityModule,
   createWebContentsEventSink,
-  createWindowCapabilityModule,
-  type CapabilityModule,
 } from './capability-registry.ts';
 import { ensureDesktopDataLayout } from './data-layout.ts';
 import {
   authorizePrivilegedIpcSender,
-  authorizeSplashSender,
-  HOST_IPC_CHANNELS,
   resolveAllowedStudioOrigins,
   type PrivilegedIpcGuardOptions,
 } from './ipc-guard.ts';
 import { createDesktopDiagnosticZip, DesktopLogger } from './logger.ts';
-import { buildDesktopMenuTemplate } from './menu.ts';
+import { buildDesktopDockMenuTemplate, buildDesktopMenuTemplate } from './menu.ts';
+import { attachNativeContextMenu } from './context-menu.ts';
 import {
+  buildDesktopChromeCss,
   buildMainWindowOptions,
+  DEFAULT_MAIN_WINDOW_BOUNDS,
+  getDesktopWindowBackgroundColor,
   getWindowsTitleBarOverlay,
   normalizeDesktopPlatform,
   resolveDesktopChrome,
@@ -69,14 +69,47 @@ import {
   extractDeepLinkFromArgv,
   registerDesktopProtocolClient,
 } from './protocol.ts';
-import { SplashController } from './splash.ts';
+import type { SplashController } from './splash.ts';
 import { DesktopUpdaterController, resolvePackagedReleaseChannel } from './updater.ts';
 import {
   attachWindowNavigationPolicies,
   isAllowedExternalUrl,
+  resolveDefaultFallbackAuthOrigins,
   type PolicyWebContentsLike,
   type WindowPolicyConfig,
 } from './window-policy.ts';
+import {
+  readWindowState,
+  resolveRestoredWindowBounds,
+  writeWindowState,
+} from './window-state.ts';
+import { DesktopPreferencesStore, resolveDesktopPreferenceValues } from './prefs.ts';
+import {
+  DesktopEnvironmentStore,
+  describeDesktopEnvironment,
+  extractStudioUrlFromArgv,
+  isEnvironmentSwitcherEnabled,
+  parseExtraAllowedEnvDomains,
+  resolveEnvironmentSessionPartition,
+  validateTestEnvironmentUrl,
+  type TestEnvironmentValidationOptions,
+} from './env-switcher.ts';
+import {
+  buildRendererCrashRetryInfo,
+  isSafeHistoryNavigationTarget,
+  RendererCrashGuard,
+  resolveUpdaterMenuPresentation,
+  TaskProgressCoordinator,
+  WakeLockManager,
+} from './ux-controllers.ts';
+import { createBootOverlayController } from './main-boot-overlay.ts';
+import { registerDesktopCapabilities } from './main-capabilities.ts';
+import {
+  createManualUpdateFeedbackPresenter,
+  createSessionDownloadController,
+} from './main-downloads.ts';
+import { createDesktopEnvironmentController } from './main-env-runtime.ts';
+import { registerDesktopIpc } from './main-ipc.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const distDir = path.dirname(__filename);
@@ -193,7 +226,29 @@ const signedConfig = new SignedConfigManager({
   allowLocalDevLoopback,
 });
 
-function resolveStudioUrl(): string {
+const envSwitcherEnabled = isEnvironmentSwitcherEnabled(releaseChannel);
+const envValidationOptions: TestEnvironmentValidationOptions = {
+  channel: releaseChannel,
+  ...(envSwitcherEnabled
+    ? {
+        extraAllowedDomains: parseExtraAllowedEnvDomains(
+          process.env.OPENMOTION_DESKTOP_ALLOWED_ENV_DOMAINS,
+        ),
+      }
+    : {}),
+};
+const envStore = envSwitcherEnabled
+  ? new DesktopEnvironmentStore(
+      path.join(dataLayout.paths.configDir, 'dev-env.json'),
+      envValidationOptions,
+    )
+  : null;
+let cliStudioUrlOverride: string | undefined = extractStudioUrlFromArgv(
+  process.argv,
+  envValidationOptions,
+);
+
+function resolveBaseDefaultStudioUrl(): string {
   const envOverride = !app.isPackaged ? process.env.MOTION_DESKTOP_STUDIO_URL?.trim() : undefined;
   if (
     envOverride &&
@@ -211,27 +266,111 @@ function resolveStudioUrl(): string {
   return DEFAULT_STUDIO_URLS[releaseChannel];
 }
 
+function resolveStudioUrl(): string {
+  if (envSwitcherEnabled) {
+    if (cliStudioUrlOverride) {
+      return cliStudioUrlOverride;
+    }
+    const persisted = envStore?.get().overrideUrl;
+    if (persisted) {
+      const checked = validateTestEnvironmentUrl(persisted, envValidationOptions);
+      if (checked.ok) {
+        return checked.normalizedUrl;
+      }
+    }
+  }
+  return resolveBaseDefaultStudioUrl();
+}
+
 function resolveStudioOrigin(): string {
   return new URL(resolveStudioUrl()).origin;
 }
 
+function resolveExplicitTestStudioOrigin(): string | undefined {
+  if (!envSwitcherEnabled) return undefined;
+  const activeUrl = resolveStudioUrl();
+  const checked = validateTestEnvironmentUrl(activeUrl, envValidationOptions);
+  if (!checked.ok) return undefined;
+  const inDefaultScope = isUrlInAllowedDomainScope(checked.origin, {
+    channel: releaseChannel,
+    allowLocalDevLoopback,
+  });
+  return inDefaultScope ? undefined : checked.origin;
+}
+
+function resolveCurrentEnvironmentDescription() {
+  return describeDesktopEnvironment(resolveStudioUrl(), {
+    channel: releaseChannel,
+    defaultUrl: resolveBaseDefaultStudioUrl(),
+  });
+}
+
+function resolveCurrentSessionPartition(): string | undefined {
+  if (!envSwitcherEnabled) return undefined;
+  return resolveEnvironmentSessionPartition(resolveStudioUrl(), resolveBaseDefaultStudioUrl());
+}
+
 const linuxCustomTitleBar = process.env.MOTION_LINUX_NATIVE_FRAME !== '1';
+const windowStatePath = path.join(dataDir, 'window-state.json');
+const desktopPrefs = new DesktopPreferencesStore(
+  path.join(dataLayout.paths.configDir, 'desktop-prefs.json'),
+);
+const bootHardwareAcceleration = desktopPrefs.get().hardwareAcceleration !== false;
+if (!bootHardwareAcceleration) {
+  try {
+    app.disableHardwareAcceleration();
+  } catch {
+    // Ignore if hardware acceleration cannot be disabled on this host build.
+  }
+}
+const crashGuard = new RendererCrashGuard();
+const wakeLockManager = new WakeLockManager({
+  start: () => powerSaveBlocker.start('prevent-app-suspension'),
+  stop: id => powerSaveBlocker.stop(id),
+});
+const progressCoordinator = new TaskProgressCoordinator(value => {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.setProgressBar(value);
+  } catch {
+    // Ignore progress bar failures on unsupported desktop environments.
+  }
+});
 let mainWindow: BrowserWindow | null = null;
-let splash: SplashController | null = null;
+const splash: SplashController | null = null;
 let domFullscreen = false;
+let themePreference: 'system' | 'light' | 'dark' = 'system';
 let currentTheme: 'light' | 'dark' = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
 let rendererReady = false;
 let shuttingDown = false;
+let quitConfirmed = false;
 let quitPromptOpen = false;
 let inWindowAuthFallbackActive = false;
 let showingRetryPage = false;
+let manualUpdateCheckPending = false;
+let lastNotifiedDownloadedVersion: string | null = null;
+let lastMenuStateSignature = '';
 let pendingMenuActions: DesktopMenuAction[] = [];
 const MAX_PENDING_MENU_ACTIONS = 32;
 let signedConfigRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let windowStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let startupLoadWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+let unresponsiveTimer: ReturnType<typeof setTimeout> | null = null;
+let unresponsiveDialogOpen = false;
+let lastNormalWindowBounds: { x: number; y: number; width: number; height: number } | null = null;
+let shouldRestoreMaximized = false;
+let activeWindowPartition: string | undefined;
+let switchingMainWindow = false;
+
+const STARTUP_LOAD_TIMEOUT_MS = 18_000;
+const UNRESPONSIVE_PROMPT_DELAY_MS = 8_000;
 
 const protocolRouter = new DesktopProtocolRouter({
-  onActivateMainWindow: () => {
-    focusOrRestoreMainWindow();
+  allowEnvParam: envSwitcherEnabled,
+  envValidation: envValidationOptions,
+  onActivateMainWindow: link => {
+    void handleDeepLinkOpen(link.params);
   },
 });
 protocolRouter.subscribe(link => {
@@ -245,6 +384,10 @@ const updater = new DesktopUpdaterController({
   feedUrl: !app.isPackaged ? process.env.MOTION_DESKTOP_UPDATE_URL?.trim() || undefined : undefined,
 });
 
+let pendingLoginReturnPath: string | undefined;
+const handoffSupportCache = new Map<string, { supported: boolean; checkedAt: number }>();
+const HANDOFF_PROBE_CACHE_TTL_MS = 30_000;
+
 const authHandoff = new DesktopAuthHandoffManager({
   getStudioOrigin: () => resolveStudioOrigin(),
   openExternal: async url => {
@@ -255,16 +398,132 @@ const authHandoff = new DesktopAuthHandoffManager({
     if (!win) {
       throw new Error('Main window is unavailable for session exchange');
     }
-    return await win.webContents.session.fetch(url, init);
+    const response = await win.webContents.session.fetch(url, {
+      ...init,
+      credentials: 'include',
+    });
+    if (response.ok) {
+      await win.webContents.session.cookies.flushStore().catch(() => {});
+    }
+    return response;
   },
   onFocusMainWindow: () => {
     inWindowAuthFallbackActive = false;
+    const returnPath = pendingLoginReturnPath;
+    pendingLoginReturnPath = undefined;
     focusOrRestoreMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
-      void mainWindow.loadURL(resolveStudioUrl());
+      void loadStudioIntoMainWindow(returnPath);
     }
   },
 });
+
+async function isDesktopHandoffSupportedForOrigin(studioOrigin: string): Promise<boolean> {
+  const cached = handoffSupportCache.get(studioOrigin);
+  if (cached && Date.now() - cached.checkedAt < HANDOFF_PROBE_CACHE_TTL_MS) {
+    return cached.supported;
+  }
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const probeFetch = win
+    ? (url: string, init: { method: 'GET'; redirect: 'manual'; signal?: AbortSignal }) =>
+        win.webContents.session.fetch(url, init)
+    : (url: string, init: { method: 'GET'; redirect: 'manual'; signal?: AbortSignal }) => fetch(url, init);
+  const supported = await probeDesktopHandoffSupport(studioOrigin, probeFetch);
+  handoffSupportCache.set(studioOrigin, { supported, checkedAt: Date.now() });
+  return supported;
+}
+
+async function openInWindowLoginFlow(params?: {
+  returnPath?: string;
+  switchAccount?: boolean;
+}): Promise<Record<string, unknown>> {
+  const returnPath = sanitizeAuthReturnPath(params?.returnPath);
+  inWindowAuthFallbackActive = true;
+  const loginUrl = authHandoff.openInWindowFallback({
+    returnPath,
+    switchAccount: params?.switchAccount,
+  });
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  if (win) {
+    try {
+      await win.loadURL(loginUrl);
+    } catch (error) {
+      inWindowAuthFallbackActive = false;
+      throw error;
+    }
+  }
+  return { mode: 'in-window', state: 'in-window', url: loginUrl };
+}
+
+async function startDesktopSignIn(params?: {
+  returnPath?: string;
+  switchAccount?: boolean;
+}): Promise<Record<string, unknown>> {
+  const studioOrigin = resolveStudioOrigin();
+  const returnPath = sanitizeAuthReturnPath(params?.returnPath);
+  const supported = await isDesktopHandoffSupportedForOrigin(studioOrigin);
+  if (!supported) {
+    logger.info('main', 'Desktop PKCE handoff route unavailable on Studio origin; using in-window sign-in', {
+      studioOrigin,
+    });
+    return await openInWindowLoginFlow({
+      returnPath,
+      switchAccount: params?.switchAccount,
+    });
+  }
+
+  const startedAt = Date.now();
+  pendingLoginReturnPath = returnPath;
+  try {
+    const result = await authHandoff.startLogin({
+      switchAccount: params?.switchAccount,
+    });
+    void result.completion
+      .then(finalState => {
+        if (finalState.status !== 'authenticated') {
+          pendingLoginReturnPath = undefined;
+        }
+        const outcome =
+          finalState.status === 'authenticated'
+            ? 'authenticated'
+            : finalState.status === 'canceled'
+              ? 'cancelled'
+              : finalState.errorCode === 'TIMEOUT'
+                ? 'timeout'
+                : 'error';
+        telemetry.record({
+          category: 'auth.handoff',
+          outcome,
+          durationMs: Date.now() - startedAt,
+        });
+      })
+      .catch(() => {
+        pendingLoginReturnPath = undefined;
+        telemetry.record({
+          category: 'auth.handoff',
+          outcome: 'error',
+          durationMs: Date.now() - startedAt,
+        });
+      });
+    // Return only structuredClone-safe plain fields over Electron IPC (never return the completion Promise).
+    return {
+      mode: 'browser-handoff',
+      url: result.startUrl,
+      startUrl: result.startUrl,
+      redirectUri: result.redirectUri,
+      state: result.state,
+      codeChallenge: result.codeChallenge,
+    };
+  } catch (error) {
+    pendingLoginReturnPath = undefined;
+    telemetry.record({
+      category: 'auth.handoff',
+      outcome: 'error',
+      durationMs: Date.now() - startedAt,
+    });
+    throw error;
+  }
+}
 
 function formatConfirmationDetail(request: HostConfirmationRequest): string {
   const lines = [
@@ -349,18 +608,103 @@ function currentChromeState(): DesktopChromeInsets {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
   const fullscreen = Boolean(win?.isFullScreen() || domFullscreen);
   const maximized = Boolean(win?.isMaximized());
+  const zoomFactor = win ? win.webContents.getZoomFactor() : 1;
   return resolveDesktopChrome({
     platform,
     fullscreen,
     maximized,
     linuxCustomTitleBar,
+    zoomFactor,
   });
+}
+
+function adjustMainWindowZoom(direction: 'in' | 'out' | 'reset'): void {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  const wc = win.webContents;
+  if (direction === 'reset') {
+    wc.setZoomFactor(1);
+  } else {
+    const current = wc.getZoomFactor();
+    const next =
+      direction === 'in'
+        ? Math.min(2, Math.round((current + 0.1) * 10) / 10)
+        : Math.max(0.5, Math.round((current - 0.1) * 10) / 10);
+    wc.setZoomFactor(next);
+  }
+  broadcastChromeState();
+}
+
+let injectedChromeCssKey: string | null = null;
+let chromeCssGeneration = 0;
+let liveResizingActive = false;
+let liveResizeIdleTimer: ReturnType<typeof setTimeout> | null = null;
+const LIVE_RESIZE_SETTLE_MS = 120;
+
+function setLiveResizing(active: boolean): void {
+  if (liveResizingActive === active) return;
+  liveResizingActive = active;
+  registry.emit(HOST_CAPABILITIES.WINDOW, 'resizing', { active });
+}
+
+function markLiveResizing(): void {
+  if (liveResizeIdleTimer) {
+    clearTimeout(liveResizeIdleTimer);
+  }
+  setLiveResizing(true);
+  liveResizeIdleTimer = setTimeout(() => {
+    liveResizeIdleTimer = null;
+    setLiveResizing(false);
+  }, LIVE_RESIZE_SETTLE_MS);
+}
+
+function finishLiveResizing(): void {
+  if (liveResizeIdleTimer) {
+    clearTimeout(liveResizeIdleTimer);
+    liveResizeIdleTimer = null;
+  }
+  setLiveResizing(false);
+}
+
+async function syncWindowChromeCss(): Promise<void> {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  const wc = win.webContents;
+  const currentUrl = wc.getURL();
+  if (!currentUrl || (!currentUrl.startsWith('https://') && !currentUrl.startsWith('http://'))) {
+    return;
+  }
+  const gen = ++chromeCssGeneration;
+  const css = buildDesktopChromeCss(currentChromeState());
+  if (!css) {
+    const prevKey = injectedChromeCssKey;
+    injectedChromeCssKey = null;
+    if (prevKey) {
+      await wc.removeInsertedCSS(prevKey).catch(() => {});
+    }
+    return;
+  }
+  try {
+    const nextKey = await wc.insertCSS(css);
+    if (win.isDestroyed() || gen !== chromeCssGeneration) {
+      await wc.removeInsertedCSS(nextKey).catch(() => {});
+      return;
+    }
+    const prevKey = injectedChromeCssKey;
+    injectedChromeCssKey = nextKey;
+    if (prevKey && prevKey !== nextKey) {
+      await wc.removeInsertedCSS(prevKey).catch(() => {});
+    }
+  } catch {
+    // Ignore CSS injection failures during navigation teardown.
+  }
 }
 
 function broadcastChromeState(): void {
   const state = currentChromeState();
   registry.emit(HOST_CAPABILITIES.WINDOW, 'chromeState', state);
   registry.emit(HOST_CAPABILITIES.WINDOW, 'chrome-state', state);
+  void syncWindowChromeCss();
 }
 
 function focusOrRestoreMainWindow(): void {
@@ -372,6 +716,7 @@ function focusOrRestoreMainWindow(): void {
 }
 
 function buildRuntimeInfo(): HostRuntimeInfo {
+  const envDesc = resolveCurrentEnvironmentDescription();
   return {
     hostKind: 'desktop',
     shellVersion: app.getVersion(),
@@ -389,6 +734,9 @@ function buildRuntimeInfo(): HostRuntimeInfo {
     dataDir,
     logDir,
     dataLayoutVersion: DESKTOP_DATA_LAYOUT_VERSION,
+    activeStudioUrl: envDesc.url,
+    environmentLabel: envDesc.label,
+    isCustomEnvironment: envDesc.isCustomOverride,
   };
 }
 
@@ -400,6 +748,7 @@ function getPrivilegedGuardOptions(): PrivilegedIpcGuardOptions {
     studioUrl: resolveStudioUrl(),
     allowedOrigins: active.allowedOrigins,
     allowLocalDevLoopback,
+    explicitTestStudioOrigin: resolveExplicitTestStudioOrigin(),
     inWindowAuthFallbackActive,
   };
 }
@@ -417,6 +766,7 @@ function maybeReloadMainWindowForSignedConfigChange(): void {
       studioUrl: resolveStudioUrl(),
       allowedOrigins: active.allowedOrigins,
       allowLocalDevLoopback,
+      explicitTestStudioOrigin: resolveExplicitTestStudioOrigin(),
     });
     if (!allowedOrigins.has(currentOrigin)) {
       logger.info('main', 'Reloading Studio after signed config origin migration', {
@@ -437,8 +787,10 @@ function getWindowPolicyConfig(): WindowPolicyConfig {
     channel: releaseChannel,
     allowedOrigins: active.allowedOrigins,
     windowPolicy: active.windowPolicy,
+    explicitIdpAuthOrigins: resolveDefaultFallbackAuthOrigins(releaseChannel),
     inWindowAuthFallbackActive,
     allowLocalDevLoopback,
+    explicitTestStudioOrigin: resolveExplicitTestStudioOrigin(),
   };
 }
 
@@ -447,6 +799,231 @@ function queuePendingMenuAction(action: DesktopMenuAction): void {
     pendingMenuActions.shift();
   }
   pendingMenuActions.push(action);
+}
+
+function getEffectiveAppLocale(): string {
+  return desktopPrefs.get().locale || app.getLocale();
+}
+
+function isZhAppLocale(): boolean {
+  return getEffectiveAppLocale().toLowerCase().startsWith('zh');
+}
+
+function isConfirmBeforeQuitEnabled(): boolean {
+  return desktopPrefs.get().confirmBeforeQuit !== false;
+}
+
+function isAutoCheckUpdatesEnabled(): boolean {
+  return desktopPrefs.get().autoCheckUpdates !== false;
+}
+
+function getOpenAtLoginSupport(): { supported: boolean; reason?: string } {
+  if (platform !== 'darwin' && platform !== 'win32') {
+    return { supported: false, reason: 'Launch at login is only supported on macOS and Windows.' };
+  }
+  if (!app.isPackaged) {
+    return { supported: false, reason: 'Launch at login applies to packaged desktop releases.' };
+  }
+  return { supported: true };
+}
+
+function readOpenAtLogin(): boolean {
+  if (!getOpenAtLoginSupport().supported) return false;
+  try {
+    return Boolean(app.getLoginItemSettings().openAtLogin);
+  } catch {
+    return false;
+  }
+}
+
+function buildDesktopPreferencesSnapshot(): DesktopPreferencesSnapshot {
+  const stored = desktopPrefs.get();
+  const values = resolveDesktopPreferenceValues(stored, {
+    openAtLogin: readOpenAtLogin(),
+  });
+  const loginSupport = getOpenAtLoginSupport();
+  const descriptors: DesktopPreferenceDescriptor[] = [
+    { key: 'confirmBeforeQuit', supported: true },
+    {
+      key: 'openAtLogin',
+      supported: loginSupport.supported,
+      ...(loginSupport.reason ? { reason: loginSupport.reason } : {}),
+    },
+    { key: 'autoCheckUpdates', supported: true },
+    { key: 'hardwareAcceleration', supported: true, requiresRestart: true },
+    { key: 'locale', supported: true },
+    { key: 'lastDownloadDir', supported: true, picker: true },
+  ];
+  const pendingRestartKeys: DesktopPreferenceKey[] = [];
+  if (values.hardwareAcceleration !== bootHardwareAcceleration) {
+    pendingRestartKeys.push('hardwareAcceleration');
+  }
+  return {
+    values,
+    descriptors,
+    platform,
+    pendingRestartKeys,
+  };
+}
+
+function emitPreferencesChanged(): void {
+  registry.emit(HOST_CAPABILITIES.PREFERENCES, 'changed', buildDesktopPreferencesSnapshot());
+}
+
+function clearStartupLoadWatchdog(): void {
+  if (startupLoadWatchdogTimer) {
+    clearTimeout(startupLoadWatchdogTimer);
+    startupLoadWatchdogTimer = null;
+  }
+}
+
+function clearUnresponsiveTimer(): void {
+  if (unresponsiveTimer) {
+    clearTimeout(unresponsiveTimer);
+    unresponsiveTimer = null;
+  }
+}
+
+function applyResolvedTheme(nextTheme: 'light' | 'dark'): void {
+  const changed = nextTheme !== currentTheme;
+  currentTheme = nextTheme;
+  const win = mainWindow;
+  if (win && !win.isDestroyed()) {
+    try {
+      win.setBackgroundColor(getDesktopWindowBackgroundColor(currentTheme));
+      if (platform === 'win32') {
+        win.setTitleBarOverlay(getWindowsTitleBarOverlay(currentTheme));
+      }
+    } catch {
+      // Ignore background / overlay update failures on unsupported modes.
+    }
+    if (showingRetryPage) {
+      void win.webContents
+        .executeJavaScript(`window.__setDesktopTheme && window.__setDesktopTheme(${JSON.stringify(currentTheme)})`)
+        .catch(() => {});
+    } else {
+      void syncEnvironmentBadge(win);
+    }
+  }
+  if (changed) {
+    registry.emit(HOST_CAPABILITIES.WINDOW, 'themeChanged', {
+      theme: currentTheme,
+      source: themePreference,
+    });
+  }
+}
+
+function showDesktopNotification(options: {
+  title: string;
+  body?: string;
+  silent?: boolean;
+  bounce?: boolean;
+  whenUnfocusedOnly?: boolean;
+  onClick?: () => void;
+}): { delivered: boolean; bounced: boolean } {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const isFocused = Boolean(win?.isFocused());
+  if (options.whenUnfocusedOnly && isFocused) {
+    return { delivered: false, bounced: false };
+  }
+
+  let bounced = false;
+  if (options.bounce !== false && platform === 'darwin' && !isFocused) {
+    try {
+      app.dock?.bounce('informational');
+      bounced = true;
+    } catch {
+      // Ignore dock bounce errors.
+    }
+  }
+
+  if (!Notification.isSupported()) {
+    return { delivered: false, bounced };
+  }
+  try {
+    const notification = new Notification({
+      title: options.title,
+      ...(options.body ? { body: options.body } : {}),
+      ...(typeof options.silent === 'boolean' ? { silent: options.silent } : {}),
+    });
+    notification.on('click', () => {
+      if (options.onClick) {
+        options.onClick();
+      } else {
+        focusOrRestoreMainWindow();
+      }
+    });
+    notification.show();
+    return { delivered: true, bounced };
+  } catch {
+    return { delivered: false, bounced };
+  }
+}
+
+async function installDownloadedUpdate(): Promise<{ ok: boolean; error?: string }> {
+  const startedAt = Date.now();
+  const result = await updater.installUpdateNow(async () => {
+    quitConfirmed = true;
+    shuttingDown = true;
+    wakeLockManager.releaseAll();
+    progressCoordinator.clearAll();
+    authHandoff.cancelLogin();
+    logger.markSessionEnded('install-update');
+  });
+  telemetry.record({
+    category: 'updater.install',
+    outcome: result.ok ? 'ok' : 'error',
+    durationMs: Date.now() - startedAt,
+  });
+  return result;
+}
+
+function getAllowedHistoryOrigins(): Set<string> {
+  const active = signedConfig.getActiveConfig();
+  return resolveAllowedStudioOrigins({
+    channel: releaseChannel,
+    studioUrl: resolveStudioUrl(),
+    allowedOrigins: active.allowedOrigins,
+    allowLocalDevLoopback,
+  });
+}
+
+function getHistoryNavigationAvailability(): { canGoBack: boolean; canGoForward: boolean } {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || showingRetryPage || inWindowAuthFallbackActive) {
+    return { canGoBack: false, canGoForward: false };
+  }
+  try {
+    const history = win.webContents.navigationHistory;
+    const activeIndex = history.getActiveIndex();
+    const allowedOrigins = getAllowedHistoryOrigins();
+    const prevEntry = activeIndex > 0 ? history.getEntryAtIndex(activeIndex - 1) : undefined;
+    const nextEntry =
+      activeIndex >= 0 && activeIndex + 1 < history.length()
+        ? history.getEntryAtIndex(activeIndex + 1)
+        : undefined;
+    return {
+      canGoBack: isSafeHistoryNavigationTarget(prevEntry?.url, allowedOrigins),
+      canGoForward: isSafeHistoryNavigationTarget(nextEntry?.url, allowedOrigins),
+    };
+  } catch {
+    return { canGoBack: false, canGoForward: false };
+  }
+}
+
+function navigateMainWindowHistory(direction: 'back' | 'forward'): boolean {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return false;
+  const availability = getHistoryNavigationAvailability();
+  if (direction === 'back' && availability.canGoBack) {
+    win.webContents.navigationHistory.goBack();
+    return true;
+  }
+  if (direction === 'forward' && availability.canGoForward) {
+    win.webContents.navigationHistory.goForward();
+    return true;
+  }
+  return false;
 }
 
 function dispatchMenuAction(action: DesktopMenuAction): void {
@@ -459,7 +1036,10 @@ function dispatchMenuAction(action: DesktopMenuAction): void {
     return;
   }
   if (action === 'check-updates') {
-    void updater.checkForUpdates();
+    manualUpdateCheckPending = true;
+    void updater.checkForUpdates().then(state => {
+      void maybePresentManualUpdateFeedback(state);
+    });
   }
   focusOrRestoreMainWindow();
   if (rendererReady) {
@@ -522,6 +1102,25 @@ async function openLogsFolder(): Promise<{ ok: boolean; path?: string; error?: s
   return { ok: true, path: logDir };
 }
 
+const bootOverlay = createBootOverlayController({
+  distDir,
+  getMainWindow: () => mainWindow,
+  getCurrentTheme: () => currentTheme,
+  isShuttingDown: () => shuttingDown,
+});
+
+function dismissBootOverlay(options: { immediate?: boolean } = {}): void {
+  bootOverlay.dismiss(options);
+}
+
+function scheduleBootOverlayDismiss(delayMs = 200): void {
+  bootOverlay.scheduleDismiss(delayMs);
+}
+
+function attachBootOverlay(win: BrowserWindow, onReady: () => void): void {
+  bootOverlay.attach(win, onReady);
+}
+
 function revealMainWindow(): void {
   const win = mainWindow;
   if (!win || win.isDestroyed()) return;
@@ -532,31 +1131,96 @@ function revealMainWindow(): void {
   broadcastChromeState();
 }
 
-async function showRetryPage(info: { code?: string; message?: string; detail?: string }): Promise<void> {
+async function showRetryPage(info: {
+  badge?: string;
+  title?: string;
+  code?: string;
+  message?: string;
+  detail?: string;
+  force?: boolean;
+}): Promise<void> {
   const win = mainWindow;
-  if (!win || win.isDestroyed() || showingRetryPage) return;
+  if (!win || win.isDestroyed()) return;
+  if (showingRetryPage && !info.force) return;
+  clearStartupLoadWatchdog();
+  clearUnresponsiveTimer();
+  dismissBootOverlay({ immediate: true });
   showingRetryPage = true;
   inWindowAuthFallbackActive = false;
   rendererReady = false;
-  const query: Record<string, string> = { theme: currentTheme };
+  const query: Record<string, string> = {
+    theme: currentTheme,
+    locale: getEffectiveAppLocale(),
+  };
+  if (platform === 'linux' && linuxCustomTitleBar) {
+    query.customWindowControls = '1';
+  }
+  if (envSwitcherEnabled) {
+    const envDesc = resolveCurrentEnvironmentDescription();
+    query.canSwitchEnv = '1';
+    if (envDesc.isCustomOverride) {
+      query.canResetEnv = '1';
+    }
+  }
+  if (info.badge) query.badge = info.badge;
+  if (info.title) query.title = info.title;
   if (info.code) query.code = info.code;
   if (info.message) query.message = info.message;
   if (info.detail) query.detail = info.detail;
   await win.loadFile(path.join(distDir, 'retry.html'), { query });
   revealMainWindow();
+  refreshDesktopMenus();
 }
 
-async function loadStudioIntoMainWindow(): Promise<void> {
+async function loadStudioIntoMainWindow(targetPath?: string): Promise<void> {
   const win = mainWindow;
   if (!win || win.isDestroyed()) return;
+  clearStartupLoadWatchdog();
+  clearUnresponsiveTimer();
   showingRetryPage = false;
   inWindowAuthFallbackActive = false;
   rendererReady = false;
-  const targetUrl = resolveStudioUrl();
+  const baseTargetUrl = resolveStudioUrl();
+  let targetUrl = baseTargetUrl;
+  if (targetPath && targetPath.startsWith('/')) {
+    try {
+      targetUrl = new URL(targetPath, baseTargetUrl).toString();
+    } catch {
+      targetUrl = baseTargetUrl;
+    }
+  }
   logger.info('main', 'Loading cloud Studio URL', { url: targetUrl });
+
+  startupLoadWatchdogTimer = setTimeout(() => {
+    startupLoadWatchdogTimer = null;
+    if (shuttingDown || !mainWindow || mainWindow.isDestroyed() || showingRetryPage || rendererReady) {
+      return;
+    }
+    const loadedUrl = mainWindow.webContents.getURL();
+    if (loadedUrl && !loadedUrl.startsWith('file://') && !mainWindow.webContents.isLoadingMainFrame()) {
+      return;
+    }
+    logger.warn('main', 'Cloud Studio load timed out', { url: targetUrl, timeoutMs: STARTUP_LOAD_TIMEOUT_MS });
+    const zh = isZhAppLocale();
+    void showRetryPage({
+      badge: zh ? '连接超时' : 'Connection timed out',
+      title: zh ? '连接 OpenDesign 超时' : 'Taking longer than usual to connect',
+      code: 'NET_TIMEOUT',
+      message: zh
+        ? '暂时未能连上 OpenDesign Cloud，请检查网络或代理设置后重试。'
+        : 'OpenDesign Cloud did not respond in time. Check your network or proxy settings and retry.',
+      detail: `${targetUrl} (${Math.round(STARTUP_LOAD_TIMEOUT_MS / 1000)}s)`,
+      force: true,
+    });
+  }, STARTUP_LOAD_TIMEOUT_MS);
+
   try {
     await win.loadURL(targetUrl);
   } catch (error) {
+    clearStartupLoadWatchdog();
+    // If shutting down, window was destroyed, or `did-fail-load` already transitioned to retry.html
+    // (which aborts the superseded `loadURL` promise with ERR_ABORTED -3), exit cleanly.
+    if (shuttingDown || win.isDestroyed() || showingRetryPage) return;
     const message = error instanceof Error ? error.message : String(error);
     logger.error('main', 'Failed to load cloud Studio URL', { error: message });
     await showRetryPage({
@@ -567,364 +1231,271 @@ async function loadStudioIntoMainWindow(): Promise<void> {
   }
 }
 
+const sessionDownloads = createSessionDownloadController({
+  desktopPrefs,
+  wakeLockManager,
+  progressCoordinator,
+  isZhAppLocale,
+  emitPreferencesChanged,
+  focusOrRestoreMainWindow,
+  showDesktopNotification,
+});
+
+const manualUpdateFeedback = createManualUpdateFeedbackPresenter({
+  updater,
+  getMainWindow: () => mainWindow,
+  getEffectiveAppLocale,
+  isShuttingDown: () => shuttingDown,
+  isManualUpdateCheckPending: () => manualUpdateCheckPending,
+  setManualUpdateCheckPending: pending => {
+    manualUpdateCheckPending = pending;
+  },
+  installDownloadedUpdate,
+});
+
+const envController = createDesktopEnvironmentController({
+  distDir,
+  platform,
+  releaseChannel,
+  envSwitcherEnabled,
+  envValidationOptions,
+  envStore,
+  authHandoff,
+  registry,
+  logger,
+  wakeLockManager,
+  progressCoordinator,
+  getMainWindow: () => mainWindow,
+  createMainWindow,
+  getCurrentTheme: () => currentTheme,
+  getEffectiveAppLocale,
+  isZhAppLocale,
+  isShuttingDown: () => shuttingDown,
+  getActiveWindowPartition: () => activeWindowPartition,
+  setSwitchingMainWindow: switching => {
+    switchingMainWindow = switching;
+  },
+  clearCliStudioUrlOverride: () => {
+    cliStudioUrlOverride = undefined;
+  },
+  setInWindowAuthFallbackActive: active => {
+    inWindowAuthFallbackActive = active;
+  },
+  resolveBaseDefaultStudioUrl,
+  resolveStudioUrl,
+  resolveStudioOrigin,
+  resolveCurrentEnvironmentDescription,
+  resolveCurrentSessionPartition,
+  clearStartupLoadWatchdog,
+  clearUnresponsiveTimer,
+  flushMainWindowState,
+  focusOrRestoreMainWindow,
+  refreshDesktopMenus,
+  loadStudioIntoMainWindow,
+  showDesktopNotification,
+});
+
 function registerCapabilities(): void {
-  registry.register(
-    createWindowCapabilityModule({
-      getChromeState: () => currentChromeState(),
-      setTheme: theme => {
-        currentTheme = theme;
-        nativeTheme.themeSource = currentTheme;
-        if (platform === 'win32' && mainWindow && !mainWindow.isDestroyed()) {
-          try {
-            mainWindow.setTitleBarOverlay(getWindowsTitleBarOverlay(currentTheme));
-          } catch {
-            // Ignore overlay update failures on unsupported Electron modes.
-          }
-        }
-      },
-      minimize: () => {
-        mainWindow?.minimize();
-      },
-      toggleMaximize: () => {
-        if (!mainWindow || mainWindow.isDestroyed()) return;
-        if (mainWindow.isMaximized()) mainWindow.unmaximize();
-        else mainWindow.maximize();
-      },
-      close: () => {
-        mainWindow?.close();
-      },
-      openExternal: url => openExternalSafe(url),
-      notifyRendererReady: () => {
-        if (!rendererReady) {
-          telemetry.record({
-            category: 'app.startup',
-            outcome: 'ok',
-            durationMs: Date.now() - appStartupStartedAt,
-          });
-        }
-        rendererReady = true;
-        revealMainWindow();
-        const queued = pendingMenuActions;
-        pendingMenuActions = [];
-        for (const action of queued) {
-          registry.emit(HOST_CAPABILITIES.WINDOW, 'menuAction', action);
-          registry.emit(HOST_CAPABILITIES.WINDOW, 'menu-action', action);
-        }
-      },
-      retryStartup: async () => {
-        await loadStudioIntoMainWindow();
-      },
-    }),
-  );
-
-  registry.register(
-    createUpdaterCapabilityModule({
-      getUpdateState: () => updater.getState(),
-      checkForUpdates: async () => {
-        const startedAt = Date.now();
-        const state = await updater.checkForUpdates();
-        telemetry.record({
-          category: 'updater.check',
-          outcome: state.status === 'error' ? 'error' : 'ok',
-          durationMs: Date.now() - startedAt,
-          ...(state.availableVersion ? { targetVersion: state.availableVersion } : {}),
-        });
-        return state;
-      },
-      downloadUpdate: async () => {
-        const startedAt = Date.now();
-        const state = await updater.downloadUpdate();
-        telemetry.record({
-          category: 'updater.download',
-          outcome: state.status === 'error' ? 'error' : 'ok',
-          durationMs: Date.now() - startedAt,
-          ...(state.availableVersion ? { targetVersion: state.availableVersion } : {}),
-        });
-        return state;
-      },
-      installUpdateNow: async () => {
-        const startedAt = Date.now();
-        const result = await updater.installUpdateNow(async () => {
-          shuttingDown = true;
-          authHandoff.cancelLogin();
-          logger.markSessionEnded('install-update');
-        });
-        telemetry.record({
-          category: 'updater.install',
-          outcome: result.ok ? 'ok' : 'error',
-          durationMs: Date.now() - startedAt,
-        });
-        return result;
-      },
-    }),
-  );
-
-  registry.register(
-    createDiagnosticsCapabilityModule({
-      getAppInfo: () => buildRuntimeInfo(),
-      exportLogs: () => exportLogsWithDialog(),
-      openLogsFolder: () => openLogsFolder(),
-    }),
-  );
-
-  registry.register(
-    createAccountCapabilityModule({
-      startSignIn: async params => {
-        const startedAt = Date.now();
-        try {
-          const result = await authHandoff.startLogin({
-            switchAccount: params?.switchAccount,
-          });
-          void result.completion
-            .then(finalState => {
-              const outcome =
-                finalState.status === 'authenticated'
-                  ? 'authenticated'
-                  : finalState.status === 'canceled'
-                    ? 'cancelled'
-                    : finalState.errorCode === 'TIMEOUT'
-                      ? 'timeout'
-                      : 'error';
-              telemetry.record({
-                category: 'auth.handoff',
-                outcome,
-                durationMs: Date.now() - startedAt,
-              });
-            })
-            .catch(() => {
-              telemetry.record({
-                category: 'auth.handoff',
-                outcome: 'error',
-                durationMs: Date.now() - startedAt,
-              });
-            });
-          return result as unknown as Record<string, unknown>;
-        } catch (error) {
-          telemetry.record({
-            category: 'auth.handoff',
-            outcome: 'error',
-            durationMs: Date.now() - startedAt,
-          });
-          throw error;
-        }
-      },
-      cancelSignIn: () => authHandoff.cancelLogin() as unknown as Record<string, unknown>,
-      refreshAccount: () => authHandoff.getState() as unknown as Record<string, unknown>,
-      getLoginState: () => authHandoff.getState() as unknown as Record<string, unknown>,
-      openBillingPortal: async ({ url }) => openExternalSafe(url),
-      openInWindowLogin: async () => {
-        inWindowAuthFallbackActive = true;
-        const loginUrl = authHandoff.openInWindowFallback();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          try {
-            await mainWindow.loadURL(loginUrl);
-          } catch (error) {
-            inWindowAuthFallbackActive = false;
-            throw error;
-          }
-        }
-        return { state: 'in-window', url: loginUrl };
-      },
-    }),
-  );
-
-  const signedConfigModule: CapabilityModule = {
-    name: HOST_CAPABILITIES.SIGNED_CONFIG,
-    version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.SIGNED_CONFIG],
-    status: 'available',
-    events: ['updated'],
-    methods: {
-      getStatus: {
-        handler: async () => hostOk(signedConfig.getStatus()),
-      },
-      refresh: {
-        handler: async () => {
-          const startedAt = Date.now();
-          const result = await signedConfig.fetchAndApply();
-          telemetry.record({
-            category: 'signed_config.refresh',
-            outcome: result.applied ? (result.unchanged ? 'unchanged' : 'applied') : 'rejected',
-            durationMs: Date.now() - startedAt,
-            ...(result.applied && typeof result.sequence === 'number' ? { sequence: result.sequence } : {}),
-            ...(!result.applied && result.code ? { errorCode: result.code } : {}),
-          });
-          if (result.applied && !result.unchanged) {
-            registry.emit(HOST_CAPABILITIES.SIGNED_CONFIG, 'updated', signedConfig.getStatus());
-            maybeReloadMainWindowForSignedConfigChange();
-          }
-          return hostOk(result);
-        },
-      },
+  registerDesktopCapabilities({
+    registry,
+    updater,
+    authHandoff,
+    signedConfig,
+    telemetry,
+    desktopSentry,
+    desktopPrefs,
+    atomsRuntime,
+    progressCoordinator,
+    wakeLockManager,
+    getMainWindow: () => mainWindow,
+    currentChromeState,
+    setThemePreference: theme => {
+      themePreference = theme;
     },
-  };
-  registry.register(signedConfigModule);
-
-  const telemetryModule: CapabilityModule = {
-    name: HOST_CAPABILITIES.TELEMETRY,
-    version: HOST_CAPABILITY_VERSIONS[HOST_CAPABILITIES.TELEMETRY],
-    status: 'available',
-    methods: {
-      getSummary: {
-        handler: async params => {
-          const checked = validateHostMethodParams(HOST_CAPABILITIES.TELEMETRY, 'getSummary', params);
-          if (!checked.ok) return checked;
-          return hostOk(telemetry.getSummary());
-        },
-      },
-      recordEvent: {
-        handler: async params => {
-          const checked = validateHostMethodParams<DesktopTelemetryRecordInput>(
-            HOST_CAPABILITIES.TELEMETRY,
-            'recordEvent',
-            params,
-          );
-          if (!checked.ok) return checked;
-          const recorded = telemetry.record(checked.data);
-          return hostOk({ recorded: Boolean(recorded), event: recorded });
-        },
-      },
-      setEnabled: {
-        handler: async params => {
-          const checked = validateHostMethodParams<{ enabled: boolean }>(
-            HOST_CAPABILITIES.TELEMETRY,
-            'setEnabled',
-            params,
-          );
-          if (!checked.ok) return checked;
-          desktopSentry.setEnabled(checked.data.enabled);
-          return hostOk(telemetry.setEnabled(checked.data.enabled));
-        },
-      },
-      reset: {
-        handler: async params => {
-          const checked = validateHostMethodParams(HOST_CAPABILITIES.TELEMETRY, 'reset', params);
-          if (!checked.ok) return checked;
-          return hostOk(telemetry.reset());
-        },
-      },
+    applyResolvedTheme,
+    openExternalSafe,
+    onRendererReady: () => {
+      clearStartupLoadWatchdog();
+      if (!rendererReady) {
+        telemetry.record({
+          category: "app.startup",
+          outcome: "ok",
+          durationMs: Date.now() - appStartupStartedAt,
+        });
+      }
+      rendererReady = true;
+      dismissBootOverlay();
+      revealMainWindow();
+      const queued = pendingMenuActions;
+      pendingMenuActions = [];
+      for (const action of queued) {
+        registry.emit(HOST_CAPABILITIES.WINDOW, "menuAction", action);
+        registry.emit(HOST_CAPABILITIES.WINDOW, "menu-action", action);
+      }
     },
-  };
-  registry.register(telemetryModule);
-
-  for (const [capName, atomHandler] of Object.entries(atomsRuntime.capabilities)) {
-    const methods: CapabilityModule['methods'] = {};
-    for (const methodName of atomHandler.descriptor.methods ?? []) {
-      methods[methodName] = {
-        handler: async params => atomHandler.invoke(methodName, params),
-      };
-    }
-    if (capName === HOST_CAPABILITIES.ATOM_DETECT) {
-      methods.detect = { handler: async params => atomHandler.invoke('scan', params) };
-      methods.detectAll = { handler: async params => atomHandler.invoke('scan', params) };
-    }
-    if (capName === HOST_CAPABILITIES.ATOM_CREDENTIAL) {
-      methods.startDeviceAuth = { handler: async params => atomHandler.invoke('start', params) };
-      methods.pollDeviceAuth = { handler: async params => atomHandler.invoke('poll', params) };
-    }
-    registry.register({
-      name: atomHandler.descriptor.name,
-      version: atomHandler.descriptor.version,
-      status: atomHandler.descriptor.status,
-      ...(atomHandler.descriptor.reason ? { reason: atomHandler.descriptor.reason } : {}),
-      methods,
-    });
-  }
+    loadStudioIntoMainWindow,
+    showDesktopNotification,
+    installDownloadedUpdate,
+    buildRuntimeInfo,
+    exportLogsWithDialog,
+    openLogsFolder,
+    setInWindowAuthFallbackActive: active => {
+      inWindowAuthFallbackActive = active;
+    },
+    startDesktopSignIn,
+    openInWindowLoginFlow,
+    maybeReloadMainWindowForSignedConfigChange,
+    buildDesktopPreferencesSnapshot,
+    refreshDesktopMenus,
+    emitPreferencesChanged,
+    clearStartupUpdateCheckTimer: () => {
+      if (startupUpdateCheckTimer) {
+        clearTimeout(startupUpdateCheckTimer);
+        startupUpdateCheckTimer = null;
+      }
+    },
+    getOpenAtLoginSupport,
+    isZhAppLocale,
+    markQuitConfirmed: () => {
+      quitConfirmed = true;
+    },
+  });
 }
 
 function registerIpc(): void {
-  ipcMain.handle(HOST_IPC_CHANNELS.INFO, event => {
-    const auth = authorizePrivilegedIpcSender(event, getPrivilegedGuardOptions());
-    if (!auth.ok) {
-      throw new Error(auth.error.message);
-    }
-    return buildRuntimeInfo();
+  registerDesktopIpc({
+    distDir,
+    releaseChannel,
+    envSwitcherEnabled,
+    registry,
+    updater,
+    authHandoff,
+    envController,
+    getMainWindow: () => mainWindow,
+    getSplash: () => splash,
+    getPrivilegedGuardOptions,
+    buildRuntimeInfo,
+    resolveStudioUrl,
+    loadStudioIntoMainWindow,
+    exportLogsWithDialog,
+    setDomFullscreen: active => {
+      domFullscreen = active;
+    },
+    broadcastChromeState,
+    refreshDesktopMenus,
+    isManualUpdateCheckPending: () => manualUpdateCheckPending,
+    setManualUpdateCheckPending: pending => {
+      manualUpdateCheckPending = pending;
+    },
+    maybePresentManualUpdateFeedback,
+    getLastNotifiedDownloadedVersion: () => lastNotifiedDownloadedVersion,
+    setLastNotifiedDownloadedVersion: version => {
+      lastNotifiedDownloadedVersion = version;
+    },
+    isZhAppLocale,
+    focusOrRestoreMainWindow,
+    showDesktopNotification,
   });
+}
 
-  ipcMain.handle(HOST_IPC_CHANNELS.CAPABILITIES, event => {
-    const auth = authorizePrivilegedIpcSender(event, getPrivilegedGuardOptions());
-    if (!auth.ok) {
-      throw new Error(auth.error.message);
-    }
-    return registry.listCapabilities();
-  });
+async function maybePresentManualUpdateFeedback(
+  state: ReturnType<DesktopUpdaterController["getState"]>,
+): Promise<void> {
+  await manualUpdateFeedback.maybePresent(state);
+}
 
-  ipcMain.handle(HOST_IPC_CHANNELS.INVOKE, async (event, payload: unknown) => {
-    const auth = authorizePrivilegedIpcSender(event, getPrivilegedGuardOptions());
-    if (!auth.ok) {
-      return auth;
-    }
-    if (!payload || typeof payload !== 'object') {
-      return hostErr('INVALID_PARAMS', 'IPC invoke payload must be an object');
-    }
-    const { capability, method, params } = payload as {
-      capability?: unknown;
-      method?: unknown;
-      params?: unknown;
-    };
-    return await registry.invoke(capability, method, params, {
-      origin: auth.origin,
-      url: auth.url,
-      webContentsId: auth.webContentsId,
-    });
-  });
+function attachSessionDownloadHandler(win: BrowserWindow): void {
+  sessionDownloads.attach(win);
+}
 
-  ipcMain.handle(HOST_IPC_CHANNELS.SPLASH_RETRY, async event => {
-    const allowedFiles = [path.join(distDir, 'splash.html'), path.join(distDir, 'retry.html')];
-    const auth =
-      authorizeSplashSender(event, 'retryStartup', {
-        splashWindow: splash?.window,
-        allowedFilePaths: allowedFiles,
-      }).ok
-        ? { ok: true as const }
-        : authorizeSplashSender(event, 'retryStartup', {
-            splashWindow: mainWindow,
-            allowedFilePaths: allowedFiles,
-          });
-    if (!auth.ok) {
-      return auth;
-    }
-    await loadStudioIntoMainWindow();
-    return hostOk({ ok: true });
-  });
+function captureMainWindowState(): void {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || win.isFullScreen()) return;
+  if (!win.isMaximized() && !win.isMinimized()) {
+    lastNormalWindowBounds = win.getNormalBounds();
+  }
+}
 
-  ipcMain.handle(HOST_IPC_CHANNELS.SPLASH_EXPORT_DIAGNOSTICS, async event => {
-    const allowedFiles = [path.join(distDir, 'splash.html'), path.join(distDir, 'retry.html')];
-    const auth =
-      authorizeSplashSender(event, 'exportDiagnostics', {
-        splashWindow: splash?.window,
-        allowedFilePaths: allowedFiles,
-      }).ok
-        ? { ok: true as const }
-        : authorizeSplashSender(event, 'exportDiagnostics', {
-            splashWindow: mainWindow,
-            allowedFilePaths: allowedFiles,
-          });
-    if (!auth.ok) {
-      return auth;
-    }
-    const result = await exportLogsWithDialog();
-    return hostOk(result);
+function flushMainWindowState(): void {
+  if (windowStateSaveTimer) {
+    clearTimeout(windowStateSaveTimer);
+    windowStateSaveTimer = null;
+  }
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  captureMainWindowState();
+  const bounds = lastNormalWindowBounds ?? win.getNormalBounds();
+  writeWindowState(windowStatePath, {
+    version: 1,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    maximized: win.isMaximized(),
   });
+}
 
-  ipcMain.on(HOST_IPC_CHANNELS.DOM_FULLSCREEN, (event, active: boolean) => {
-    const auth = authorizePrivilegedIpcSender(event, getPrivilegedGuardOptions());
-    if (!auth.ok) return;
-    domFullscreen = Boolean(active);
-    broadcastChromeState();
-  });
+function scheduleSaveMainWindowState(): void {
+  if (windowStateSaveTimer) {
+    clearTimeout(windowStateSaveTimer);
+  }
+  windowStateSaveTimer = setTimeout(() => {
+    windowStateSaveTimer = null;
+    flushMainWindowState();
+  }, 250);
+}
 
-  updater.subscribe(state => {
-    registry.emit(HOST_CAPABILITIES.UPDATER, 'state', state);
-  });
+function resolveMainWindowTitle(): string {
+  return envController.resolveMainWindowTitle();
+}
 
-  authHandoff.subscribe(state => {
-    registry.emit(HOST_CAPABILITIES.ACCOUNT, 'state', state);
-    registry.emit(HOST_CAPABILITIES.ACCOUNT, 'login-state', state);
-  });
+function buildEnvironmentSwitcherPayload() {
+  return envController.buildSwitcherPayload();
+}
+
+function closeEnvironmentSwitcherWindow(): void {
+  envController.closeSwitcherWindow();
+}
+
+function openEnvironmentSwitcherWindow(): void {
+  envController.openSwitcherWindow();
+}
+
+async function syncEnvironmentBadge(win: BrowserWindow): Promise<void> {
+  await envController.syncEnvironmentBadge(win);
+}
+
+async function switchDesktopEnvironment(
+  nextUrl: string | null,
+  targetPath?: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  return envController.switchEnvironment(nextUrl, targetPath);
+}
+
+async function clearCurrentEnvironmentDataAndReload(): Promise<void> {
+  await envController.clearCurrentDataAndReload();
+}
+
+function copyEnvironmentDiagnostics(): void {
+  envController.copyDiagnostics();
+}
+
+async function handleDeepLinkOpen(params: Readonly<Record<string, string>>): Promise<void> {
+  await envController.handleDeepLinkOpen(params);
 }
 
 function createMainWindow(): BrowserWindow {
   const preloadPath = path.join(distDir, 'preload.cjs');
+  const displays = screen.getAllDisplays().map(display => display.workArea);
+  const restored = resolveRestoredWindowBounds(
+    readWindowState(windowStatePath),
+    displays,
+    DEFAULT_MAIN_WINDOW_BOUNDS,
+  );
+  shouldRestoreMaximized = restored.maximized;
+  const partition = resolveCurrentSessionPartition();
+  activeWindowPartition = partition;
+
   const win = new BrowserWindow(
     buildMainWindowOptions({
       platform,
@@ -932,9 +1503,25 @@ function createMainWindow(): BrowserWindow {
       linuxCustomTitleBar,
       preloadPath,
       iconPath: resolveIconPath(),
+      bounds: restored.bounds,
+      partition,
+      title: resolveMainWindowTitle(),
     }),
   );
   mainWindow = win;
+  lastNormalWindowBounds = win.getNormalBounds();
+
+  attachNativeContextMenu(win.webContents, {
+    platform,
+    getLocale: () => getEffectiveAppLocale(),
+    openExternal: openExternalSafe,
+    writeClipboardText: text => clipboard.writeText(text),
+    popupTemplate: template => {
+      Menu.buildFromTemplate(template).popup({ window: win });
+    },
+  });
+
+  attachSessionDownloadHandler(win);
 
   const policyWebContents: PolicyWebContentsLike = {
     on: (event, listener) => {
@@ -945,12 +1532,50 @@ function createMainWindow(): BrowserWindow {
     },
   };
 
+  const maybeResetAuthFallback = (url: string) => {
+    if (!inWindowAuthFallbackActive) return;
+    try {
+      const parsed = new URL(url);
+      if (parsed.origin === resolveStudioOrigin() && parsed.pathname !== '/auth' && !parsed.pathname.startsWith('/auth/')) {
+        inWindowAuthFallbackActive = false;
+      }
+    } catch {
+      // Ignore unparseable URLs.
+    }
+  };
+
+  // Intercept direct same-origin /auth/login navigations (e.g. legacy Studio web builds)
+  // so sign-in routes through K3 browser PKCE handoff when available, or controlled
+  // in-window fallback when the target backend has not mounted /auth/desktop/start yet.
+  win.webContents.on('will-navigate', (event, url) => {
+    if (showingRetryPage && url.startsWith('file://') && url.includes('retry.html')) {
+      event.preventDefault();
+      void loadStudioIntoMainWindow();
+      return;
+    }
+    if (!inWindowAuthFallbackActive) {
+      const authNav = parseStudioAuthNavigationUrl(url, resolveStudioOrigin());
+      if (authNav) {
+        event.preventDefault();
+        void startDesktopSignIn(authNav).catch(error => {
+          logger.error('main', 'Desktop sign-in navigation intercept failed', {
+            url,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    }
+  });
+
   attachWindowNavigationPolicies(policyWebContents, {
     getConfig: getWindowPolicyConfig,
     openExternal: async url => {
       await openExternalSafe(url);
     },
     onDecision: (kind, url, decision) => {
+      if (inWindowAuthFallbackActive && decision.action === 'allow' && decision.reason === 'same-origin-studio') {
+        maybeResetAuthFallback(url);
+      }
       if (decision.action === 'deny' && !decision.openExternal) {
         logger.warn('main', `Blocked ${kind}`, { url, reason: decision.reason });
       }
@@ -968,35 +1593,62 @@ function createMainWindow(): BrowserWindow {
       detail: `${errorDescription} (${validatedURL})`,
     });
   });
-
-  win.webContents.on('will-navigate', (event, url) => {
-    if (showingRetryPage && url.startsWith('file://') && url.includes('retry.html')) {
-      event.preventDefault();
-      void loadStudioIntoMainWindow();
+  win.webContents.on('did-navigate', (_event, url) => {
+    injectedChromeCssKey = null;
+    clearUnresponsiveTimer();
+    wakeLockManager.releasePrefix('task:');
+    progressCoordinator.clearTasks();
+    finishLiveResizing();
+    maybeResetAuthFallback(url);
+    void syncWindowChromeCss();
+    refreshDesktopMenus();
+  });
+  win.webContents.on('dom-ready', () => {
+    clearStartupLoadWatchdog();
+    void syncWindowChromeCss();
+  });
+  win.webContents.on('zoom-changed', (_event, zoomDirection) => {
+    adjustMainWindowZoom(zoomDirection === 'in' ? 'in' : 'out');
+  });
+  win.webContents.on('did-finish-load', () => {
+    clearStartupLoadWatchdog();
+    refreshDesktopMenus();
+    void syncEnvironmentBadge(win);
+    if (!showingRetryPage) {
+      scheduleBootOverlayDismiss(220);
     }
   });
-
-  const maybeResetAuthFallback = (url: string) => {
-    if (!inWindowAuthFallbackActive) return;
-    try {
-      const parsed = new URL(url);
-      if (parsed.origin === resolveStudioOrigin() && parsed.pathname !== '/auth' && !parsed.pathname.startsWith('/auth/')) {
-        inWindowAuthFallbackActive = false;
-      }
-    } catch {
-      // Ignore unparseable URLs.
-    }
-  };
-  win.webContents.on('did-navigate', (_event, url) => maybeResetAuthFallback(url));
   win.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
-    if (isMainFrame) maybeResetAuthFallback(url);
+    if (isMainFrame) {
+      maybeResetAuthFallback(url);
+      refreshDesktopMenus();
+    }
   });
+
+  const revealOnceReady = () => {
+    clearTimeout(initialRevealTimer);
+    if (win.isDestroyed()) return;
+    if (shouldRestoreMaximized) {
+      shouldRestoreMaximized = false;
+      win.maximize();
+    }
+    revealMainWindow();
+  };
+
+  const initialRevealTimer = setTimeout(() => {
+    if (!win.isDestroyed() && !win.isVisible()) {
+      revealOnceReady();
+    }
+  }, 180);
+
+  attachBootOverlay(win, revealOnceReady);
 
   win.once('ready-to-show', () => {
-    revealMainWindow();
+    revealOnceReady();
   });
 
   win.on('close', event => {
+    flushMainWindowState();
     if (platform === 'darwin' && !shuttingDown) {
       event.preventDefault();
       if (win.isFullScreen()) {
@@ -1011,35 +1663,116 @@ function createMainWindow(): BrowserWindow {
   });
 
   win.on('closed', () => {
-    if (mainWindow === win) mainWindow = null;
+    clearTimeout(initialRevealTimer);
+    dismissBootOverlay({ immediate: true });
+    clearStartupLoadWatchdog();
+    clearUnresponsiveTimer();
+    wakeLockManager.releasePrefix('task:');
+    progressCoordinator.clearTasks();
+    finishLiveResizing();
+    if (windowStateSaveTimer) {
+      clearTimeout(windowStateSaveTimer);
+      windowStateSaveTimer = null;
+    }
+    if (mainWindow === win) {
+      mainWindow = null;
+      injectedChromeCssKey = null;
+    }
+  });
+  win.on('app-command', (_event, cmd) => {
+    if (cmd === 'browser-backward') {
+      navigateMainWindowHistory('back');
+    } else if (cmd === 'browser-forward') {
+      navigateMainWindowHistory('forward');
+    }
+  });
+  win.on('swipe', (_event, direction) => {
+    if (direction === 'left') {
+      navigateMainWindowHistory('back');
+    } else if (direction === 'right') {
+      navigateMainWindowHistory('forward');
+    }
+  });
+  win.on('unresponsive', () => {
+    logger.warn('renderer', 'Main window became unresponsive');
+    if (unresponsiveTimer || unresponsiveDialogOpen || shuttingDown) return;
+    unresponsiveTimer = setTimeout(() => {
+      unresponsiveTimer = null;
+      if (shuttingDown || unresponsiveDialogOpen || win.isDestroyed()) return;
+      unresponsiveDialogOpen = true;
+      const zh = isZhAppLocale();
+      void dialog
+        .showMessageBox(win, {
+          type: 'warning',
+          title: zh ? '页面暂时无响应' : 'Workspace Unresponsive',
+          message: zh
+            ? 'OpenDesign 页面暂时没有响应，你可以继续等待或重新加载工作区。'
+            : 'OpenDesign is not responding right now. You can keep waiting or reload the workspace.',
+          buttons: zh ? ['继续等待', '重新加载'] : ['Wait', 'Reload Workspace'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        })
+        .then(({ response }) => {
+          if (response === 1 && !win.isDestroyed()) {
+            void loadStudioIntoMainWindow();
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          unresponsiveDialogOpen = false;
+        });
+    }, UNRESPONSIVE_PROMPT_DELAY_MS);
+  });
+  win.on('responsive', () => {
+    clearUnresponsiveTimer();
+  });
+  win.on('will-resize', () => {
+    markLiveResizing();
+  });
+  win.on('move', () => {
+    scheduleSaveMainWindowState();
+  });
+  win.on('moved', () => {
+    scheduleSaveMainWindowState();
+  });
+  win.on('resize', () => {
+    markLiveResizing();
+    scheduleSaveMainWindowState();
+  });
+  win.on('resized', () => {
+    finishLiveResizing();
+    scheduleSaveMainWindowState();
+  });
+  win.on('blur', () => {
+    finishLiveResizing();
+  });
+  win.on('hide', () => {
+    finishLiveResizing();
+    registry.emit(HOST_CAPABILITIES.WINDOW, 'visibility', { visible: false });
+  });
+  win.on('show', () => {
+    registry.emit(HOST_CAPABILITIES.WINDOW, 'visibility', { visible: true });
   });
   win.on('enter-full-screen', broadcastChromeState);
   win.on('leave-full-screen', broadcastChromeState);
-  win.on('maximize', broadcastChromeState);
-  win.on('unmaximize', broadcastChromeState);
+  win.on('maximize', () => {
+    broadcastChromeState();
+    scheduleSaveMainWindowState();
+  });
+  win.on('unmaximize', () => {
+    broadcastChromeState();
+    scheduleSaveMainWindowState();
+  });
   win.on('focus', () => {
     registry.emit(HOST_CAPABILITIES.WINDOW, 'focus', { focused: true });
   });
 
-  win.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || input.alt || input.shift) return;
-    const primaryMod =
-      platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta;
-    if (!primaryMod) return;
-    const key = input.key.toLowerCase();
-    if (key === 'w') {
-      event.preventDefault();
-      minimizeFocusedWindow();
-    } else if (key === 'm') {
-      event.preventDefault();
-      hideDesktopApp();
-    } else if (key === 'q') {
-      event.preventDefault();
-      void requestQuitWithConfirmation();
-    }
-  });
-
   win.webContents.on('render-process-gone', (_event, details) => {
+    clearStartupLoadWatchdog();
+    clearUnresponsiveTimer();
+    wakeLockManager.releasePrefix('task:');
+    progressCoordinator.clearTasks();
     logger.error('renderer', 'Renderer process gone', {
       reason: details.reason,
       exitCode: details.exitCode,
@@ -1049,96 +1782,205 @@ function createMainWindow(): BrowserWindow {
       area: 'renderer',
       extra: { reason: details.reason, exitCode: details.exitCode },
     });
+    if (shuttingDown || win.isDestroyed()) return;
+    const decision = crashGuard.recordExit(details.reason);
+    if (decision.recover) {
+      const retryInfo = buildRendererCrashRetryInfo(decision, details, getEffectiveAppLocale());
+      void showRetryPage({ ...retryInfo, force: true });
+    }
   });
 
   return win;
 }
 
-async function bootDesktop(): Promise<void> {
-  const preloadPath = path.join(distDir, 'preload.cjs');
-  splash ??= new SplashController({
-    onRetry: () => {
-      void loadStudioIntoMainWindow();
+const STARTUP_UPDATE_CHECK_DELAY_MS = 8_000;
+let startupUpdateCheckTimer: ReturnType<typeof setTimeout> | null = null;
+
+function preconnectStudioOrigin(): void {
+  try {
+    const origin = resolveStudioOrigin();
+    if (origin.startsWith('https://') || origin.startsWith('http://')) {
+      session.defaultSession.preconnect({ url: origin, numSockets: 4 });
+    }
+  } catch {
+    // Ignore preconnect failures on restricted or offline environments.
+  }
+}
+
+function scheduleStartupUpdateCheck(): void {
+  if (!app.isPackaged || startupUpdateCheckTimer || !isAutoCheckUpdatesEnabled()) return;
+  startupUpdateCheckTimer = setTimeout(() => {
+    startupUpdateCheckTimer = null;
+    if (shuttingDown || !isAutoCheckUpdatesEnabled()) return;
+    void updater.checkForUpdates().catch(() => {});
+  }, STARTUP_UPDATE_CHECK_DELAY_MS);
+}
+
+let desktopMenusInitialized = false;
+
+function refreshDesktopMenus(force = false): void {
+  if (!desktopMenusInitialized || shuttingDown) return;
+  const appLocale = getEffectiveAppLocale();
+  const includeDevItems = !app.isPackaged || process.env.OPENMOTION_DESKTOP_DEVTOOLS === '1';
+  const updateState = updater.getState();
+  const updaterPresentation = resolveUpdaterMenuPresentation(updateState, appLocale);
+  const confirmBeforeQuit = isConfirmBeforeQuitEnabled();
+  const historyNav = getHistoryNavigationAvailability();
+  const envPayload = envSwitcherEnabled ? buildEnvironmentSwitcherPayload() : null;
+  const signature = [
+    appLocale,
+    includeDevItems ? '1' : '0',
+    updaterPresentation.label,
+    updaterPresentation.action,
+    updaterPresentation.enabled ? '1' : '0',
+    confirmBeforeQuit ? '1' : '0',
+    historyNav.canGoBack ? '1' : '0',
+    historyNav.canGoForward ? '1' : '0',
+    envPayload ? `${envPayload.active.url}:${envPayload.recent.map(r => r.url).join(',')}` : '',
+  ].join('|');
+  if (!force && signature === lastMenuStateSignature) return;
+  lastMenuStateSignature = signature;
+
+  if (platform === 'darwin') {
+    app.dock?.setMenu(
+      Menu.buildFromTemplate(
+        buildDesktopDockMenuTemplate({
+          locale: appLocale,
+          updateState,
+          onAction: dispatchMenuAction,
+          onInstallUpdate: () => {
+            void installDownloadedUpdate();
+          },
+          onFocusMainWindow: focusOrRestoreMainWindow,
+        }),
+      ),
+    );
+  }
+
+  const template = buildDesktopMenuTemplate({
+    platform,
+    appVersion: app.getVersion(),
+    locale: appLocale,
+    includeDevItems,
+    updateState,
+    confirmBeforeQuit,
+    canGoBack: historyNav.canGoBack,
+    canGoForward: historyNav.canGoForward,
+    ...(envPayload
+      ? {
+          environment: {
+            activeLabel: envPayload.active.label,
+            activeUrl: envPayload.active.url,
+            isCustomOverride: envPayload.active.isCustomOverride,
+            presets: envPayload.presets.map(preset => ({
+              label: preset.label,
+              url: preset.url,
+              active: preset.origin === envPayload.active.origin,
+            })),
+            recent: envPayload.recent.map(item => ({
+              label: item.label,
+              url: item.url,
+              active: item.origin === envPayload.active.origin,
+            })),
+            onSelectUrl: url => {
+              void switchDesktopEnvironment(url);
+            },
+            onOpenSwitcher: () => {
+              openEnvironmentSwitcherWindow();
+            },
+            onResetDefault: () => {
+              void switchDesktopEnvironment(null);
+            },
+            onClearEnvironmentData: () => {
+              void clearCurrentEnvironmentDataAndReload();
+            },
+            onCopyEnvironmentInfo: () => {
+              copyEnvironmentDiagnostics();
+            },
+          },
+        }
+      : {}),
+    onAction: dispatchMenuAction,
+    onOpenUrl: url => {
+      void openExternalSafe(url);
+    },
+    onOpenLogsFolder: () => {
+      void openLogsFolder();
+    },
+    onInstallUpdate: () => {
+      void installDownloadedUpdate();
+    },
+    onNavigateBack: () => {
+      navigateMainWindowHistory('back');
+    },
+    onNavigateForward: () => {
+      navigateMainWindowHistory('forward');
+    },
+    onToggleConfirmBeforeQuit: enabled => {
+      desktopPrefs.update({ confirmBeforeQuit: enabled });
+      refreshDesktopMenus(true);
+      emitPreferencesChanged();
+    },
+    onZoomChange: direction => {
+      adjustMainWindowZoom(direction);
     },
   });
-  splash.open(distDir, preloadPath, currentTheme);
-  splash.setProgress({
-    step: 'ready',
-    mode: 'booting',
-    status: 'Connecting to OpenDesign Cloud',
-  });
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
-  // Best-effort signed config refresh before loading cloud Studio;
-  // failures fall back cleanly to last-known-good or bundled defaults.
-  await signedConfig.fetchAndApply().catch(() => {});
+function setupDesktopMenusAndAbout(): void {
+  if (desktopMenusInitialized) return;
+  desktopMenusInitialized = true;
+
+  if (platform === 'darwin') {
+    app.setAboutPanelOptions({
+      applicationName: DESKTOP_PRODUCT_NAME,
+      applicationVersion: app.getVersion(),
+      version: releaseChannel,
+      copyright: 'Copyright © OpenDesign Contributors',
+      ...(resolveIconPath() ? { iconPath: resolveIconPath() } : {}),
+    });
+  }
+
+  refreshDesktopMenus(true);
+}
+
+function refreshSignedConfigInBackground(): void {
+  void signedConfig
+    .fetchAndApply()
+    .then(result => {
+      if (result.applied && !result.unchanged) {
+        registry.emit(HOST_CAPABILITIES.SIGNED_CONFIG, 'updated', signedConfig.getStatus());
+        maybeReloadMainWindowForSignedConfigChange();
+      }
+    })
+    .catch(() => {});
+}
+
+async function bootDesktop(): Promise<void> {
+  // Warm DNS/TCP/TLS sockets before constructing the window and initiating loadURL.
+  preconnectStudioOrigin();
+
+  // Single-window startup (macOS HIG): open the restored main window directly without
+  // popping up a separate splash window that jumps size/position on handoff.
+  // Signed config refreshes asynchronously in the background so cold start never stalls.
+  refreshSignedConfigInBackground();
 
   if (!mainWindow || mainWindow.isDestroyed()) {
     createMainWindow();
   }
-  await loadStudioIntoMainWindow();
+  const loadPromise = loadStudioIntoMainWindow();
+  setImmediate(() => {
+    if (!shuttingDown) setupDesktopMenusAndAbout();
+  });
+  await loadPromise;
 
-  if (app.isPackaged) {
-    void updater.checkForUpdates().catch(() => {});
-  }
+  scheduleStartupUpdateCheck();
 
   if (!signedConfigRefreshTimer) {
     signedConfigRefreshTimer = setInterval(() => {
-      void signedConfig
-        .fetchAndApply()
-        .then(result => {
-          if (result.applied && !result.unchanged) {
-            registry.emit(HOST_CAPABILITIES.SIGNED_CONFIG, 'updated', signedConfig.getStatus());
-            maybeReloadMainWindowForSignedConfigChange();
-          }
-        })
-        .catch(() => {});
+      refreshSignedConfigInBackground();
     }, 30 * 60 * 1000);
-  }
-}
-
-function minimizeFocusedWindow(): void {
-  const target = BrowserWindow.getFocusedWindow() ?? mainWindow;
-  if (target && !target.isDestroyed()) {
-    target.minimize();
-  }
-}
-
-function hideDesktopApp(): void {
-  if (platform === 'darwin') {
-    app.hide();
-    return;
-  }
-  const target = BrowserWindow.getFocusedWindow() ?? mainWindow;
-  if (target && !target.isDestroyed()) {
-    target.minimize();
-  }
-}
-
-async function requestQuitWithConfirmation(): Promise<void> {
-  if (shuttingDown || quitPromptOpen) return;
-  quitPromptOpen = true;
-  try {
-    const isZh = app.getLocale().toLowerCase().startsWith('zh');
-    const parent =
-      BrowserWindow.getFocusedWindow() ??
-      (mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined);
-    const options = {
-      type: 'question' as const,
-      title: isZh ? '退出 OpenDesign' : 'Quit OpenDesign',
-      message: isZh ? '确认退出 OpenDesign 吗？' : 'Are you sure you want to quit OpenDesign?',
-      buttons: isZh ? ['取消', '退出'] : ['Cancel', 'Quit'],
-      defaultId: 1,
-      cancelId: 0,
-      noLink: true,
-    };
-    const { response } = parent
-      ? await dialog.showMessageBox(parent, options)
-      : await dialog.showMessageBox(options);
-    if (response === 1) {
-      app.quit();
-    }
-  } finally {
-    quitPromptOpen = false;
   }
 }
 
@@ -1170,6 +2012,7 @@ app.on('second-instance', (_event, argv) => {
 });
 
 app.on('window-all-closed', () => {
+  if (switchingMainWindow) return;
   if (platform !== 'darwin') {
     app.quit();
   }
@@ -1183,9 +2026,65 @@ app.on('activate', () => {
   }
 });
 
-app.on('before-quit', () => {
+async function promptQuitWithConfirmation(): Promise<void> {
+  if (quitPromptOpen || shuttingDown) return;
+  quitPromptOpen = true;
+  closeEnvironmentSwitcherWindow();
+  try {
+    const zh = isZhAppLocale();
+    const options = {
+      type: 'question' as const,
+      title: zh ? '退出 OpenDesign' : 'Quit OpenDesign',
+      message: zh ? '确认退出 OpenDesign 吗？' : 'Are you sure you want to quit OpenDesign?',
+      buttons: zh ? ['取消', '退出'] : ['Cancel', 'Quit'],
+      defaultId: 1,
+      cancelId: 0,
+      checkboxLabel: zh ? '下次不再提示' : "Don't ask me again",
+      checkboxChecked: false,
+      noLink: true,
+    };
+    const { response, checkboxChecked } = await dialog.showMessageBox(options);
+    if (response === 1) {
+      if (checkboxChecked) {
+        desktopPrefs.update({ confirmBeforeQuit: false });
+        refreshDesktopMenus(true);
+        emitPreferencesChanged();
+      }
+      quitConfirmed = true;
+      shuttingDown = true;
+      app.quit();
+    }
+  } finally {
+    quitPromptOpen = false;
+  }
+}
+
+app.on('before-quit', event => {
+  if (
+    !quitConfirmed &&
+    !shuttingDown &&
+    isConfirmBeforeQuitEnabled() &&
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.isVisible()
+  ) {
+    event.preventDefault();
+    void promptQuitWithConfirmation();
+    return;
+  }
   shuttingDown = true;
+  closeEnvironmentSwitcherWindow();
+  dismissBootOverlay({ immediate: true });
+  clearStartupLoadWatchdog();
+  clearUnresponsiveTimer();
+  wakeLockManager.releaseAll();
+  progressCoordinator.clearAll();
+  flushMainWindowState();
   authHandoff.cancelLogin();
+  if (startupUpdateCheckTimer) {
+    clearTimeout(startupUpdateCheckTimer);
+    startupUpdateCheckTimer = null;
+  }
   if (signedConfigRefreshTimer) {
     clearInterval(signedConfigRefreshTimer);
     signedConfigRefreshTimer = null;
@@ -1193,28 +2092,17 @@ app.on('before-quit', () => {
   logger.markSessionEnded('quit');
 });
 
+nativeTheme.on('updated', () => {
+  if (themePreference !== 'system') return;
+  const nextTheme: 'light' | 'dark' = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+  applyResolvedTheme(nextTheme);
+});
+
 void app.whenReady().then(async () => {
+  preconnectStudioOrigin();
   registerDesktopProtocolClient(app);
   registerCapabilities();
   registerIpc();
-
-  const template = buildDesktopMenuTemplate({
-    platform,
-    appVersion: app.getVersion(),
-    onAction: dispatchMenuAction,
-    onOpenUrl: url => {
-      void openExternalSafe(url);
-    },
-    onOpenLogsFolder: () => {
-      void openLogsFolder();
-    },
-    onMinimizeWindow: minimizeFocusedWindow,
-    onHideApp: hideDesktopApp,
-    onRequestQuit: () => {
-      void requestQuitWithConfirmation();
-    },
-  });
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 
   const initialDeepLink = extractDeepLinkFromArgv(process.argv);
   await bootDesktop();

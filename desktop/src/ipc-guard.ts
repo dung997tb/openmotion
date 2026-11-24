@@ -16,12 +16,26 @@ export const HOST_IPC_CHANNELS = {
   DOM_FULLSCREEN: 'openmotion:dom-fullscreen',
   SPLASH_RETRY: 'openmotion:splash-retry',
   SPLASH_EXPORT_DIAGNOSTICS: 'openmotion:splash-export-diagnostics',
+  SPLASH_WINDOW_CONTROL: 'openmotion:splash-window-control',
+  SPLASH_RESET_ENV: 'openmotion:splash-reset-env',
+  SPLASH_OPEN_ENV_SWITCHER: 'openmotion:splash-open-env-switcher',
+  ENV_SWITCHER_GET_STATE: 'openmotion:env-switcher:get-state',
+  ENV_SWITCHER_SELECT: 'openmotion:env-switcher:select',
+  ENV_SWITCHER_RESET: 'openmotion:env-switcher:reset',
+  ENV_SWITCHER_CLOSE: 'openmotion:env-switcher:close',
 } as const;
 
-export const SPLASH_ALLOWED_ACTIONS = ['retryStartup', 'exportDiagnostics'] as const;
+export const SPLASH_ALLOWED_ACTIONS = [
+  'retryStartup',
+  'exportDiagnostics',
+  'windowControl',
+  'resetEnvironment',
+  'openEnvironmentSwitcher',
+] as const;
 export type SplashAllowedAction = (typeof SPLASH_ALLOWED_ACTIONS)[number];
 
 const ALLOWED_SPLASH_FILENAMES = new Set(['splash.html', 'retry.html']);
+const ALLOWED_ENV_SWITCHER_FILENAMES = new Set(['env-switcher.html']);
 
 export type IpcSenderFrameLike = {
   url: string;
@@ -59,6 +73,12 @@ export type PrivilegedIpcGuardOptions = {
   studioUrl?: string;
   /** Permits http://127.0.0.1 and http://localhost only when channel === 'dev'. */
   allowLocalDevLoopback?: boolean;
+  /**
+   * Optional user-selected test/dev Studio origin (e.g. local loopback or an
+   * Orbit lane origin explicitly validated by the test/dev environment switcher).
+   * Strictly ignored when `channel === 'stable'`.
+   */
+  explicitTestStudioOrigin?: string;
   /** True while an explicit in-window login fallback session is active (denies privileged IPC). */
   inWindowAuthFallbackActive?: boolean;
 };
@@ -127,16 +147,47 @@ function normalizeOriginCandidate(
  * channel's built-in default Studio URL. When explicit origins are supplied,
  * fails closed if none of them satisfy the built-in domain scope.
  */
+function normalizeExplicitTestStudioOrigin(
+  rawOrigin: string | undefined,
+  channel: HostReleaseChannel,
+): string | null {
+  if (channel === 'stable' || typeof rawOrigin !== 'string' || !rawOrigin.trim()) {
+    return null;
+  }
+  try {
+    const parsed = new URL(rawOrigin.trim());
+    if (parsed.username || parsed.password) return null;
+    if (parsed.protocol === 'https:') {
+      return parsed.origin;
+    }
+    if (
+      parsed.protocol === 'http:' &&
+      (parsed.hostname.toLowerCase() === '127.0.0.1' || parsed.hostname.toLowerCase() === 'localhost')
+    ) {
+      return parsed.origin;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function resolveAllowedStudioOrigins(options: {
   channel: HostReleaseChannel;
   allowedOrigins?: readonly string[];
   studioUrl?: string;
   allowLocalDevLoopback?: boolean;
+  explicitTestStudioOrigin?: string;
 }): Set<string> {
   const allowLocalDev = Boolean(options.allowLocalDevLoopback && options.channel === 'dev');
+  const explicitOrigin = normalizeExplicitTestStudioOrigin(
+    options.explicitTestStudioOrigin,
+    options.channel,
+  );
   const hasExplicitInput =
     (Array.isArray(options.allowedOrigins) && options.allowedOrigins.length > 0) ||
-    (typeof options.studioUrl === 'string' && options.studioUrl.trim().length > 0);
+    (typeof options.studioUrl === 'string' && options.studioUrl.trim().length > 0) ||
+    Boolean(explicitOrigin);
 
   const candidates: string[] = [];
   if (hasExplicitInput) {
@@ -156,6 +207,9 @@ export function resolveAllowedStudioOrigins(options: {
     if (normalized) {
       allowed.add(normalized);
     }
+  }
+  if (explicitOrigin) {
+    allowed.add(explicitOrigin);
   }
   return allowed;
 }
@@ -241,12 +295,25 @@ export function authorizePrivilegedIpcSender(
   }
 
   const allowLocalDev = Boolean(options.allowLocalDevLoopback && options.channel === 'dev');
-  if (!isAllowedPrivilegedProtocol(parsed.protocol, options.channel, allowLocalDev)) {
-    return hostErr('ORIGIN_DENIED', `IPC sender protocol "${parsed.protocol}" is not permitted`);
-  }
+  const explicitOrigin = normalizeExplicitTestStudioOrigin(
+    options.explicitTestStudioOrigin,
+    options.channel,
+  );
+  const matchesExplicitTestOrigin = Boolean(explicitOrigin && parsed.origin === explicitOrigin);
 
-  if (!isUrlInAllowedDomainScope(rawUrl, { channel: options.channel, allowLocalDevLoopback: allowLocalDev })) {
-    return hostErr('ORIGIN_DENIED', `Origin "${parsed.origin}" is outside the allowed domain scope`);
+  if (!matchesExplicitTestOrigin) {
+    if (!isAllowedPrivilegedProtocol(parsed.protocol, options.channel, allowLocalDev)) {
+      return hostErr('ORIGIN_DENIED', `IPC sender protocol "${parsed.protocol}" is not permitted`);
+    }
+
+    if (
+      !isUrlInAllowedDomainScope(rawUrl, {
+        channel: options.channel,
+        allowLocalDevLoopback: allowLocalDev,
+      })
+    ) {
+      return hostErr('ORIGIN_DENIED', `Origin "${parsed.origin}" is outside the allowed domain scope`);
+    }
   }
 
   const allowedOrigins = resolveAllowedStudioOrigins({
@@ -254,6 +321,7 @@ export function authorizePrivilegedIpcSender(
     allowedOrigins: options.allowedOrigins,
     studioUrl: options.studioUrl,
     allowLocalDevLoopback: allowLocalDev,
+    explicitTestStudioOrigin: options.explicitTestStudioOrigin,
   });
 
   if (!allowedOrigins.has(parsed.origin)) {
@@ -276,7 +344,10 @@ function normalizePathForComparison(rawPath: string): string {
   return /^[a-zA-Z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
 }
 
-function parseSafeLocalHtmlFilePath(rawUrl: string): string | null {
+function parseSafeLocalHtmlFilePath(
+  rawUrl: string,
+  allowedFilenames: ReadonlySet<string> = ALLOWED_SPLASH_FILENAMES,
+): string | null {
   if (typeof rawUrl !== 'string' || !rawUrl.trim()) return null;
   let parsed: URL;
   try {
@@ -301,7 +372,7 @@ function parseSafeLocalHtmlFilePath(rawUrl: string): string | null {
   if (segments.some(segment => segment === '..')) return null;
 
   const basename = segments[segments.length - 1] ?? '';
-  if (!ALLOWED_SPLASH_FILENAMES.has(basename)) return null;
+  if (!allowedFilenames.has(basename)) return null;
 
   return normalized;
 }
@@ -361,4 +432,48 @@ export function authorizeSplashSender(
     filePath,
     webContentsId: sender.id,
   };
+}
+
+/**
+ * Guard for the test/dev-only local `env-switcher.html` modal window.
+ * Always denies on `stable` builds.
+ */
+export function authorizeEnvSwitcherSender(
+  event: IpcEventLike | null | undefined,
+  options: {
+    channel: HostReleaseChannel;
+    envSwitcherWindow: IpcWindowLike | null | undefined;
+    allowedFilePaths?: readonly string[];
+  },
+): { ok: true; filePath: string; webContentsId: number } | HostInvokeFailure {
+  if (options.channel === 'stable') {
+    return hostErr('POLICY_DENIED', 'Environment switching is disabled in stable releases');
+  }
+  const win = options.envSwitcherWindow;
+  if (!win || win.isDestroyed?.()) {
+    return hostErr('UNAUTHORIZED', 'Environment switcher window is not available');
+  }
+  const wc = win.webContents;
+  if (!wc || wc.isDestroyed?.()) {
+    return hostErr('UNAUTHORIZED', 'Environment switcher webContents is not available');
+  }
+  const sender = event?.sender;
+  if (!sender || sender.isDestroyed?.() || typeof sender.id !== 'number' || sender.id !== wc.id) {
+    return hostErr('UNAUTHORIZED', 'IPC caller does not belong to the environment switcher window');
+  }
+  const senderFrame = event?.senderFrame;
+  if (!isMainFrame(senderFrame, wc.mainFrame)) {
+    return hostErr('UNAUTHORIZED', 'Subframes are not permitted on the environment switcher channel');
+  }
+  const filePath = parseSafeLocalHtmlFilePath(senderFrame?.url ?? '', ALLOWED_ENV_SWITCHER_FILENAMES);
+  if (!filePath) {
+    return hostErr('ORIGIN_DENIED', 'Action requires local env-switcher.html');
+  }
+  if (Array.isArray(options.allowedFilePaths) && options.allowedFilePaths.length > 0) {
+    const allowedSet = new Set(options.allowedFilePaths.map(normalizePathForComparison));
+    if (!allowedSet.has(filePath)) {
+      return hostErr('ORIGIN_DENIED', 'Environment switcher file path is outside allowed bundle paths');
+    }
+  }
+  return { ok: true, filePath, webContentsId: sender.id };
 }

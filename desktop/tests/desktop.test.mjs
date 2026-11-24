@@ -5,12 +5,18 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { resolveDesktopChrome } from '../../shared/platform-host.ts';
-import { buildAppIconSvg, packPngFramesAsIco } from '../scripts/build-icons.mjs';
-import { stageDesktopApp } from '../scripts/stage-app.mjs';
-import { DesktopLogger, redactDesktopText } from '../src/logger.ts';
-import { buildDesktopMenuTemplate, DOCS_URL, RELEASES_URL, REPORT_ISSUE_URL } from '../src/menu.ts';
-import { augmentDesktopPath, resolveSidecarRuntimeBinary } from '../src/sidecar.ts';
 import {
+  buildAppIconSvg,
+  buildLiquidGlassIconBundle,
+  LIQUID_GLASS_ICON_NAME,
+  packPngFramesAsIco,
+} from '../scripts/build-icons.mjs';
+import { DesktopLogger, redactDesktopText } from '../src/logger.ts';
+import { buildDesktopDockMenuTemplate, buildDesktopMenuTemplate, DOCS_URL, RELEASES_URL, REPORT_ISSUE_URL } from '../src/menu.ts';
+import { buildContextMenuTemplate } from '../src/context-menu.ts';
+import { readWindowState, resolveRestoredWindowBounds, writeWindowState } from '../src/window-state.ts';
+import {
+  buildDesktopChromeCss,
   buildMainWindowOptions,
   getWindowsTitleBarOverlay,
   normalizeDesktopPlatform,
@@ -24,29 +30,48 @@ test('resolveDesktopChrome computes safe insets across macOS, Windows, and Linux
   assert.equal(macWindowed.titleBarStyle, 'hiddenInset');
   assert.equal(macWindowed.insetLeft, 78);
   assert.equal(macWindowed.insetRight, 0);
+  assert.equal(macWindowed.safeTop, 46);
   assert.equal(macWindowed.customWindowControls, false);
+
+  const macZoomedOut = resolveDesktopChrome({ platform: 'darwin', fullscreen: false, zoomFactor: 0.75 });
+  assert.equal(macZoomedOut.insetLeft, 104);
+  assert.equal(macZoomedOut.titleBarHeight, 62);
+  assert.equal(macZoomedOut.safeTop, 62);
+
+  const macZoomedIn = resolveDesktopChrome({ platform: 'darwin', fullscreen: false, zoomFactor: 1.5 });
+  assert.equal(macZoomedIn.insetLeft, 52);
+  assert.equal(macZoomedIn.titleBarHeight, 46);
 
   const macFullscreen = resolveDesktopChrome({ platform: 'darwin', fullscreen: true });
   assert.equal(macFullscreen.insetLeft, 0);
+  assert.equal(macFullscreen.safeTop, 0);
 
   const winWindowed = resolveDesktopChrome({ platform: 'win32', fullscreen: false, maximized: true });
   assert.equal(winWindowed.titleBarStyle, 'hiddenOverlay');
   assert.equal(winWindowed.insetLeft, 0);
   assert.equal(winWindowed.insetRight, 138);
+  assert.equal(winWindowed.safeTop, 46);
   assert.equal(winWindowed.maximized, true);
+
+  const winZoomedOut = resolveDesktopChrome({ platform: 'win32', fullscreen: false, zoomFactor: 0.75 });
+  assert.equal(winZoomedOut.insetRight, 184);
+  assert.equal(winZoomedOut.titleBarHeight, 62);
 
   const winFullscreen = resolveDesktopChrome({ platform: 'win32', fullscreen: true });
   assert.equal(winFullscreen.insetRight, 0);
+  assert.equal(winFullscreen.safeTop, 0);
 
   const linuxCustom = resolveDesktopChrome({ platform: 'linux', fullscreen: false });
   assert.equal(linuxCustom.titleBarStyle, 'custom');
   assert.equal(linuxCustom.customWindowControls, true);
-  assert.equal(linuxCustom.insetRight, 132);
+  assert.equal(linuxCustom.insetRight, 0);
+  assert.equal(linuxCustom.safeTop, 46);
 
   const linuxNative = resolveDesktopChrome({ platform: 'linux', linuxCustomTitleBar: false });
   assert.equal(linuxNative.titleBarStyle, 'native');
   assert.equal(linuxNative.customWindowControls, false);
   assert.equal(linuxNative.insetRight, 0);
+  assert.equal(linuxNative.safeTop, 0);
 });
 
 test('buildMainWindowOptions enforces hardened preload and OS title bar chrome', () => {
@@ -56,10 +81,14 @@ test('buildMainWindowOptions enforces hardened preload and OS title bar chrome',
     preloadPath: '/app/preload.cjs',
   });
   assert.equal(mac.titleBarStyle, 'hiddenInset');
-  assert.deepEqual(mac.trafficLightPosition, { x: 16, y: 15 });
+  assert.deepEqual(mac.trafficLightPosition, { x: 16, y: 17 });
+  assert.equal(mac.minWidth, 480);
+  assert.equal(mac.minHeight, 480);
   assert.equal(mac.webPreferences?.contextIsolation, true);
   assert.equal(mac.webPreferences?.nodeIntegration, false);
   assert.equal(mac.webPreferences?.sandbox, true);
+  assert.equal(mac.webPreferences?.v8CacheOptions, 'bypassHeatCheck');
+  assert.equal(mac.webPreferences?.backgroundThrottling, true);
 
   const winLight = buildMainWindowOptions({
     platform: 'win32',
@@ -76,6 +105,37 @@ test('buildMainWindowOptions enforces hardened preload and OS title bar chrome',
   });
   assert.equal(linux.frame, false);
   assert.equal(normalizeDesktopPlatform('freebsd'), 'linux');
+});
+
+test('buildDesktopChromeCss enforces traffic-light safe insets across windowed, fullscreen, and non-Studio pages', () => {
+  const macWindowedCss = buildDesktopChromeCss(resolveDesktopChrome({ platform: 'darwin', fullscreen: false }));
+  assert.match(macWindowedCss, /--om-desktop-inset-left:\s*78px/);
+  assert.match(macWindowedCss, /--om-desktop-safe-top:\s*46px/);
+  assert.match(macWindowedCss, /\.om-gallery-surface:not\(\[data-workspace-gallery\]\).*\.om-game-project/);
+  assert.match(macWindowedCss, /html\[data-motion-studio\] \.om-app-header/);
+  assert.match(macWindowedCss, /user-select:\s*none;/);
+  assert.match(macWindowedCss, /-webkit-user-drag:\s*none;/);
+  assert.match(macWindowedCss, /padding-inline-start:\s*calc\(var\(--motion-space-8, 8px\) \+ 78px\)/);
+  assert.match(macWindowedCss, /html\[data-motion-studio\] \.om-application\s*\{\s*display:\s*flex;\s*flex-direction:\s*column;/);
+  assert.match(macWindowedCss, /html\[data-motion-studio\] \.om-application > \.om-app-header\s*\{\s*flex:\s*0 0 46px;\s*order:\s*0;/);
+  assert.match(macWindowedCss, /@media \(max-width: 860px\)/);
+  assert.match(macWindowedCss, /\.om-app-header-links\s*\{\s*display:\s*none;/);
+  assert.match(macWindowedCss, /justify-content:\s*flex-start;/);
+  assert.match(macWindowedCss, /html:not\(\[data-motion-studio\]\) body \{\s*box-sizing:\s*border-box;\s*padding-top:\s*46px;/);
+  assert.match(macWindowedCss, /html\[data-om-resizing="true"\]/);
+  assert.match(macWindowedCss, /transition-duration:\s*0s !important;/);
+  assert.match(macWindowedCss, /pointer-events:\s*none !important;/);
+
+  const macFullscreenCss = buildDesktopChromeCss(resolveDesktopChrome({ platform: 'darwin', fullscreen: true }));
+  assert.match(macFullscreenCss, /--om-desktop-inset-left:\s*0px/);
+  assert.match(macFullscreenCss, /padding-inline-start:\s*calc\(var\(--motion-space-8, 8px\) \+ 0px\)/);
+  assert.doesNotMatch(macFullscreenCss, /html:not\(\[data-motion-studio\]\) body/);
+
+  const winWindowedCss = buildDesktopChromeCss(resolveDesktopChrome({ platform: 'win32', fullscreen: false }));
+  assert.match(winWindowedCss, /--om-desktop-inset-right:\s*138px/);
+
+  const nativeCss = buildDesktopChromeCss(resolveDesktopChrome({ platform: 'linux', linuxCustomTitleBar: false }));
+  assert.equal(nativeCss, '');
 });
 
 test('DesktopLogger redacts credentials/paths, rotates logs, and records crash markers', () => {
@@ -163,49 +223,165 @@ test('buildDesktopMenuTemplate wires Check Updates, Export Logs, Report Issue, a
   assert.equal(menuSource.includes('feishu.cn'), false);
 });
 
-test('buildDesktopMenuTemplate binds CmdOrCtrl+W minimize, CmdOrCtrl+M hide, and CmdOrCtrl+Q confirmed quit across platforms', () => {
-  for (const platform of ['darwin', 'win32', 'linux']) {
-    let minimizeCount = 0;
-    let hideCount = 0;
-    let quitCount = 0;
-    const template = buildDesktopMenuTemplate({
-      platform,
-      appVersion: '0.1.0',
-      onAction: () => {},
-      onOpenUrl: () => {},
-      onMinimizeWindow: () => {
-        minimizeCount += 1;
-      },
-      onHideApp: () => {
-        hideCount += 1;
-      },
-      onRequestQuit: () => {
-        quitCount += 1;
-      },
-    });
+test('buildDesktopMenuTemplate follows macOS HIG standard roles, localization, Dock menu, and production dev-item gating', () => {
+  const macProd = buildDesktopMenuTemplate({
+    platform: 'darwin',
+    appVersion: '0.2.1',
+    locale: 'en-US',
+    includeDevItems: false,
+    onAction: () => {},
+    onOpenUrl: () => {},
+  });
+  const macFlat = macProd.flatMap(group => (Array.isArray(group.submenu) ? group.submenu : []));
 
-    const flatItems = template.flatMap(group =>
-      Array.isArray(group.submenu) ? group.submenu : [],
+  assert.ok(macFlat.some(item => item.role === 'about'), 'macOS app menu should use native About role');
+  assert.ok(macFlat.some(item => item.role === 'hide'), 'macOS app menu should bind Cmd+H via hide role');
+  assert.ok(macFlat.some(item => item.role === 'hideOthers'), 'macOS app menu should include hideOthers');
+  assert.ok(macFlat.some(item => item.role === 'quit'), 'macOS app menu should bind Cmd+Q via quit role');
+  assert.ok(macFlat.some(item => item.role === 'close'), 'macOS File menu should bind Cmd+W via close role');
+  assert.ok(macFlat.some(item => item.role === 'minimize'), 'macOS Window menu should bind Cmd+M via minimize role');
+  assert.ok(macFlat.some(item => item.role === 'zoom'), 'macOS Window menu should include zoom role for window tiling');
+  assert.equal(macFlat.some(item => item.role === 'toggleDevTools'), false, 'Production menu hides DevTools');
+  assert.equal(macFlat.some(item => item.role === 'forceReload'), false, 'Production menu hides Force Reload');
+
+  const macDev = buildDesktopMenuTemplate({
+    platform: 'darwin',
+    appVersion: '0.2.1',
+    locale: 'zh-CN',
+    includeDevItems: true,
+    onAction: () => {},
+    onOpenUrl: () => {},
+  });
+  const macDevFlat = macDev.flatMap(group => (Array.isArray(group.submenu) ? group.submenu : []));
+  assert.ok(macDevFlat.some(item => item.role === 'toggleDevTools'), 'Dev menu includes DevTools');
+  assert.ok(macDevFlat.some(item => item.label === '检查更新…'), 'zh-CN locale localizes custom menu labels');
+  assert.ok(macDevFlat.some(item => item.label === '新建项目'), 'zh-CN locale localizes File menu labels');
+
+  const dockActions = [];
+  let focused = 0;
+  const dockMenu = buildDesktopDockMenuTemplate({
+    locale: 'zh-CN',
+    onAction: action => dockActions.push(action),
+    onFocusMainWindow: () => {
+      focused += 1;
+    },
+  });
+  dockMenu.find(item => item.label === '打开工作区')?.click?.({}, undefined, {});
+  dockMenu.find(item => item.label === '新建项目')?.click?.({}, undefined, {});
+  assert.equal(focused, 1);
+  assert.deepEqual(dockActions, ['new-project']);
+});
+
+test('window-state persists bounds safely and clamps disconnected display coordinates', () => {
+  const workAreas = [{ x: 0, y: 25, width: 1512, height: 957 }];
+  const defaults = { width: 1440, height: 920, minWidth: 480, minHeight: 480 };
+
+  const inBounds = resolveRestoredWindowBounds(
+    { x: 120, y: 80, width: 1200, height: 800, maximized: false },
+    workAreas,
+    defaults,
+  );
+  assert.deepEqual(inBounds, { bounds: { x: 120, y: 80, width: 1200, height: 800 }, maximized: false });
+
+  const offScreen = resolveRestoredWindowBounds(
+    { x: 3200, y: 100, width: 1200, height: 800, maximized: true },
+    workAreas,
+    defaults,
+  );
+  assert.equal(offScreen.bounds.x, undefined);
+  assert.equal(offScreen.bounds.y, undefined);
+  assert.equal(offScreen.bounds.width, 1200);
+  assert.equal(offScreen.maximized, true);
+
+  // Small primary laptop display + large secondary external display:
+  // restoring a large window positioned on the secondary monitor must NOT be shrunk to the primary display.
+  const multiDisplay = [
+    { x: 0, y: 25, width: 1280, height: 775 },
+    { x: 1280, y: 0, width: 2560, height: 1440 },
+  ];
+  const onExternal = resolveRestoredWindowBounds(
+    { x: 1400, y: 80, width: 1920, height: 1100, maximized: false },
+    multiDisplay,
+    defaults,
+  );
+  assert.deepEqual(onExternal, {
+    bounds: { x: 1400, y: 80, width: 1920, height: 1100 },
+    maximized: false,
+  });
+
+  const tmpDir = path.join(os.tmpdir(), `om-win-state-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+  const statePath = path.join(tmpDir, 'window-state.json');
+  try {
+    assert.equal(
+      writeWindowState(statePath, { version: 1, x: 40, y: 60, width: 1280, height: 820, maximized: false }),
+      true,
     );
-
-    const byAccel = accel => flatItems.filter(item => item.accelerator === accel);
-    assert.equal(byAccel('CmdOrCtrl+W').length, 1, `Expected single CmdOrCtrl+W binding on ${platform}`);
-    assert.equal(byAccel('CmdOrCtrl+M').length, 1, `Expected single CmdOrCtrl+M binding on ${platform}`);
-    assert.equal(byAccel('CmdOrCtrl+Q').length, 1, `Expected single CmdOrCtrl+Q binding on ${platform}`);
-
-    assert.equal(flatItems.some(item => item.role === 'close'), false, `Unexpected close role on ${platform}`);
-    assert.equal(flatItems.some(item => item.role === 'minimize'), false, `Unexpected minimize role on ${platform}`);
-    assert.equal(flatItems.some(item => item.role === 'quit'), false, `Unexpected quit role on ${platform}`);
-    assert.equal(flatItems.some(item => item.role === 'hide'), false, `Unexpected hide role on ${platform}`);
-
-    byAccel('CmdOrCtrl+W')[0].click?.({}, undefined, {});
-    byAccel('CmdOrCtrl+M')[0].click?.({}, undefined, {});
-    byAccel('CmdOrCtrl+Q')[0].click?.({}, undefined, {});
-
-    assert.equal(minimizeCount, 1, `CmdOrCtrl+W should minimize on ${platform}`);
-    assert.equal(hideCount, 1, `CmdOrCtrl+M should hide on ${platform}`);
-    assert.equal(quitCount, 1, `CmdOrCtrl+Q should request confirmed quit on ${platform}`);
+    const loaded = readWindowState(statePath);
+    assert.deepEqual(loaded, { version: 1, x: 40, y: 60, width: 1280, height: 820, maximized: false });
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test('buildContextMenuTemplate builds native macOS context menus and rejects unsafe links', () => {
+  const empty = buildContextMenuTemplate(
+    {
+      isEditable: false,
+      selectionText: '',
+      linkURL: '',
+      misspelledWord: '',
+      dictionarySuggestions: [],
+      editFlags: { canUndo: false, canRedo: false, canCut: false, canCopy: false, canPaste: false, canDelete: false, canSelectAll: false, canEditRichly: false },
+    },
+    { platform: 'darwin', locale: 'zh-CN' },
+  );
+  assert.deepEqual(empty, []);
+
+  let replaced = '';
+  let lookedUp = 0;
+  let openedUrl = '';
+  const editable = buildContextMenuTemplate(
+    {
+      isEditable: true,
+      selectionText: 'teh',
+      linkURL: 'https://open-design.ai/docs',
+      misspelledWord: 'teh',
+      dictionarySuggestions: ['the'],
+      editFlags: { canUndo: true, canRedo: false, canCut: true, canCopy: true, canPaste: true, canDelete: true, canSelectAll: true, canEditRichly: false },
+    },
+    {
+      platform: 'darwin',
+      locale: 'zh-CN',
+      onReplaceMisspelling: s => {
+        replaced = s;
+      },
+      onLookUpSelection: () => {
+        lookedUp += 1;
+      },
+      onOpenLinkExternal: url => {
+        openedUrl = url;
+      },
+    },
+  );
+  editable.find(item => item.label === 'the')?.click?.({}, undefined, {});
+  editable.find(item => typeof item.label === 'string' && item.label.startsWith('查询'))?.click?.({}, undefined, {});
+  editable.find(item => item.label === '在浏览器中打开链接')?.click?.({}, undefined, {});
+  assert.equal(replaced, 'the');
+  assert.equal(lookedUp, 1);
+  assert.equal(openedUrl, 'https://open-design.ai/docs');
+
+  const unsafeLink = buildContextMenuTemplate(
+    {
+      isEditable: false,
+      selectionText: '',
+      linkURL: 'javascript:alert(1)',
+      misspelledWord: '',
+      dictionarySuggestions: [],
+      editFlags: { canUndo: false, canRedo: false, canCut: false, canCopy: false, canPaste: false, canDelete: false, canSelectAll: false, canEditRichly: false },
+    },
+    { platform: 'darwin', locale: 'en-US' },
+  );
+  assert.deepEqual(unsafeLink, []);
 });
 
 test('DesktopUpdaterController transitions cleanly and runs beforeQuit hook before quitAndInstall', async () => {
@@ -293,57 +469,54 @@ test('DesktopUpdaterController resolves CJS default autoUpdater export and repor
   assert.ok(resMissing.message);
 });
 
-test('splash.html contains retry, log export, and WebGL disposal controls and stageDesktopApp stages runtime allowlist', () => {
+test('splash.html uses pure inline vector SVG animation and thin-shell omits legacy thick-shell sidecar/staging files', () => {
   const splashHtml = readFileSync(path.join(desktopRoot, 'src', 'splash.html'), 'utf8');
   assert.match(splashHtml, /id="retry-btn"/);
   assert.match(splashHtml, /id="export-logs-btn"/);
   assert.match(splashHtml, /prefers-reduced-motion/);
-  assert.match(splashHtml, /function disposePixelScan/);
-  assert.match(splashHtml, /WEBGL_lose_context/);
+  assert.match(splashHtml, /class="od-wordmark-svg"/);
+  assert.match(splashHtml, /id="od-wordmark-mask"/);
+  assert.equal(splashHtml.includes('<canvas'), false, 'Splash should use pure vector SVG without raster canvas/WebGL blur');
   assert.match(splashHtml, /function teardownSplashResources/);
 
-  const tmpStage = path.join(os.tmpdir(), `om-stage-test-${Date.now()}`);
-  const fakeRepo = path.join(tmpStage, 'repo');
-  const targetDir = path.join(tmpStage, 'out', 'resources', 'app-server');
-  try {
-    mkdirSync(path.join(fakeRepo, 'packages', 'design-system', 'brand'), { recursive: true });
-    mkdirSync(path.join(fakeRepo, 'studio', 'build', 'editor-assets'), { recursive: true });
-    mkdirSync(path.join(fakeRepo, 'shared'), { recursive: true });
-    mkdirSync(path.join(fakeRepo, 'gateway'), { recursive: true });
-    writeFileSync(path.join(fakeRepo, 'server.ts'), '// server\n');
-    writeFileSync(path.join(fakeRepo, 'package.json'), JSON.stringify({ name: 'openmotion' }));
-    writeFileSync(path.join(fakeRepo, 'studio', 'build', 'index.html'), '<html></html>');
-    writeFileSync(path.join(fakeRepo, 'studio', 'build', 'editor-assets', 'app.js'), 'console.log(1);\n');
-    writeFileSync(path.join(fakeRepo, 'studio', 'build', 'editor-assets', 'app.js.map'), '{"version":3}');
-    writeFileSync(path.join(fakeRepo, 'shared', 'sample.ts'), 'export const x = 1;\n');
-    writeFileSync(path.join(fakeRepo, 'shared', 'sample.test.ts'), 'export const skip = true;\n');
-    const sourceIcon = path.resolve(desktopRoot, '..', 'packages', 'design-system', 'brand', 'apple-touch-icon.png');
-    writeFileSync(
-      path.join(fakeRepo, 'packages', 'design-system', 'brand', 'apple-touch-icon.png'),
-      readFileSync(sourceIcon),
-    );
-
-    const staged = stageDesktopApp({
-      repoRoot: fakeRepo,
-      targetDir,
-      copyNodeModules: false,
-    });
-    assert.ok(existsSync(path.join(staged.targetDir, 'server.ts')));
-    assert.ok(existsSync(path.join(staged.targetDir, 'studio', 'build', 'index.html')));
-    assert.ok(existsSync(path.join(staged.targetDir, 'studio', 'build', 'editor-assets', 'app.js')));
-    assert.equal(existsSync(path.join(staged.targetDir, 'studio', 'build', 'editor-assets', 'app.js.map')), false);
-    assert.ok(existsSync(path.join(staged.targetDir, 'shared', 'sample.ts')));
-    assert.equal(existsSync(path.join(staged.targetDir, 'shared', 'sample.test.ts')), false);
-  } finally {
-    rmSync(tmpStage, { recursive: true, force: true });
-  }
+  assert.equal(
+    existsSync(path.join(desktopRoot, 'src', 'sidecar.ts')),
+    false,
+    'Thin-shell desktop must not carry legacy local Node sidecar',
+  );
+  assert.equal(
+    existsSync(path.join(desktopRoot, 'scripts', 'stage-app.mjs')),
+    false,
+    'Thin-shell desktop must not carry legacy backend app-server staging script',
+  );
 });
 
-test('buildAppIconSvg, packPngFramesAsIco, and augmentDesktopPath produce valid multi-platform outputs', () => {
+test('buildAppIconSvg, buildLiquidGlassIconBundle, and packPngFramesAsIco produce valid multi-platform outputs', () => {
   const brandSvg = path.resolve(desktopRoot, '..', 'packages', 'design-system', 'brand', 'loading-mark.svg');
   const iconSvg = buildAppIconSvg(brandSvg);
   assert.match(iconSvg, /viewBox="0 0 1024 1024"/);
   assert.match(iconSvg, /#00e608|#58ff5e/);
+
+  const tmpIconDir = path.join(os.tmpdir(), `om-liquid-glass-test-${Date.now()}`, `${LIQUID_GLASS_ICON_NAME}.icon`);
+  try {
+    const { iconDir, iconManifest } = buildLiquidGlassIconBundle(brandSvg, tmpIconDir);
+    assert.ok(existsSync(path.join(iconDir, 'icon.json')));
+    assert.ok(existsSync(path.join(iconDir, 'Assets', 'aura.svg')));
+    assert.ok(existsSync(path.join(iconDir, 'Assets', 'ring.svg')));
+    assert.ok(existsSync(path.join(iconDir, 'Assets', 'arrow.svg')));
+    assert.equal(iconManifest['supported-platforms']?.squares, 'shared');
+    assert.ok(Array.isArray(iconManifest['fill-specializations']));
+    assert.ok(iconManifest['fill-specializations'].some(spec => spec.appearance === 'dark'));
+    const glassGroup = iconManifest.groups.find(group => group.specular === true);
+    assert.ok(glassGroup);
+    assert.ok(glassGroup.layers.every(layer => layer.glass === true));
+  } finally {
+    rmSync(path.dirname(tmpIconDir), { recursive: true, force: true });
+  }
+
+  const builderConfig = readFileSync(path.join(desktopRoot, 'electron-builder.yml'), 'utf8');
+  assert.match(builderConfig, /CFBundleIconName:\s*AppIcon/);
+  assert.match(builderConfig, /-\s*Assets\.car/);
 
   const fakePng16 = Buffer.from([137, 80, 78, 71, 1, 2, 3, 4]);
   const fakePng256 = Buffer.from([137, 80, 78, 71, 5, 6, 7, 8, 9]);
@@ -356,64 +529,4 @@ test('buildAppIconSvg, packPngFramesAsIco, and augmentDesktopPath produce valid 
   assert.equal(ico.readUInt16LE(4), 2);
   assert.equal(ico.readUInt8(6), 16);
   assert.equal(ico.readUInt8(6 + 16), 0);
-
-  const augmented = augmentDesktopPath('/custom/bin');
-  assert.ok(augmented.includes('/custom/bin'));
-});
-
-test('resolveSidecarRuntimeBinary uses LSUIElement Helper on macOS to prevent duplicate Dock icons', () => {
-  const packagedExec = '/Applications/OpenMotion.app/Contents/MacOS/OpenMotion';
-  const packagedHelper = '/Applications/OpenMotion.app/Contents/Frameworks/OpenMotion Helper.app/Contents/MacOS/OpenMotion Helper';
-  assert.equal(
-    resolveSidecarRuntimeBinary({
-      platform: 'darwin',
-      execPath: packagedExec,
-      env: {},
-      exists: candidate => candidate === packagedHelper,
-    }),
-    packagedHelper,
-  );
-
-  const devElectron = '/tmp/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron';
-  const devHelper = '/tmp/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper';
-  assert.equal(
-    resolveSidecarRuntimeBinary({
-      platform: 'darwin',
-      execPath: devElectron,
-      env: {},
-      exists: candidate => candidate === devHelper,
-    }),
-    devHelper,
-  );
-
-  // Fallback when Helper binary is absent or running on Windows/Linux.
-  assert.equal(
-    resolveSidecarRuntimeBinary({
-      platform: 'darwin',
-      execPath: packagedExec,
-      env: {},
-      exists: () => false,
-    }),
-    packagedExec,
-  );
-  assert.equal(
-    resolveSidecarRuntimeBinary({
-      platform: 'win32',
-      execPath: 'C:\\OpenMotion\\OpenMotion.exe',
-      env: {},
-      exists: () => true,
-    }),
-    'C:\\OpenMotion\\OpenMotion.exe',
-  );
-
-  // Explicit override wins across all platforms.
-  assert.equal(
-    resolveSidecarRuntimeBinary({
-      platform: 'darwin',
-      execPath: packagedExec,
-      env: { MOTION_NODE_BINARY: '/usr/local/bin/node' },
-      exists: () => true,
-    }),
-    '/usr/local/bin/node',
-  );
 });
