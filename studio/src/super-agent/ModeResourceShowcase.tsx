@@ -814,6 +814,8 @@ export function ModeResourceShowcase({
   const [activeSkillCategory, setActiveSkillCategory] = useState<SkillCategory | 'all'>('all');
   const [designQuery, setDesignQuery] = useState('');
   const [gameQuery, setGameQuery] = useState('');
+  // Several Top 100 cards share one template; remember which card started play so only it shows as playing.
+  const [playedTopCard, setPlayedTopCard] = useState<string | null>(null);
   const [gameSort, setGameSort] = useState<GameSort>('relevance');
   const [visibleCount, setVisibleCount] = useState(PAGE_BATCH_SIZE);
   const [fanIndex, setFanIndex] = useState(0);
@@ -1989,7 +1991,7 @@ export function ModeResourceShowcase({
                 const isSelected = isMine
                   ? Boolean(mineAttachment && selectedKeys.has(resourceKey(mineAttachment)))
                   : modeOptions?.gameTemplate?.id === game.id;
-                const isPlaying = playingGameId === (playable ?? game).id;
+                const isPlaying = playingGameId === (playable ?? game).id && (!topEntry || playedTopCard === game.id);
                 const status = isMine ? GAME_STATUS_LABELS[game.status] : undefined;
                 // Top 100 entries have no gameplay of their own here: a ranked text card stands in for the cover.
                 const top = topEntry;
@@ -2073,14 +2075,14 @@ export function ModeResourceShowcase({
 
                     {(onPlayGame || onDeployGame) && (
                       <div className="om-sa-game-tile-actions">
-                        {onDeployGame && (game.status === 'ready' || game.status === 'published') && (
+                        {onDeployGame && (!top || playable) && ((playable ?? game).status === 'ready' || (playable ?? game).status === 'published') && (
                           <IconButton
                             variant="plain"
                             type="button"
                             className="om-sa-game-tile-deploy"
                             title={t('Share')}
                             aria-label={`${t('Share')}: ${title}`}
-                            onClick={() => onDeployGame(game)}
+                            onClick={() => onDeployGame(playable ?? game)}
                             icon={<RemixIcon name="share-forward-line" size={13} />}
                           />
                         )}
@@ -2092,7 +2094,7 @@ export function ModeResourceShowcase({
                             data-playing={isPlaying || undefined}
                             title={t('Try game: {title}', { title })}
                             aria-label={t('Try game: {title}', { title })}
-                            onClick={() => onPlayGame(playable ?? game)}
+                            onClick={() => { setPlayedTopCard(top ? game.id : null); onPlayGame(playable ?? game); }}
                           >
                             <RemixIcon name="play-fill" size={12} />
                             <span>{t('Try game')}</span>
