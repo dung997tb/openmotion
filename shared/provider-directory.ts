@@ -22,12 +22,20 @@ export function publicProviderConnection(provider: ProviderConnection): Provider
   return { id, label, protocol, baseUrl, kinds, category, website, docs, setupRequired, baseUrlEditable,
     configured, enabled, available, custom, credentialSource, reason, ...(verification ? { verification } : {}) };
 }
+export const modelRoutingTiers = ['flagship', 'balanced', 'fast'] as const;
+export type ModelRoutingTier = typeof modelRoutingTiers[number];
 export const modelCapabilities = ['reasoning', 'tools'] as const;
 export const inputModalities = ['vision', 'audio', 'video'] as const;
 export type ModelMetadata = {
   group?: string; capabilities?: typeof modelCapabilities[number][]; inputs?: typeof inputModalities[number][];
   contextWindow?: number | null; maxInputTokens?: number | null; maxOutputTokens?: number | null;
   defaults?: Record<string, unknown>;
+  /** Concise routing summary for discovery (server-published or hydrated fallback). */
+  description?: string;
+  /** Speed/quality tier for automated routing (`flagship`, `balanced`, `fast`). */
+  tier?: ModelRoutingTier;
+  /** Concise capability/use-case tags (e.g. `hero-art`, `batch-sprites`, `transparent-cutout`, `zh-speech`). */
+  bestFor?: string[];
 };
 export type DirectoryModel = ModelMetadata & {
   id: string; provider: string; modelId: string; label: string; kind: ModelKind;
