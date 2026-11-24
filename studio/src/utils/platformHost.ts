@@ -3,6 +3,12 @@ import { setObservabilityContext } from '@openmotion/observability/browser';
 import {
   HOST_CAPABILITIES,
   hostErr,
+  type DesktopPickDownloadDirResult,
+  type DesktopPreferenceKey,
+  type DesktopPreferenceSetResult,
+  type DesktopPreferencesSnapshot,
+  type DesktopPreferenceValues,
+  type DesktopWritablePreferenceKey,
   type HostCapabilityDescriptor,
   type HostInvokeResult,
   type HostKind,
@@ -371,14 +377,29 @@ export function applyDesktopDocumentAttributes(chrome: DesktopChromeInsets | nul
     delete root.dataset.desktopFullscreen;
     root.style.removeProperty('--om-desktop-inset-left');
     root.style.removeProperty('--om-desktop-inset-right');
+    root.style.removeProperty('--om-desktop-safe-top');
+    root.style.removeProperty('--om-desktop-titlebar-height');
     return;
   }
+  const titleBarHeight = Math.max(0, Math.round(chrome.titleBarHeight || 46));
+  const safeTop = Math.max(
+    0,
+    Math.round(
+      typeof chrome.safeTop === 'number'
+        ? chrome.safeTop
+        : !chrome.fullscreen && chrome.titleBarStyle !== 'native'
+          ? titleBarHeight
+          : 0,
+    ),
+  );
   root.dataset.desktop = 'true';
   root.dataset.desktopPlatform = chrome.platform;
   root.dataset.desktopTitlebar = chrome.titleBarStyle;
   root.dataset.desktopFullscreen = chrome.fullscreen ? 'true' : 'false';
   root.style.setProperty('--om-desktop-inset-left', `${chrome.insetLeft}px`);
   root.style.setProperty('--om-desktop-inset-right', `${chrome.insetRight}px`);
+  root.style.setProperty('--om-desktop-titlebar-height', `${titleBarHeight}px`);
+  root.style.setProperty('--om-desktop-safe-top', `${safeTop}px`);
 }
 
 export function syncDesktopTheme(theme: 'light' | 'dark'): void {
@@ -388,6 +409,28 @@ export function syncDesktopTheme(theme: 'light' | 'dark'): void {
     .then(supported => {
       if (!supported) return;
       return bridge.invoke(HOST_CAPABILITIES.WINDOW, 'setTheme', { theme });
+    })
+    .catch(() => {});
+}
+
+export function syncDesktopLocale(locale: string | null): void {
+  const bridge = getDesktopHostBridge();
+  if (!bridge) return;
+  void hasHostCapability(HOST_CAPABILITIES.PREFERENCES, '1.0.0', bridge)
+    .then(supported => {
+      if (!supported) return;
+      return bridge.invoke(HOST_CAPABILITIES.PREFERENCES, 'set', { key: 'locale', value: locale });
+    })
+    .catch(() => {});
+}
+
+export function syncDesktopTelemetryEnabled(enabled: boolean): void {
+  const bridge = getDesktopHostBridge();
+  if (!bridge) return;
+  void hasHostCapability(HOST_CAPABILITIES.TELEMETRY, '1.0.0', bridge)
+    .then(supported => {
+      if (!supported) return;
+      return bridge.invoke(HOST_CAPABILITIES.TELEMETRY, 'setEnabled', { enabled });
     })
     .catch(() => {});
 }
@@ -738,19 +781,26 @@ export async function startDesktopBrowserLogin(
   const bridge = getDesktopHostBridge();
   if (bridge && (await hasHostCapability(HOST_CAPABILITIES.ACCOUNT, '1.0.0', bridge))) {
     try {
-      const result = await bridge.invoke<{ url?: string }>(
+      let switchAccount = false;
+      try {
+        switchAccount = new URL(targetUrl, 'https://example.invalid').searchParams.get('switch') === '1';
+      } catch {
+        // Ignore unparseable loginUrl.
+      }
+      const result = await bridge.invoke<{ url?: string; startUrl?: string }>(
         HOST_CAPABILITIES.ACCOUNT,
         'startBrowserLogin',
         {
           ...(options?.loginUrl ? { loginUrl: options.loginUrl } : {}),
           returnTo: fallbackReturnTo,
+          ...(switchAccount ? { switchAccount: true } : {}),
         },
       );
       if (result.ok) {
         return {
           ok: true,
           mode: 'desktop-account',
-          url: result.data?.url ?? targetUrl,
+          url: result.data?.url ?? result.data?.startUrl ?? targetUrl,
         };
       }
       if (result.error.code !== 'UNSUPPORTED') {
@@ -907,4 +957,244 @@ export async function invokeHostAtom<T = unknown>(
       error instanceof Error ? error.message : 'Local host invocation failed.',
     );
   }
+}
+
+function isDesktopPreferencesSnapshot(value: unknown): value is DesktopPreferencesSnapshot {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.values === 'object' &&
+    record.values !== null &&
+    Array.isArray(record.descriptors) &&
+    Array.isArray(record.pendingRestartKeys) &&
+    (record.platform === 'darwin' || record.platform === 'win32' || record.platform === 'linux')
+  );
+}
+
+export type DesktopPreferencesHookState = {
+  supported: boolean;
+  loading: boolean;
+  snapshot: DesktopPreferencesSnapshot | null;
+  busyKey: string | null;
+  setPreference: <K extends DesktopWritablePreferenceKey>(
+    key: K,
+    value: DesktopPreferenceValues[K],
+  ) => Promise<HostInvokeResult<DesktopPreferenceSetResult>>;
+  resetPreference: (
+    key?: DesktopPreferenceKey,
+  ) => Promise<HostInvokeResult<DesktopPreferencesSnapshot>>;
+  pickDownloadDir: () => Promise<HostInvokeResult<DesktopPickDownloadDirResult>>;
+  relaunchApp: () => Promise<HostInvokeResult<{ relaunching: boolean }>>;
+  refresh: () => Promise<void>;
+};
+
+/**
+ * Capability-gated React hook for Electron desktop-only preferences.
+ * Strictly binds to the Electron desktop shell (`getDesktopHostBridge`) and
+ * stays inactive (`supported: false`) on regular Web, Web Connect Script, and
+ * older desktop shells that do not advertise `preferences >= 1.0.0`.
+ */
+export function useDesktopPreferences(): DesktopPreferencesHookState {
+  const [supported, setSupported] = useState(false);
+  const [loading, setLoading] = useState(() => Boolean(getDesktopHostBridge()));
+  const [snapshot, setSnapshot] = useState<DesktopPreferencesSnapshot | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  const loadSnapshot = useCallback(async () => {
+    const bridge = getDesktopHostBridge();
+    if (!bridge) {
+      setSupported(false);
+      setSnapshot(null);
+      setLoading(false);
+      return;
+    }
+    const available = await hasHostCapability(HOST_CAPABILITIES.PREFERENCES, '1.0.0', bridge);
+    if (!available) {
+      setSupported(false);
+      setSnapshot(null);
+      setLoading(false);
+      return;
+    }
+    setSupported(true);
+    try {
+      const result = await bridge.invoke<DesktopPreferencesSnapshot>(
+        HOST_CAPABILITIES.PREFERENCES,
+        'getAll',
+      );
+      if (result.ok && isDesktopPreferencesSnapshot(result.data)) {
+        setSnapshot(result.data);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const bridge = getDesktopHostBridge();
+    if (!bridge) {
+      setSupported(false);
+      setSnapshot(null);
+      setLoading(false);
+      return;
+    }
+    let active = true;
+    let unsubscribe = () => {};
+
+    void hasHostCapability(HOST_CAPABILITIES.PREFERENCES, '1.0.0', bridge)
+      .then(async available => {
+        if (!active) return;
+        if (!available) {
+          setSupported(false);
+          setSnapshot(null);
+          setLoading(false);
+          return;
+        }
+        setSupported(true);
+        unsubscribe = bridge.subscribe(HOST_CAPABILITIES.PREFERENCES, 'changed', payload => {
+          if (active && isDesktopPreferencesSnapshot(payload)) {
+            setSnapshot(payload);
+          }
+        });
+        const result = await bridge.invoke<DesktopPreferencesSnapshot>(
+          HOST_CAPABILITIES.PREFERENCES,
+          'getAll',
+        );
+        if (active && result.ok && isDesktopPreferencesSnapshot(result.data)) {
+          setSnapshot(result.data);
+        }
+      })
+      .catch(() => {
+        if (active) setSupported(false);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const setPreference = useCallback(
+    async <K extends DesktopWritablePreferenceKey>(
+      key: K,
+      value: DesktopPreferenceValues[K],
+    ): Promise<HostInvokeResult<DesktopPreferenceSetResult>> => {
+      const bridge = getDesktopHostBridge();
+      if (!bridge) {
+        return hostErr('UNSUPPORTED', 'Desktop preferences are only available in the desktop app.');
+      }
+      setBusyKey(key);
+      try {
+        const result = await bridge.invoke<DesktopPreferenceSetResult>(
+          HOST_CAPABILITIES.PREFERENCES,
+          'set',
+          { key, value },
+        );
+        if (result.ok && isDesktopPreferencesSnapshot(result.data?.snapshot)) {
+          setSnapshot(result.data.snapshot);
+        }
+        return result;
+      } catch (error) {
+        return hostErr(
+          'INTERNAL_ERROR',
+          error instanceof Error ? error.message : 'Could not update desktop preference.',
+        );
+      } finally {
+        setBusyKey(current => (current === key ? null : current));
+      }
+    },
+    [],
+  );
+
+  const resetPreference = useCallback(
+    async (key?: DesktopPreferenceKey): Promise<HostInvokeResult<DesktopPreferencesSnapshot>> => {
+      const bridge = getDesktopHostBridge();
+      if (!bridge) {
+        return hostErr('UNSUPPORTED', 'Desktop preferences are only available in the desktop app.');
+      }
+      const marker = key ?? '__all__';
+      setBusyKey(marker);
+      try {
+        const result = await bridge.invoke<DesktopPreferencesSnapshot>(
+          HOST_CAPABILITIES.PREFERENCES,
+          'reset',
+          key ? { key } : {},
+        );
+        if (result.ok && isDesktopPreferencesSnapshot(result.data)) {
+          setSnapshot(result.data);
+        }
+        return result;
+      } catch (error) {
+        return hostErr(
+          'INTERNAL_ERROR',
+          error instanceof Error ? error.message : 'Could not reset desktop preference.',
+        );
+      } finally {
+        setBusyKey(current => (current === marker ? null : current));
+      }
+    },
+    [],
+  );
+
+  const pickDownloadDir = useCallback(async (): Promise<
+    HostInvokeResult<DesktopPickDownloadDirResult>
+  > => {
+    const bridge = getDesktopHostBridge();
+    if (!bridge) {
+      return hostErr('UNSUPPORTED', 'Desktop preferences are only available in the desktop app.');
+    }
+    setBusyKey('lastDownloadDir');
+    try {
+      const result = await bridge.invoke<DesktopPickDownloadDirResult>(
+        HOST_CAPABILITIES.PREFERENCES,
+        'pickDownloadDir',
+      );
+      if (result.ok && isDesktopPreferencesSnapshot(result.data?.snapshot)) {
+        setSnapshot(result.data.snapshot);
+      }
+      return result;
+    } catch (error) {
+      return hostErr(
+        'INTERNAL_ERROR',
+        error instanceof Error ? error.message : 'Could not choose download folder.',
+      );
+    } finally {
+      setBusyKey(current => (current === 'lastDownloadDir' ? null : current));
+    }
+  }, []);
+
+  const relaunchApp = useCallback(async (): Promise<HostInvokeResult<{ relaunching: boolean }>> => {
+    const bridge = getDesktopHostBridge();
+    if (!bridge) {
+      return hostErr('UNSUPPORTED', 'App relaunch is only available in the desktop app.');
+    }
+    setBusyKey('__relaunch__');
+    try {
+      return await bridge.invoke<{ relaunching: boolean }>(
+        HOST_CAPABILITIES.PREFERENCES,
+        'relaunch',
+      );
+    } catch (error) {
+      return hostErr(
+        'INTERNAL_ERROR',
+        error instanceof Error ? error.message : 'Could not restart the desktop app.',
+      );
+    } finally {
+      setBusyKey(current => (current === '__relaunch__' ? null : current));
+    }
+  }, []);
+
+  return {
+    supported,
+    loading,
+    snapshot,
+    busyKey,
+    setPreference,
+    resetPreference,
+    pickDownloadDir,
+    relaunchApp,
+    refresh: loadSnapshot,
+  };
 }
