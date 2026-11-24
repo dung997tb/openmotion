@@ -132,40 +132,49 @@ async function diffMountedPreview(previous: string, current: string) {
   return diffPreviewChanges(previous, current);
 }
 
+function onlyStyles(changes: PreviewChange[]) {
+  return changes.every(change => change.styles && !change.attributes.length && !change.text);
+}
+
 export async function diffScriptedPreviewStyles(previous: string, current: string) {
   const changes = await diffMountedPreview(previous, current);
-  return changes?.every(change => change.styles && !change.attributes.length && !change.text) ? changes : null;
+  return changes && onlyStyles(changes) ? changes : null;
 }
 
 export async function tryApplyPeerChanges(
   frame: HTMLIFrameElement | null,
   update: PeerTimingUpdate,
   isCurrent: () => boolean,
-  options?: "temporary" | { gestureId?: string },
+  options?: "temporary" | "keep-visible" | { gestureId?: string },
 ): Promise<boolean> {
   if (!frame || !isCurrent()) return false;
   const adapter = createPreviewAdapter({ iframe: frame });
   const document = documents.get(frame);
   if (adapter.sameOrigin || !document || document.token !== adapter.token || !adapter.projectId) return false;
-  const temporary = options === "temporary";
-  if (temporary && document.canRebind) return false;
-  const localSave = typeof options === "object" ? options : undefined;
   const { previous, current } = update;
-  const changes = temporary ? await diffScriptedPreviewStyles(previous.content, current.content) :
+  const changes = options === "temporary" ? await diffScriptedPreviewStyles(previous.content, current.content) :
     await diffMountedPreview(previous.content, current.content);
   if (!changes || !isCurrent()) return false;
-  if (!temporary && !document.canRebind &&
-      !(document.liveEdits.position && isLivePositionEdit(changes)) &&
-      !(document.liveEdits.mediaTiming && isLiveMediaMove(changes))) return false;
+  const canAdvance = document.canRebind || (document.liveEdits.position && isLivePositionEdit(changes)) ||
+    (document.liveEdits.mediaTiming && isLiveMediaMove(changes));
+  const temporary = options === "temporary" || (!canAdvance && options === "keep-visible");
+  if (temporary && (document.canRebind || !onlyStyles(changes))) return false;
+  if (!temporary && !canAdvance) return false;
+  const localSave = typeof options === "object" ? options : undefined;
   const presentation = changes.some(c => c.styles || c.text);
   if (localSave && (!presentation || changes.some(c => c.attributes.length))) return false;
   const timeout = 350;
   try {
-    const applied = await adapter.request<boolean>(presentation ? "peer-presentation" : "peer-timing", {
+    const paint = adapter.request<boolean>(presentation ? "peer-presentation" : "peer-timing", {
       documentId: document.id, path: update.path, before: update.previous.version, after: update.current.version,
       changes, ...(temporary && { temporary: true }), ...(localSave && { localSave: true, gestureId: localSave.gestureId }), expiresAt: Date.now() + timeout,
     }, timeout);
-    if (applied !== true || documents.get(frame) !== document || !isCurrent()) return false;
+    // A provisional style can paint in parallel with the authoritative script rebuild.
+    if (temporary && options === "keep-visible") {
+      void paint.catch(() => {});
+      return false;
+    }
+    if (await paint !== true || documents.get(frame) !== document || !isCurrent()) return false;
     if (!temporary && (!presentation || document.timingFile?.path === update.path)) {
       document.timingFile = { path: update.path, version: current.version };
     }
