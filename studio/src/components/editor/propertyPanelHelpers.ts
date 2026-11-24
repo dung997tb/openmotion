@@ -200,6 +200,18 @@ export function readClipInPoint(dataAttributes: Record<string, string> | undefin
   };
 }
 
+/** The inspector edits media in centiseconds. Keep its last stop within the source. */
+export function mediaStartLimit(selection: DomEditSelection, currentStart: number): number {
+  const declared = Number(selection.dataAttributes["source-duration"]);
+  const duration = Number.isFinite(declared) && declared > 0
+    ? declared
+    : selection.intrinsicMediaDuration ?? (selection.element as HTMLMediaElement).duration;
+  if (Number.isFinite(duration) && duration > 0) {
+    return Math.floor(duration * 100) / 100;
+  }
+  return Math.max(30, Math.ceil(currentStart + 10));
+}
+
 export function formatTimingValue(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0.00s";
   return `${seconds.toFixed(2)}s`;

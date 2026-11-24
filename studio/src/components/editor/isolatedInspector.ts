@@ -17,6 +17,7 @@ interface InspectorSnapshot extends InlineTextTarget {
   muted: boolean;
   loop: boolean;
   src?: string;
+  intrinsicMediaDuration?: number;
 }
 
 type Identity = { elementId?: string | null; hfId?: string | null; sourceFile?: string };
@@ -56,6 +57,8 @@ export async function inspectIsolatedElement(adapter: PreviewAdapter, identity: 
   element.textContent = textContent;
   const flags = { isCompositionHost: snapshot.compositionHost === true, isInsideLockedComposition: snapshot.locked === true };
   return {
+    intrinsicMediaDuration: typeof snapshot.intrinsicMediaDuration === "number" && Number.isFinite(snapshot.intrinsicMediaDuration) && snapshot.intrinsicMediaDuration > 0
+      ? snapshot.intrinsicMediaDuration : undefined,
     element, id: id || undefined, hfId: hfId || undefined, selector, sourceFile, compositionPath: sourceFile,
     label: id || hfId || tag, tagName: tag, ...flags, boundingBox: geometry, inlineStyles, computedStyles, dataAttributes,
     existsInSource: true, textContent, isolatedTarget: { sourceFile, sha256: snapshot.sha256, ...(snapshot.fileVersion && {fileVersion: snapshot.fileVersion}), elementId: id, hfId, binding: snapshot.binding },

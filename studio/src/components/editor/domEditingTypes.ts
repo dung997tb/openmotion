@@ -79,6 +79,7 @@ export interface DomEditTextField {
 }
 
 export interface DomEditSelection extends PatchTarget {
+  intrinsicMediaDuration?: number;
   isolatedTarget?: import("./isolatedInlineTextPatch").InlineTextTarget;
   element: HTMLElement;
   label: string;

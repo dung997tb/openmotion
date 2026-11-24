@@ -12,6 +12,7 @@ import {
   LABEL,
   parseNumericValue,
   readClipInPoint,
+  mediaStartLimit,
   RESPONSIVE_GRID,
 } from "./propertyPanelHelpers";
 import { Section, SegmentedControl, SelectField, SliderControl } from "./propertyPanelPrimitives";
@@ -88,11 +89,7 @@ export function MediaSection({
   const objectFit = styles["object-fit"] || "contain";
   const objectPosition = styles["object-position"] || "center";
 
-  const sourceDuration =
-    Number.parseFloat(element.dataAttributes["source-duration"] ?? "") ||
-    (el as HTMLMediaElement).duration ||
-    0;
-  const mediaStartMax = Math.max(30, Math.ceil(sourceDuration || mediaStart + 10));
+  const mediaStartMax = mediaStartLimit(element, mediaStart);
 
   const srcAttr = el.getAttribute("src") ?? "";
   const [copied, setCopied] = useState(false);

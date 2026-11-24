@@ -30,6 +30,17 @@ it("projects only the requested authored layer, with caret text and presentation
   expect(await inspect('<p id="t">word</p>', {elementId:"t",sourceFile:"missing.html"})).toBeNull();
 });
 
+it("reads the intrinsic duration from loaded preview media", async () => {
+  const duration = vi.spyOn(HTMLMediaElement.prototype, "duration", "get").mockReturnValue(2.375);
+  try {
+    const selection = await inspect('<video id="clip"></video>', {elementId: "clip"});
+    expect(selection?.intrinsicMediaDuration).toBe(2.375);
+    expect(selection?.dataAttributes["source-duration"]).toBeUndefined();
+  } finally {
+    duration.mockRestore();
+  }
+});
+
 it("distinguishes a mounted target awaiting its saved version from a removed target", async () => {
   const html = '<h1 id="title">Title</h1>';
   const target = { elementId: "title" };

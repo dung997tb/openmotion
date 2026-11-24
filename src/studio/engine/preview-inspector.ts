@@ -44,6 +44,7 @@ export const PREVIEW_INSPECTOR = `
     const leafText = text ? Array.from(el.childNodes, n => n.nodeName === 'BR' ? '\\n' : n.textContent || '').join('') : null;
     const src = el.getAttribute('src');
     return {elementId: detail.elementId, hfId: detail.hfId, sourceFile: detail.sourceFile, ...sourceIdentity(sha256),
+      intrinsicMediaDuration: el.matches('audio,video') && Number.isFinite(el.duration) && el.duration > 0 ? el.duration : undefined,
       tag: el.localName, geometry: detail.geometry, inline, computed, data, leafText, lineBreaks: text && el.childElementCount > 0, binding: binding || undefined,
       compositionHost: el.matches('[data-composition-src],[data-composition-file]'),
       compositionRoot: el === document.querySelector('[data-composition-id]'),
