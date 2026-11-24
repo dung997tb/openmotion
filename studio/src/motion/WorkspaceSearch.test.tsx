@@ -520,3 +520,166 @@ it('defers filtering and suppresses Enter navigation during Chinese IME composit
     container.remove();
   }
 });
+
+it('preserves video asset preview src when switching from a playing Motion template to a video asset', async () => {
+  vi.useFakeTimers();
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const templates: GalleryTemplate[] = [
+    {
+      id: 'tpl-clip',
+      title: 'Orbit Intro Clip',
+      subtitle: 'Motion',
+      description: 'Orbit animation',
+      collection: 'reference',
+      kind: 'prism',
+      hasHtmlProject: true,
+      tags: ['orbit'],
+      duration: 8,
+      ratio: '16:9',
+      posterUrl: '/poster-orbit.jpg',
+      previewUrl: '/preview-orbit.mp4',
+      author: 'Studio',
+    },
+  ];
+  vi.mocked(useCoveredTemplates).mockReturnValue({
+    catalog: templates,
+    firstPage: null,
+    failed: false,
+    retry: vi.fn(),
+  });
+  vi.mocked(assetRequest).mockResolvedValue({
+    assets: [{ id: 'asset-vid-1', name: 'Orbit Video Asset', modality: 'video', currentVersionId: 'ver-1' }],
+    nextOffset: null,
+  });
+
+  const noop = vi.fn();
+  const container = document.body.appendChild(document.createElement('div'));
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(
+      <WorkspaceSearch
+        destination={null}
+        onSkill={noop}
+        onAsset={noop}
+        onStudio={noop}
+        onScene={noop}
+        onAccount={noop}
+        onLibrary={noop}
+        onCommunity={noop}
+      />,
+    ));
+    await act(async () => container.querySelector('button')!.click());
+    const input = document.querySelector<HTMLInputElement>('.om-workspace-search input')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'orbit');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(220); });
+
+    const templateRow = document.querySelector<HTMLButtonElement>('[data-result-key="motion-template:tpl-clip"]')!;
+    await act(async () => {
+      templateRow.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      templateRow.focus();
+    });
+    const playBtn = document.querySelector<HTMLButtonElement>('.om-command-stage-play')!;
+    expect(playBtn).not.toBeNull();
+    await act(async () => playBtn.click());
+    expect(document.querySelector<HTMLVideoElement>('.om-command-stage video')?.getAttribute('src')).toBe('/preview-orbit.mp4');
+
+    // Switch directly to the video asset while template playback was active
+    const assetRow = document.querySelector<HTMLButtonElement>('[data-result-key="asset:asset-vid-1:ver-1"]')!;
+    expect(assetRow).not.toBeNull();
+    await act(async () => {
+      assetRow.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      assetRow.focus();
+    });
+    const assetVideo = document.querySelector<HTMLVideoElement>('.om-command-stage-asset video')!;
+    expect(assetVideo).not.toBeNull();
+    expect(assetVideo.getAttribute('src')).toContain('asset-vid-1');
+  } finally {
+    await act(async () => root.unmount());
+    vi.useRealTimers();
+    container.remove();
+  }
+});
+
+it('submits any natural-language query directly to Super Agent via the colorful Ask AI button or Cmd/Ctrl+Enter', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  vi.mocked(assetRequest).mockResolvedValue({ assets: [], nextOffset: null });
+  const openInSuperAgent = vi.fn();
+  const chromeValue = {
+    workspace: { projects: [], open: vi.fn(), create: vi.fn(), status: null, busy: false, error: '', errorSource: 'operation', clearError: vi.fn(), activeProjectId: undefined, connectionError: null, navigationError: null },
+    switchingDisabled: false,
+    saveState: '',
+    openLibrary: vi.fn(),
+    openConnections: vi.fn(),
+    openModelSettings: vi.fn(),
+    openHome: vi.fn(),
+    openAssets: vi.fn(),
+    openInSuperAgent,
+    assetsOpen: false,
+    openSkills: vi.fn(),
+    skillsOpen: false,
+    toggleSidebar: vi.fn(),
+    sidebarOpen: false,
+    navigationCollapsed: false,
+    registerEditor: vi.fn(),
+    beforeViewChange: async () => {},
+  } as unknown as WorkspaceChrome;
+  const noop = vi.fn();
+  const container = document.body.appendChild(document.createElement('div'));
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(
+      <I18nProvider initialLocale="zh-CN">
+        <WorkspaceChromeContext.Provider value={chromeValue}>
+          <WorkspaceSearch
+            destination={null}
+            onSkill={noop}
+            onAsset={noop}
+            onStudio={noop}
+            onScene={noop}
+            onAccount={noop}
+            onLibrary={noop}
+            onCommunity={noop}
+          />
+        </WorkspaceChromeContext.Provider>
+      </I18nProvider>,
+    ));
+    await act(async () => container.querySelector('button')!.click());
+    const input = document.querySelector<HTMLInputElement>('.om-workspace-search input')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '做一个科技感发布会开场视频');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const aiBtn = document.querySelector<HTMLButtonElement>('.om-command-ai-btn')!;
+    expect(aiBtn).not.toBeNull();
+    expect(aiBtn.textContent).toContain('问 AI');
+    await act(async () => aiBtn.click());
+    expect(openInSuperAgent).toHaveBeenCalledWith(expect.objectContaining({
+      newChat: true,
+      autoSend: true,
+      prompt: expect.stringContaining('做一个科技感发布会开场视频'),
+    }));
+
+    // Reopen and verify Cmd+Enter works even on zero-result query
+    await act(async () => container.querySelector('button')!.click());
+    const input2 = document.querySelector<HTMLInputElement>('.om-workspace-search input')!;
+    const palette2 = document.querySelector<HTMLElement>('.om-command-palette')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input2, '像王家卫电影一样的霓虹短片');
+      input2.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      palette2.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
+    });
+    expect(openInSuperAgent).toHaveBeenLastCalledWith(expect.objectContaining({
+      newChat: true,
+      autoSend: true,
+      prompt: expect.stringContaining('像王家卫电影一样的霓虹短片'),
+    }));
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

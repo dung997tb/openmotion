@@ -21,7 +21,7 @@ import { designClient, peekCachedDesignSkills, peekCachedDesignTemplates } from 
 import { DesignProjectList } from '../DesignProjectList';
 import { DesignTemplateDetailModal } from '../DesignTemplateDetailModal';
 import { ScaledPreviewThumb } from '../ScaledPreviewThumb';
-import designMentionTitlesZh from '../design-mention-titles.zh-CN.json';
+import designMentionTitlesZh from '../../../../shared/design-mention-titles.zh-CN.json';
 import { DesignSceneTabs, type DesignTabId } from './DesignSceneTabs';
 import '../design.css';
 

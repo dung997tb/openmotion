@@ -44,15 +44,20 @@ export function WorkspaceSearchPreview({
   const [assetMediaFailed, setAssetMediaFailed] = useState(false);
   const [thumbFailed, setThumbFailed] = useState(false);
   const [settledDesignKey, setSettledDesignKey] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const templateVideoRef = useRef<HTMLVideoElement>(null);
+  const assetVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     setPlayingVideo(false);
     setVideoFailed(false);
     setAssetMediaFailed(false);
     setThumbFailed(false);
-    const el = videoRef.current;
-    return () => releaseMediaElement(el);
+    const tplEl = templateVideoRef.current;
+    const assetEl = assetVideoRef.current;
+    return () => {
+      releaseMediaElement(tplEl);
+      releaseMediaElement(assetEl);
+    };
   }, [item?.key]);
 
   // Debounce mounting heavy Design preview iframes when scrubbing rapidly through rows
@@ -66,8 +71,8 @@ export function WorkspaceSearchPreview({
   }, [item?.key, item?.kind]);
 
   useEffect(() => {
-    const el = videoRef.current;
-    if (!playingVideo) {
+    const el = templateVideoRef.current;
+    if (!playingVideo || item?.kind !== 'motion-template') {
       releaseMediaElement(el);
       return;
     }
@@ -76,7 +81,7 @@ export function WorkspaceSearchPreview({
       void el.play().catch(() => {});
     }
     return () => releaseMediaElement(el);
-  }, [playingVideo]);
+  }, [playingVideo, item?.kind]);
 
   if (!item) {
     return (
@@ -111,7 +116,7 @@ export function WorkspaceSearchPreview({
           <TemplatePoster key={template.id} template={template} eager />
           {template.previewUrl && playingVideo && !videoFailed && (
             <video
-              ref={videoRef}
+              ref={templateVideoRef}
               key={template.id}
               src={template.previewUrl}
               muted
@@ -327,7 +332,7 @@ export function WorkspaceSearchPreview({
             <img src={mediaUrl} alt={asset.name} onError={() => setAssetMediaFailed(true)} />
           ) : asset.modality === 'video' && !assetMediaFailed ? (
             <video
-              ref={videoRef}
+              ref={assetVideoRef}
               key={item.key}
               src={mediaUrl}
               controls

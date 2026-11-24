@@ -70,7 +70,7 @@ function listFiles(base: string): string[] {
   return out;
 }
 
-const zhMentionPath = fileURLToPath(new URL('../studio/src/design/design-mention-titles.zh-CN.json', import.meta.url));
+const zhMentionPath = fileURLToPath(new URL('./design-mention-titles.zh-CN.json', import.meta.url));
 let zhMentionsCache: { templates: Record<string, string>; skills: Record<string, string> } | undefined;
 function loadZhMentions() {
   return zhMentionsCache ??= readJson<{ templates: Record<string, string>; skills: Record<string, string> }>(
