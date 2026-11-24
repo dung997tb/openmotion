@@ -37,7 +37,7 @@ export function GenerationUpgradeNotice({ destination, onError, onUpgrade, visit
   const title = destination.scene.modality === 'image'
     ? t('7 days of unlimited image generation')
     : t('Unlock popular AI models');
-  return <MultimodalUpgradeCard subscription={subscription} visit={visit} title={title} />;
+  return <MultimodalUpgradeCard subscription={subscription} visit={visit} title={title} buttonLabel={t('Upgrade')} />;
 }
 
 export function GenerationSignInNotice({ destination, onSignIn, visit }: { visit?: OfferVisit; destination: StudioDestination; onSignIn: () => void }) {

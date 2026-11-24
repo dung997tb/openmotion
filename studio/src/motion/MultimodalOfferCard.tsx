@@ -23,18 +23,18 @@ export function MultimodalOfferCard({ title, details, children, visit, kind }: {
   </section>;
 }
 
-export function MultimodalUpgradeButton({ subscription }: { subscription: ReturnType<typeof useSubscriptionOpener> }) {
+export function MultimodalUpgradeButton({ subscription, label }: { subscription: ReturnType<typeof useSubscriptionOpener>; label?: string }) {
   const { t } = useI18n();
   return subscription.link ?? <Button variant="plain" onClick={() => void subscription.openSubscription('view_plans')}>
-    {t('Upgrade to Plus')}<RemixIcon name="arrow-right-up-line" size={12} />
+    {label ?? t('Upgrade to Plus')}<RemixIcon name="arrow-right-up-line" size={12} />
   </Button>;
 }
 
-export function MultimodalUpgradeCard({ subscription, visit, title }: {
-  subscription: ReturnType<typeof useSubscriptionOpener>; visit?: OfferVisit; title?: string;
+export function MultimodalUpgradeCard({ subscription, visit, title, buttonLabel }: {
+  subscription: ReturnType<typeof useSubscriptionOpener>; visit?: OfferVisit; title?: string; buttonLabel?: string;
 }) {
   const { t } = useI18n();
   return <MultimodalOfferCard kind="upgrade" visit={visit} title={title ?? t('Unlock multimodal creation')} details={t('Black Friday’s lowest prices of the year! 7 days of unlimited use')}>
-    <MultimodalUpgradeButton subscription={subscription} />
+    <MultimodalUpgradeButton subscription={subscription} label={buttonLabel} />
   </MultimodalOfferCard>;
 }

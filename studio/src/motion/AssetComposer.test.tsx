@@ -865,7 +865,7 @@ it.each(['free', 'plus'])('keeps the background removal draft through sign-in an
   await act(async () => { window.dispatchEvent(new Event('motion:account-changed')); });
   expect(billingRead).toBe(true);
   expect(container.querySelector('[aria-label="Provider"]')?.textContent).toBe('OpenDesign');
-  expect(container.textContent.includes('Upgrade to Plus')).toBe(plan === 'free');
+  expect(container.querySelector('[data-generation-offer="upgrade"] button')?.textContent === 'Upgrade').toBe(plan === 'free');
   expect(submit().disabled).toBe(plan === 'free');
   expect(container.querySelector<HTMLTextAreaElement>('.om-image-prompt')?.value).toBe('Keep the mug');
   expect(container.querySelector('.om-scene-source-file')?.textContent).toContain('mug');
@@ -899,7 +899,7 @@ it.each([
     expect(container.querySelector('.om-creation-prompt-footer, .om-creation-save-note, .om-creation-billing')).toBeNull();
     expect(picker('Provider').querySelector('.om-picker-trigger-label')?.textContent).toBe('OpenDesign');
     expect(picker('Generation model').textContent).toContain(state === 'guest' ? 'Plus and above' : 'Requires upgrade to Plus');
-    expect(container.textContent).toContain(state === 'guest' ? 'Sign in now' : 'Upgrade to Plus');
+    expect(container.querySelector('[data-generation-offer] button')?.textContent).toBe(state === 'guest' ? 'Sign in now' : 'Upgrade');
     if (state === 'guest') {
       expect(container.querySelector('[data-generation-offer="sign_in"] h3')?.textContent)
         .toBe(modality === 'image' ? '7 days of unlimited image generation' : 'Black Friday: up to 50% off your first year');
@@ -922,7 +922,7 @@ it.each([
     await render('locked', otherCutoutModels[0].id);
     expect(picker('Provider').textContent).toBe('Codex');
     expect(container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.disabled).toBe(false);
-    expect(container.textContent).not.toContain('Upgrade to Plus');
+    expect(container.querySelector('[data-generation-offer="upgrade"]')).toBeNull();
   }
   await render('cloud');
   expect(picker('Provider').textContent).toBe('OpenDesign Cloud');
@@ -999,7 +999,7 @@ it.each(['free', 'go'])('previews locked account models and lets a %s account sw
   expect(submit().disabled).toBe(true);
   gatewayRequest.mockResolvedValue({ opened: true });
   const upgrade = offer.querySelector<HTMLButtonElement>('button')!;
-  expect(upgrade.textContent).toBe('Upgrade to Plus');
+  expect(upgrade.textContent).toBe('Upgrade');
   expect(upgrade.querySelector('[data-remix-icon="arrow-right-up-line"]')).not.toBeNull();
   await click(upgrade);
   const cardClicks = vi.mocked(trackMotion).mock.calls.filter(([event, fields]) => event === 'ui_click' && (fields as Record<string, unknown>).element === 'view_plans');
