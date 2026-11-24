@@ -659,15 +659,67 @@ function escapeHtml(text: string): string {
     .replaceAll("'", '&#39;');
 }
 
-const SCOPE_DESCRIPTIONS: Readonly<Record<string, string>> = {
-  'projects:read': '查看已授权项目的画面、时间轴与版本历史',
-  'projects:write': '编辑已授权项目的场景、文案、动画并保存新版本',
-  'assets:read': '读取素材库和项目中的媒体文件',
-  'assets:write': '上传与导入新的媒体素材到工作区',
-  'exports:write': '发起并下载视频/动效渲染导出任务',
-  'media:generate': '调用 OpenDesign 平台模型生成图片、视频和音频',
-  'mcp:tools': '通过远程 MCP 协议调用 OpenDesign 工作台工具',
+const SCOPE_DESCRIPTIONS: Readonly<Record<string, { title: string; detail: string }>> = {
+  'projects:read': { title: '查看已授权的视频项目', detail: '读取画面、时间轴与版本历史' },
+  'projects:write': { title: '编辑已授权的视频项目', detail: '修改场景、文案、动画并保存版本' },
+  'assets:read': { title: '读取工作区素材', detail: '访问素材库与项目中的媒体文件' },
+  'assets:write': { title: '上传与导入工作区素材', detail: '导入新的图片、音频和视频素材' },
+  'exports:write': { title: '发起视频渲染与导出', detail: '提交导出任务并下载成片' },
+  'media:generate': { title: '调用 AI 模型生成素材', detail: '生成图片、视频、配音和音乐' },
+  'mcp:tools': { title: '通过 MCP 连接 OpenMotion', detail: '在当前 Agent 中调用云端创作工具' },
 };
+
+interface ConsentPermissionGroup {
+  title: string;
+  detail: string;
+}
+
+function summarizeConsentScopes(scopes: readonly string[]): ConsentPermissionGroup[] {
+  const remaining = new Set(scopes);
+  const groups: ConsentPermissionGroup[] = [];
+
+  if (remaining.has('projects:read') && remaining.has('projects:write')) {
+    remaining.delete('projects:read');
+    remaining.delete('projects:write');
+    groups.push({
+      title: '查看并编辑已授权的视频项目',
+      detail: '仅限该应用新建及你在网页中手动授权的项目',
+    });
+  }
+
+  if (remaining.has('assets:read') && remaining.has('assets:write')) {
+    remaining.delete('assets:read');
+    remaining.delete('assets:write');
+    groups.push({
+      title: '读取与导入工作区素材',
+      detail: '访问素材库并上传图片、视频和音频文件',
+    });
+  }
+
+  if (remaining.has('media:generate') && remaining.has('exports:write')) {
+    remaining.delete('media:generate');
+    remaining.delete('exports:write');
+    groups.push({
+      title: 'AI 生成素材与渲染导出视频',
+      detail: '调用平台模型生成媒体并发起成片导出',
+    });
+  }
+
+  for (const scope of scopes) {
+    if (!remaining.has(scope)) continue;
+    remaining.delete(scope);
+    const desc = SCOPE_DESCRIPTIONS[scope];
+    groups.push(desc ?? { title: scope, detail: '请求此工作区权限' });
+  }
+
+  return groups;
+}
+
+const OPENDESIGN_MARK_SVG = `<svg viewBox="0 0 291 291" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M145.5 0C225.857 0 291 65.1426 291 145.5C291 225.857 225.857 291 145.5 291H19.3581C8.64385 291 0.000681982 282.358 0.000616442 271.644C0.000417939 239.193 1.50624e-09 174.523 0 145.5C0 65.1426 65.1426 5.2069e-06 145.5 0ZM145.501 29.1004C81.2147 29.1004 29.1004 81.2147 29.1004 145.501C29.1005 209.786 81.2147 261.9 145.501 261.9C209.786 261.9 261.9 209.786 261.9 145.501C261.9 81.2147 209.786 29.1004 145.501 29.1004Z" fill="currentColor"/><path d="M137.934 215.04L94.3119 100.247C92.9002 96.5317 96.5286 92.8895 100.219 94.3172L215.067 138.749C219.793 140.578 218.491 147.633 213.427 147.633H146.769V213.4C146.769 218.499 139.744 219.804 137.934 215.04Z" fill="currentColor"/></svg>`;
+
+const MCP_CLIENT_GLYPH_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>`;
+
+const CHECK_ICON_SVG = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></svg>`;
 
 export function renderOAuthConsentHtml(input: {
   clientName: string;
@@ -689,34 +741,48 @@ export function renderOAuthConsentHtml(input: {
         `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
     )
     .join('\n');
-  const scopeList = input.scopes
-    .map((scope) => {
-      const desc = SCOPE_DESCRIPTIONS[scope] ?? scope;
-      return `<li><strong>${escapeHtml(desc)}</strong> <span class="scope-tag">${escapeHtml(scope)}</span></li>`;
-    })
+
+  const permissionItems = summarizeConsentScopes(input.scopes)
+    .map(
+      (item) => `<li class="perm-item">
+          <span class="perm-check">${CHECK_ICON_SVG}</span>
+          <div class="perm-copy">
+            <div class="perm-title">${escapeHtml(item.title)}</div>
+            <div class="perm-detail">${escapeHtml(item.detail)}</div>
+          </div>
+        </li>`,
+    )
     .join('\n');
+
+  const rawScopePills = input.scopes
+    .map((scope) => `<code class="scope-pill">${escapeHtml(scope)}</code>`)
+    .join('');
 
   const redirectHostLabel = input.redirectUri
     ? formatRedirectHostLabel(input.redirectUri)
     : 'Local application';
-  const accountDisplay = input.userEmail || input.userDisplayName || '当前登录账号';
-  const avatarInitial = (input.userDisplayName || input.userEmail || 'U').slice(0, 1).toUpperCase();
+  const primaryAccountName = input.userDisplayName || input.userEmail || '当前登录账号';
+  const secondaryAccountEmail =
+    input.userEmail && input.userEmail !== primaryAccountName ? input.userEmail : null;
+  const avatarInitial = primaryAccountName.slice(0, 1).toUpperCase();
   const avatarHtml = input.userAvatarUrl
     ? `<img class="avatar-img" src="${escapeHtml(input.userAvatarUrl)}" alt="">`
-    : `<span class="avatar-fallback">${escapeHtml(avatarInitial)}</span>`;
+    : `<span class="avatar-fallback" aria-hidden="true">${escapeHtml(avatarInitial)}</span>`;
 
   const workspaceControl =
     input.workspaces && input.workspaces.length > 1
-      ? `<label class="ws-label" for="selected_workspace_id">授权工作区</label>
-         <select id="selected_workspace_id" name="selected_workspace_id" class="ws-select">
-           ${input.workspaces
-             .map(
-               (ws) =>
-                 `<option value="${escapeHtml(ws.id)}"${ws.id === input.workspaceId ? ' selected' : ''}>${escapeHtml(ws.name)} (${escapeHtml(ws.role)})</option>`,
-             )
-             .join('\n')}
-         </select>`
-      : `<div class="kv"><span>授权工作区</span><strong>${escapeHtml(input.workspaceName)}</strong></div>`;
+      ? `<div class="meta-row meta-row-select">
+          <label class="meta-label" for="selected_workspace_id">授权工作区</label>
+          <select id="selected_workspace_id" name="selected_workspace_id" class="ws-select">
+            ${input.workspaces
+              .map(
+                (ws) =>
+                  `<option value="${escapeHtml(ws.id)}"${ws.id === input.workspaceId ? ' selected' : ''}>${escapeHtml(ws.name)} (${escapeHtml(ws.role)})</option>`,
+              )
+              .join('\n')}
+          </select>
+        </div>`
+      : `<div class="meta-row"><span class="meta-label">授权工作区</span><strong class="meta-value">${escapeHtml(input.workspaceName)}</strong></div>`;
 
   const switchAccountHtml = input.switchAccountUrl
     ? `<a class="switch-link" href="${escapeHtml(input.switchAccountUrl)}">换一个账号</a>`
@@ -727,68 +793,475 @@ export function renderOAuthConsentHtml(input: {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>授权 ${escapeHtml(input.clientName)} — OpenDesign 工作台</title>
+  <title>授权 ${escapeHtml(input.clientName)} — OpenMotion</title>
+  <link rel="icon" href="/design-system/brand/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/design-system/fonts.css">
   <style>
-    body{font-family:system-ui,-apple-system,sans-serif;background:#0e0f12;color:#f5f5f7;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:1rem;}
-    main{background:#18191f;border:1px solid #2b2d36;border-radius:14px;max-width:480px;width:100%;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.4);}
-    .brand{font-size:0.8rem;letter-spacing:0.04em;text-transform:uppercase;color:#8f96a3;margin-bottom:6px;}
-    h1{font-size:1.25rem;margin:0 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-    .unverified{font-size:0.72rem;background:#3a2b14;color:#fbbf24;border:1px solid #6b4e1b;border-radius:999px;padding:2px 8px;font-weight:500;}
-    .sub{color:#a1a7b3;font-size:0.88rem;margin:0 0 16px;line-height:1.45;}
-    .card{background:#111217;border:1px solid #272932;border-radius:10px;padding:12px 14px;margin-bottom:14px;}
-    .account-row{display:flex;align-items:center;justify-content:space-between;gap:12px;}
-    .account-left{display:flex;align-items:center;gap:10px;min-width:0;}
-    .avatar-img,.avatar-fallback{width:32px;height:32px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;background:#2c3242;color:#fff;font-weight:600;font-size:0.85rem;object-fit:cover;}
-    .account-meta{min-width:0;}
-    .account-name{font-size:0.92rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .account-email{font-size:0.8rem;color:#9ba1ae;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .switch-link{color:#7cb3ff;font-size:0.82rem;text-decoration:none;white-space:nowrap;}
-    .switch-link:hover{text-decoration:underline;}
-    .kv{display:flex;justify-content:space-between;align-items:center;font-size:0.86rem;gap:12px;margin-top:8px;padding-top:8px;border-top:1px solid #23252e;}
-    .kv span{color:#9ba1ae;}
-    .ws-label{display:block;font-size:0.82rem;color:#9ba1ae;margin:10px 0 6px;}
-    .ws-select{width:100%;padding:8px 10px;border-radius:8px;border:1px solid #353846;background:#181a22;color:#f5f5f7;font-size:0.88rem;}
-    .section-title{font-size:0.84rem;color:#9ba1ae;margin:12px 0 8px;}
-    ul{padding-left:18px;margin:0 0 18px;}
-    li{margin:6px 0;font-size:0.88rem;line-height:1.45;}
-    .scope-tag{font-family:ui-monospace,monospace;font-size:0.74rem;color:#8f96a3;background:#23252e;padding:1px 6px;border-radius:4px;margin-left:4px;}
-    .note{font-size:0.78rem;color:#8f96a3;margin-bottom:16px;line-height:1.45;}
-    .actions{display:flex;gap:12px;margin-top:16px;}
-    button{flex:1;padding:10px 16px;border-radius:8px;border:1px solid #3b3e4c;font-size:0.95rem;cursor:pointer;}
-    .approve{background:#fff;color:#111;border-color:#fff;font-weight:600;}
-    .deny{background:#242630;color:#f5f5f7;}
+    :root {
+      color-scheme: dark;
+      --om-font-sans: "Albert Sans", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      --om-font-mono: "IBM Plex Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+      --om-brand: #00ff08;
+      --om-brand-ink: #111214;
+      --om-brand-glow: rgba(0, 255, 8, 0.28);
+      --om-page-bg: #111214;
+      --om-card-bg: #18191c;
+      --om-inset-bg: #121316;
+      --om-border: rgba(255, 255, 255, 0.09);
+      --om-border-strong: rgba(255, 255, 255, 0.16);
+      --om-strong: #f7f8f5;
+      --om-text: #e6e8e4;
+      --om-muted: #9ea5b0;
+      --om-dim: #7c838f;
+      --om-accent: #00ff08;
+      --om-accent-soft: rgba(0, 255, 8, 0.10);
+      --om-client-tile-bg: #22242a;
+      --om-client-tile-ink: #f7f8f5;
+      --om-action-bg: #f7f8f5;
+      --om-action-hover: #e6e8e4;
+      --om-on-action: #0b0c0d;
+      --om-deny-bg: transparent;
+      --om-deny-hover: rgba(255, 255, 255, 0.06);
+      --om-dot-color: rgba(255, 255, 255, 0.055);
+      --om-aura: rgba(0, 255, 8, 0.09);
+      --om-shadow: 0 24px 64px rgba(0, 0, 0, 0.58), 0 2px 10px rgba(0, 0, 0, 0.28);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        color-scheme: light;
+        --om-brand-glow: rgba(0, 113, 6, 0.20);
+        --om-page-bg: #f5f6f7;
+        --om-card-bg: #ffffff;
+        --om-inset-bg: #f8f9fa;
+        --om-border: rgba(18, 19, 22, 0.09);
+        --om-border-strong: rgba(18, 19, 22, 0.16);
+        --om-strong: #121212;
+        --om-text: #2e3035;
+        --om-muted: #5c616a;
+        --om-dim: #777d87;
+        --om-accent: #007106;
+        --om-accent-soft: rgba(0, 113, 6, 0.08);
+        --om-client-tile-bg: #eef0f3;
+        --om-client-tile-ink: #121212;
+        --om-action-bg: #121212;
+        --om-action-hover: #2d2f34;
+        --om-on-action: #ffffff;
+        --om-deny-bg: #ffffff;
+        --om-deny-hover: #f2f3f5;
+        --om-dot-color: rgba(18, 19, 22, 0.06);
+        --om-aura: rgba(0, 255, 8, 0.10);
+        --om-shadow: 0 20px 56px rgba(20, 22, 26, 0.10), 0 2px 8px rgba(20, 22, 26, 0.04);
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: var(--om-font-sans);
+      background-color: var(--om-page-bg);
+      background-image:
+        radial-gradient(680px 340px at 50% -40px, var(--om-aura), transparent 72%),
+        radial-gradient(var(--om-dot-color) 1px, transparent 1px);
+      background-size: auto, 22px 22px;
+      color: var(--om-text);
+      min-height: 100vh;
+      margin: 0;
+      padding: 28px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      -webkit-font-smoothing: antialiased;
+    }
+    .shell {
+      width: 100%;
+      max-width: 448px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .brand-bar {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--om-strong);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+    }
+    .brand-bar-mark {
+      width: 20px;
+      height: 20px;
+      color: var(--om-strong);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .brand-bar-mark svg { width: 100%; height: 100%; display: block; }
+    main {
+      width: 100%;
+      background: var(--om-card-bg);
+      border: 1px solid var(--om-border);
+      border-radius: 20px;
+      padding: 28px 24px 24px;
+      box-shadow: var(--om-shadow);
+    }
+    .bridge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .bridge-tile {
+      width: 46px;
+      height: 46px;
+      border-radius: 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .bridge-tile-client {
+      background: var(--om-client-tile-bg);
+      color: var(--om-client-tile-ink);
+      border: 1px solid var(--om-border);
+    }
+    .bridge-tile-client svg { width: 22px; height: 22px; }
+    .bridge-tile-od {
+      background: var(--om-brand);
+      color: var(--om-brand-ink);
+      padding: 9px;
+      box-shadow: 0 6px 24px var(--om-brand-glow);
+    }
+    .bridge-tile-od svg { width: 100%; height: 100%; display: block; }
+    .bridge-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--om-dim);
+    }
+    .bridge-dash {
+      width: 14px;
+      height: 1px;
+      border-top: 1.5px dashed var(--om-border-strong);
+    }
+    .bridge-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--om-brand);
+      box-shadow: 0 0 10px var(--om-brand-glow);
+    }
+    h1 {
+      margin: 0 0 8px;
+      text-align: center;
+      font-size: 20px;
+      line-height: 1.3;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--om-strong);
+    }
+    .client-sub {
+      margin: 0 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 12.5px;
+      color: var(--om-muted);
+      line-height: 1.45;
+      text-align: center;
+    }
+    .unverified-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--om-inset-bg);
+      border: 1px solid var(--om-border);
+      color: var(--om-muted);
+      font-size: 11.5px;
+      font-weight: 500;
+    }
+    .card {
+      background: var(--om-inset-bg);
+      border: 1px solid var(--om-border);
+      border-radius: 14px;
+      padding: 13px 14px;
+      margin-bottom: 18px;
+    }
+    .account-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .account-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .avatar-img, .avatar-fallback {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--om-client-tile-bg);
+      color: var(--om-strong);
+      border: 1px solid var(--om-border);
+      font-weight: 600;
+      font-size: 13px;
+      object-fit: cover;
+    }
+    .account-meta { min-width: 0; }
+    .account-name {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--om-strong);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .account-email {
+      font-size: 12px;
+      color: var(--om-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+    .switch-link {
+      color: var(--om-accent);
+      font-size: 12.5px;
+      font-weight: 500;
+      text-decoration: none;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .switch-link:hover { text-decoration: underline; }
+    .meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 11px;
+      padding-top: 11px;
+      border-top: 1px solid var(--om-border);
+      font-size: 13px;
+    }
+    .meta-row-select {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+    .meta-label { color: var(--om-muted); flex-shrink: 0; }
+    .meta-value {
+      color: var(--om-strong);
+      font-weight: 600;
+      text-align: right;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ws-select {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--om-border-strong);
+      background: var(--om-card-bg);
+      color: var(--om-strong);
+      font-family: inherit;
+      font-size: 13px;
+    }
+    .section-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--om-muted);
+      margin: 0 0 10px;
+    }
+    .perm-list {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .perm-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .perm-check {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: var(--om-accent-soft);
+      color: var(--om-accent);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .perm-check svg { width: 11px; height: 11px; }
+    .perm-copy { min-width: 0; }
+    .perm-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--om-strong);
+      line-height: 1.35;
+    }
+    .perm-detail {
+      font-size: 12px;
+      color: var(--om-muted);
+      line-height: 1.45;
+      margin-top: 1px;
+    }
+    .scope-details {
+      margin: 0 0 16px;
+      font-size: 12px;
+      color: var(--om-dim);
+    }
+    .scope-details summary {
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--om-muted);
+      font-size: 12px;
+    }
+    .scope-details summary::-webkit-details-marker { display: none; }
+    .scope-details summary::before {
+      content: "▸";
+      font-size: 10px;
+      transition: transform 150ms ease;
+    }
+    .scope-details[open] summary::before { transform: rotate(90deg); }
+    .scope-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .scope-pill {
+      font-family: var(--om-font-mono);
+      font-size: 11px;
+      color: var(--om-muted);
+      background: var(--om-inset-bg);
+      border: 1px solid var(--om-border);
+      padding: 2px 7px;
+      border-radius: 6px;
+    }
+    .note {
+      font-size: 12px;
+      color: var(--om-muted);
+      line-height: 1.5;
+      margin: 0 0 18px;
+      padding-top: 12px;
+      border-top: 1px solid var(--om-border);
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+    }
+    button {
+      flex: 1;
+      height: 44px;
+      padding: 0 18px;
+      border-radius: 999px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+    }
+    button:focus-visible, .switch-link:focus-visible, .ws-select:focus-visible {
+      outline: 2px solid var(--om-accent);
+      outline-offset: 2px;
+    }
+    .deny {
+      background: var(--om-deny-bg);
+      color: var(--om-muted);
+      border: 1px solid var(--om-border-strong);
+    }
+    .deny:hover {
+      background: var(--om-deny-hover);
+      color: var(--om-strong);
+    }
+    .approve {
+      background: var(--om-action-bg);
+      color: var(--om-on-action);
+      border: 1px solid transparent;
+    }
+    .approve:hover {
+      background: var(--om-action-hover);
+    }
+    .foot-caption {
+      font-size: 11.5px;
+      color: var(--om-dim);
+      text-align: center;
+    }
   </style>
 </head>
 <body>
-  <main>
-    <div class="brand">OpenDesign 工作台</div>
-    <h1>授权 ${escapeHtml(input.clientName)} <span class="unverified">应用名未经验证</span></h1>
-    <p class="sub">该应用正通过远程 MCP 请求连接你的 OpenDesign 工作台。确认后仍需在网页中按项目单独授权才可读写具体项目。</p>
-    <form method="POST" action="${escapeHtml(input.formAction)}">
-      ${hiddenInputs}
-      <div class="card">
-        <div class="account-row">
-          <div class="account-left">
-            ${avatarHtml}
-            <div class="account-meta">
-              <div class="account-name">${escapeHtml(input.userDisplayName || accountDisplay)}</div>
-              <div class="account-email">${escapeHtml(accountDisplay)}</div>
+  <div class="shell">
+    <div class="brand-bar">
+      <span class="brand-bar-mark">${OPENDESIGN_MARK_SVG}</span>
+      <span>OpenMotion</span>
+    </div>
+    <main>
+      <div class="bridge" aria-hidden="true">
+        <span class="bridge-tile bridge-tile-client">${MCP_CLIENT_GLYPH_SVG}</span>
+        <span class="bridge-link">
+          <span class="bridge-dash"></span>
+          <span class="bridge-dot"></span>
+          <span class="bridge-dash"></span>
+        </span>
+        <span class="bridge-tile bridge-tile-od">${OPENDESIGN_MARK_SVG}</span>
+      </div>
+      <h1>授权 ${escapeHtml(input.clientName)} 连接 OpenMotion</h1>
+      <p class="client-sub">
+        <span class="unverified-pill">应用名未经验证</span>
+        <span>·</span>
+        <span>回调至 ${escapeHtml(redirectHostLabel)}</span>
+      </p>
+      <form method="POST" action="${escapeHtml(input.formAction)}">
+        ${hiddenInputs}
+        <div class="card">
+          <div class="account-row">
+            <div class="account-left">
+              ${avatarHtml}
+              <div class="account-meta">
+                <div class="account-name">${escapeHtml(primaryAccountName)}</div>
+                ${secondaryAccountEmail ? `<div class="account-email">${escapeHtml(secondaryAccountEmail)}</div>` : ''}
+              </div>
             </div>
+            ${switchAccountHtml}
           </div>
-          ${switchAccountHtml}
+          ${workspaceControl}
         </div>
-        <div class="kv"><span>回调来源</span><strong>${escapeHtml(redirectHostLabel)}</strong></div>
-        ${workspaceControl}
-      </div>
-      <div class="section-title">申请的权限范围</div>
-      <ul>${scopeList}</ul>
-      <div class="note">你可以随时在 OpenDesign 工作台「设置 → 已连接的应用」中撤销此连接。</div>
-      <div class="actions">
-        <button class="deny" type="submit" name="decision" value="deny">拒绝</button>
-        <button class="approve" type="submit" name="decision" value="approve">同意授权</button>
-      </div>
-    </form>
-  </main>
+        <div class="section-title">此应用将获得以下权限</div>
+        <ul class="perm-list">${permissionItems}</ul>
+        ${input.scopes.length > 0 ? `<details class="scope-details"><summary>查看详细权限标识 (${input.scopes.length})</summary><div class="scope-pills">${rawScopePills}</div></details>` : ''}
+        <div class="note">同意后即可返回 Agent 继续；新建项目自动可用，已有项目需单独授权，可随时在「设置 → 已连接的应用」撤销。</div>
+        <div class="actions">
+          <button class="deny" type="submit" name="decision" value="deny">拒绝</button>
+          <button class="approve" type="submit" name="decision" value="approve">同意授权</button>
+        </div>
+      </form>
+    </main>
+    <div class="foot-caption">OpenDesign · Cloud MCP OAuth 2.1</div>
+  </div>
 </body>
 </html>`;
 }
