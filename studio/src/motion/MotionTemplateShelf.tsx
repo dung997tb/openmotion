@@ -94,6 +94,8 @@ export function MotionTemplateShelf({ root, active }: { root: RefObject<HTMLElem
           </div>} />;
       })}
     </div>
+    {/* Announces each automatically appended batch; the visible count above is the category total. */}
+    {visible.length > 0 && <span className="sr-only" aria-live="polite">{t('{count} templates', { count: visible.length })}</span>}
     {catalog && !matches.length && <p className="om-muted">{t('No matching templates.')}</p>}
     {hasMore && <div ref={sentinel} className="om-shelf-sentinel" aria-hidden="true" />}
     {failed && <div className="om-discovery-empty" role="alert"><span>{t('Templates could not be loaded.')}</span>

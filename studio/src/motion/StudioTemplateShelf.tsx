@@ -53,6 +53,7 @@ export function StudioTemplateShelf({ studio, root, active }: {
       {items.map(item => <TemplateGalleryCard key={item.id} template={item} active={playing.has(item.id)} onPriority={setPriority}
         onSelect={(template, trigger) => openLibrary(trigger, template)} />)}
     </div>
+    {items.length > 0 && <span className="sr-only" aria-live="polite">{t('{count} templates', { count: items.length })}</span>}
     {templates.loading && <div className="om-studio-template-grid" role="status" aria-label={t('Loading templates…')}>{[0, 1, 2, 3].map(n => <Skeleton key={n} />)}</div>}
     {templates.error ? <div className="om-discovery-empty"><span>{t('Templates could not be loaded.')}</span><Button variant="ghost" className="om-button h-auto" onClick={templates.retry}>{t('Retry')}</Button></div>
       : hasMore ? <div ref={sentinel} className="om-shelf-sentinel" aria-hidden="true" />
