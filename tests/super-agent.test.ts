@@ -2790,7 +2790,6 @@ test('extractActionCardFromTool maps provider handoffs, low-balance failures, an
       kind: 'sign_in',
       entry: 'agent_media_signed_out',
       provider: 'account',
-      previewUrl: 'http://localhost/settings/providers?provider=account',
     },
   );
   assert.equal(
@@ -2930,4 +2929,16 @@ test('extractActionCardFromTool maps provider handoffs, low-balance failures, an
   assert.equal(resolveMediaSetupEntry(providers, { modality: 'image', capabilities }), undefined);
   assert.equal(resolveMediaSetupEntry(providers, { modality: 'audio', capabilities }), 'agent_media_upgrade_go');
   assert.equal(resolveMediaSetupEntry(providers, { modality: 'video', capabilities }), 'agent_media_upgrade_go');
+
+  // Text-only provider (e.g. openai) must not suppress media setup when capabilities are supplied without modality
+  const textOnlyProviders = [
+    { id: 'openai', available: true, configured: true, verification: 'unverified' as const },
+    { id: 'account', available: false, configured: false, verification: 'unverified' as const },
+  ];
+  const emptyMediaCapabilities = [
+    { modality: 'image' as const, available: false, modelIds: [] },
+    { modality: 'video' as const, available: false, modelIds: [] },
+    { modality: 'audio' as const, available: false, modelIds: [] },
+  ];
+  assert.equal(resolveMediaSetupEntry(textOnlyProviders, { capabilities: emptyMediaCapabilities }), 'agent_media_signed_out');
 });
