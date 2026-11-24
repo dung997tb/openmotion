@@ -17,7 +17,17 @@ vi.mock('./ExploreTemplates', () => ({
   useExploreTemplates: () => ({ pages: [], loading: false, error: null, retry: () => {} }),
   useExploreTemplateShelf: () => ({ items: [], categories: [], industries: [], collection: null, loading: false, error: null, retry: () => {} }),
 }));
-vi.mock('./useTemplatePlayback', () => ({ useTemplatePlayback: () => new Set<string>() }));
+vi.mock('./useTemplatePlayback', () => ({
+  EXPLORE_TEMPLATE_PLAYERS: 4,
+  useTemplatePlayback: () => new Set<string>(),
+  useTemplatePlaybackActive: () => false,
+  useTemplatePlaybackStore: () => ({
+    subscribe: () => () => {},
+    isPlaying: () => false,
+    getSnapshot: () => new Set<string>(),
+    setPriority: () => {},
+  }),
+}));
 vi.mock('../design/scenes/ExploreDesignSection', () => ({ ExploreDesignSection: () => null }));
 
 import { ExploreStudios } from './ExploreStudios';

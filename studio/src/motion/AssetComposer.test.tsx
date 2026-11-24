@@ -867,13 +867,13 @@ it.each(['free', 'plus'])('keeps the background removal draft through sign-in an
   expect(container.querySelector('[aria-label="Provider"]')?.textContent).toBe('OpenDesign');
   expect(container.querySelector('[data-generation-offer="upgrade"] button')?.textContent === 'Upgrade').toBe(plan === 'free');
   expect(submit().disabled).toBe(plan === 'free');
-  expect(container.querySelector<HTMLTextAreaElement>('.om-image-prompt')?.value).toBe('Keep the mug');
+  expect(container.querySelector<HTMLTextAreaElement>('.om-media-prompt')?.value).toBe('Keep the mug');
   expect(container.querySelector('.om-scene-source-file')?.textContent).toContain('mug');
   expect(generate).not.toHaveBeenCalled();
 });
 
 it.each([
-  'text-to-image', 'image-edit', 'remove-background', 'relight', 'character',
+  'text-to-image', 'image-edit', 'remove-background', 'relight', 'image-blend',
   'text-to-video', 'image-to-video', 'video-camera-control', 'video-multi-shot',
 ] as const)('keeps the provider and model choices for %s when showing account guides', async sceneId => {
   const { mediaEditorDestination, needsImage } = await import('./creativeStudios');
@@ -883,7 +883,7 @@ it.each([
     label: 'Wan 2.7', source: 'live', modality: 'video', mode: 'text-to-video', maxInputImages: 1 };
   const models = [...otherCutoutModels, featureModels().sunburst, cloudVideo];
   const hasCodex = sceneId === 'text-to-image' || sceneId === 'image-edit';
-  const draft: AssetDraft = { modality, prompt: 'A sunlit forest', references: needsImage(destination.scene) ? [reference('forest')] : [] };
+  const draft: AssetDraft = { modality, prompt: 'A sunlit forest', references: sceneId === 'image-blend' ? [reference('forest'), reference('lake')] : needsImage(destination.scene) ? [reference('forest')] : [] };
   const picker = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
   const click = (button: HTMLElement) => act(async () => button.click());
   const render = (state: 'guest' | 'locked' | 'cloud', model?: string) => act(async () => root.render(<AssetComposer {...props} draft={draft} studio={{
@@ -912,7 +912,7 @@ it.each([
     await click(picker('Generation model'));
     const names = optionNames();
     expect(names).toContain(modality === 'video' ? 'Wan 2.7' : 'GPT Image 2.6 Sunburst');
-    expect(names.includes('Seedream 5.5')).toBe(modality === 'image' && sceneId !== 'remove-background');
+    expect(names.includes('Seedream 5.5')).toBe(modality === 'image' && sceneId !== 'remove-background' && sceneId !== 'image-blend');
     expect(names.includes('Seedance 2.5')).toBe(modality === 'video');
     await click(picker('Generation model'));
   }
