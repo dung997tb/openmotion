@@ -2,7 +2,6 @@ import { IsolatedCanvasContextMenu, type CanvasMenuPick } from "./IsolatedCanvas
 import { useIsolatedInlineText } from "./useIsolatedInlineText";
 import { isIsolatedSourceTarget, isolatedPatchTarget, type IsolatedSourceTarget } from "./isolatedSourceTarget";
 import { useIsolatedLayerBounds } from "./useIsolatedLayerBounds";
-import { saveCanvasDrag } from "./saveCanvasDrag";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { useDomEditActionsContext } from "../../contexts/DomEditContext";
 import { useStudioShellContext } from "../../contexts/StudioContext";
@@ -11,6 +10,7 @@ import { createPreviewAdapter, type PreviewAdapter } from "../../player/lib/prev
 import { projectPreviewAdapter } from "../../player/lib/projectPreviewAdapter";
 import { usePlayerStore } from "../../player/store/playerStore";
 import { canvasBoxOperations, type MeasuredCanvasPosition } from "../../../../packages/edit-core/canvas-box";
+import { saveCanvasDrag } from "./saveCanvasDrag";
 
 interface Drag {
   pointer: number;
