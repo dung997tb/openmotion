@@ -115,7 +115,9 @@ function stepOutputs(step: ScenarioStepDefinition, state: ScenarioStepState | un
   const ordered = posts.map((post, index) => ({ post, index }))
     .sort((a, b) => Number(domestic.has(a.post.platform)) - Number(domestic.has(b.post.platform)) || a.index - b.index)
     .map(entry => entry.post);
-  return { items, posts: ordered, scripts };
+  // Once real posts exist, a draft copy of their text is not shown as its own card.
+  const shown = ordered.length ? items.filter(item => item.kind !== 'text') : items;
+  return { items: shown, posts: ordered, scripts: ordered.length ? [] : scripts };
 }
 
 /** A page shows at desktop width (1280px), scaled to fit the panel, and scrolls inside. */
