@@ -54,7 +54,10 @@ export interface GamePublishPlatform {
   steps: GamePublishStep[];
   resultTitle: string;
   resultDetail: string;
-  resultAction: string;
+  /** Main button on the result card; omitted when there is nothing useful to open yet. */
+  resultAction?: string;
+  /** Where the result button goes. Without it the button is a mock download. */
+  resultHref?: string;
 }
 
 export const GAME_PUBLISH_PLATFORMS: readonly GamePublishPlatform[] = [
@@ -114,6 +117,7 @@ export const GAME_PUBLISH_PLATFORMS: readonly GamePublishPlatform[] = [
     resultTitle: 'Sent to WeChat for review',
     resultDetail: 'Trial version 1.0.0 uploaded',
     resultAction: 'Open WeChat console',
+    resultHref: 'https://mp.weixin.qq.com/',
   },
   {
     id: 'xiaohongshu',
@@ -137,7 +141,6 @@ export const GAME_PUBLISH_PLATFORMS: readonly GamePublishPlatform[] = [
     ],
     resultTitle: 'Submitted to Xiaohongshu',
     resultDetail: 'Usually reviewed within minutes; then you can attach it to a note',
-    resultAction: 'View review status',
   },
   {
     id: 'douyin',
@@ -162,7 +165,6 @@ export const GAME_PUBLISH_PLATFORMS: readonly GamePublishPlatform[] = [
     ],
     resultTitle: 'Submitted to Douyin',
     resultDetail: 'Result within 1 working day',
-    resultAction: 'View review status',
   },
   {
     id: 'itch',
@@ -200,6 +202,7 @@ export const GAME_PUBLISH_PLATFORMS: readonly GamePublishPlatform[] = [
     resultTitle: 'Live on itch.io',
     resultDetail: 'you.itch.io/your-game',
     resultAction: 'Open game page',
+    resultHref: 'https://itch.io/dashboard',
   },
   {
     id: 'telegram',
@@ -224,6 +227,7 @@ export const GAME_PUBLISH_PLATFORMS: readonly GamePublishPlatform[] = [
     resultTitle: 'Live on Telegram',
     resultDetail: 'Opens from the bot menu button',
     resultAction: 'Open in Telegram',
+    resultHref: 'https://t.me/',
   },
   {
     id: 'playable-ad',

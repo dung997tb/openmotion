@@ -2,7 +2,7 @@ import { Button } from 'open-design-ui/button';
 import { useEffect, useRef } from 'react';
 import { useI18n } from '../../i18n/I18n';
 import { RemixIcon } from '../../icons/RemixIcons';
-import { gamePublishActions, useGamePublishThread, type GamePublishThreadEntry } from './gamePublishStore';
+import { copyGamePublishLink, gamePublishActions, useGamePublishThread, type GamePublishThreadEntry } from './gamePublishStore';
 import { gamePublishPlatform } from './platforms';
 import './gamePublish.css';
 
@@ -91,7 +91,31 @@ function ThreadEntry({ entry, onOpenPanel, onNotify }: {
       <RemixIcon name="checkbox-circle-fill" size={22} className="om-gp-result-icon" />
       <strong>{t(entry.title)}</strong>
       <span className="om-gp-muted">{entry.link ? entry.detail : t(entry.detail)}</span>
-      <Button variant="plain" type="button" className="om-gp-primary" onClick={() => { if (entry.link) onNotify?.(t('Link copied')); }}>{t(entry.action)}</Button>
+      {entry.link
+        ? <Button variant="plain" type="button" className="om-gp-primary" onClick={() => void copyGamePublishLink(entry.detail, onNotify, t)}>{t('Copy link')}</Button>
+        : <GamePublishResultAction action={entry.action} href={entry.href} onNotify={onNotify} />}
     </div>
+  );
+}
+
+/** Result-card button: opens the platform page, or reports that the download is a mock in this preview. */
+export function GamePublishResultAction({ action, href, onNotify }: {
+  action?: string;
+  href?: string;
+  onNotify?: (message: string, tone?: 'info' | 'error') => void;
+}) {
+  const { t } = useI18n();
+  if (!action) return null;
+  if (href) {
+    return (
+      <a className="om-gp-primary" href={href} target="_blank" rel="noopener noreferrer">
+        {t(action)} <RemixIcon name="external-link-line" size={12} />
+      </a>
+    );
+  }
+  return (
+    <Button variant="plain" type="button" className="om-gp-primary" onClick={() => onNotify?.(t('Download is not connected yet in this preview (mock).'))}>
+      {t(action)}
+    </Button>
   );
 }

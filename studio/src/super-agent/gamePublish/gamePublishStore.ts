@@ -38,11 +38,13 @@ export type GamePublishThreadEntry =
   | { id: string; artifactId: string; kind: 'user'; key: string; name?: string }
   | { id: string; artifactId: string; kind: 'agent'; title: string; name?: string; lines: Array<{ text: string; done: boolean }> }
   | { id: string; artifactId: string; kind: 'need'; platformId: GamePublishPlatformId; stepIndex: number; closed: boolean }
-  | { id: string; artifactId: string; kind: 'result'; title: string; detail: string; action: string; link?: boolean };
+  | { id: string; artifactId: string; kind: 'result'; title: string; detail: string; action?: string; href?: string; link?: boolean };
 
 const sessions = new Map<string, GamePublishSession>();
 const threads = new Map<string, GamePublishThreadEntry[]>();
 const listeners = new Set<() => void>();
+/** Bumped whenever the user picks a platform, so work started for an earlier choice cannot touch the current one. */
+const platformRuns = new Map<string, number>();
 let entrySeq = 0;
 
 function emit() { for (const listener of listeners) listener(); }
@@ -74,7 +76,7 @@ function patchEntry(session: GamePublishSession, id: string, patch: (entry: Game
 }
 
 /** Plays Agent work: one conversation block with ticking lines, and the panel's single status line. */
-async function runAgent(artifactId: string, title: string, name: string | undefined, run: (onLine: (line: string) => void) => Promise<unknown>) {
+async function runAgent(artifactId: string, title: string, name: string | undefined, run: (onLine: (line: string) => void) => Promise<unknown>, isCurrent: () => boolean = () => true) {
   const session = sessions.get(artifactId);
   if (!session) return;
   const entryId = pushEntry(session, { kind: 'agent', title, name, lines: [] });
@@ -84,7 +86,7 @@ async function runAgent(artifactId: string, title: string, name: string | undefi
     patchEntry(latest, entryId, entry => entry.kind === 'agent'
       ? { ...entry, lines: [...entry.lines.map(item => ({ ...item, done: true })), { text: line, done: false }] }
       : entry);
-    update(artifactId, { status: { tone: 'running', key: 'Agent: {line}', line } });
+    if (isCurrent()) update(artifactId, { status: { tone: 'running', key: 'Agent: {line}', line } });
   });
   const latest = sessions.get(artifactId);
   if (!latest) return;
@@ -143,7 +145,12 @@ export const gamePublishActions = {
     });
     const latest = sessions.get(artifactId);
     if (!latest) return;
-    update(artifactId, { linkUrl: url, linkPublishing: false, view: 'link-result', status: { tone: 'done', key: 'Agent: all done' } });
+    // Only move to the link result if the user is still on the link screen; never pull them out of a platform step.
+    update(artifactId, {
+      linkUrl: url,
+      linkPublishing: false,
+      ...(latest.view === 'home' ? { view: 'link-result' as const, status: { tone: 'done' as const, key: 'Agent: all done' } } : {}),
+    });
     pushEntry(latest, { kind: 'result', title: 'Live', detail: url, action: 'Copy link', link: true });
   },
   choose(artifactId: string, platformId: GamePublishPlatformId) {
@@ -151,17 +158,26 @@ export const gamePublishActions = {
     const platform = gamePublishPlatform(platformId);
     if (!session || !platform) return;
     closeOpenNeedCards(session);
-    update(artifactId, { platformId, stepIndex: 0, picked: undefined, inputs: {}, view: 'step', status: { tone: 'done', key: 'Agent: ready for your step' } });
+    const run = (platformRuns.get(artifactId) ?? 0) + 1;
+    platformRuns.set(artifactId, run);
+    const isCurrent = () => platformRuns.get(artifactId) === run;
+    update(artifactId, {
+      platformId,
+      stepIndex: 0,
+      picked: undefined,
+      inputs: {},
+      view: 'step',
+      preparing: platform.prepare.length > 0,
+      status: { tone: 'done', key: 'Agent: ready for your step' },
+    });
     const latest = sessions.get(artifactId)!;
     pushEntry(latest, { kind: 'user', key: 'Publish to {name}', name: platform.name });
     pushEntry(latest, { kind: 'need', platformId, stepIndex: 0, closed: false });
     if (platform.prepare.length) {
-      update(artifactId, { preparing: true });
       void runAgent(artifactId, 'Preparing for {name}', platform.name, onLine =>
         prepareForPlatform(session.gameId, platformId, platform.prepare, { onLine }),
-      ).then(() => {
-        const after = sessions.get(artifactId);
-        if (!after || after.platformId !== platformId) return;
+      isCurrent).then(() => {
+        if (!isCurrent()) return;
         update(artifactId, { preparing: false, status: { tone: 'done', key: 'Agent: ready for your step' } });
       });
     }
@@ -178,16 +194,19 @@ export const gamePublishActions = {
     if (!session || !platform || session.view !== 'step') return;
     const step = platform.steps[session.stepIndex];
     if (step.pick && !session.picked) { update(artifactId, { open: true }); return; }
+    const run = platformRuns.get(artifactId);
+    const isCurrent = () => platformRuns.get(artifactId) === run;
     closeOpenNeedCards(session);
     pushEntry(session, { kind: 'user', key: step.cta });
     update(artifactId, { view: 'working' });
     // Wait for preparation that is still running, then run the Agent work for this step.
-    while (sessions.get(artifactId)?.preparing) await new Promise(resolve => setTimeout(resolve, 200));
+    while (isCurrent() && sessions.get(artifactId)?.preparing) await new Promise(resolve => setTimeout(resolve, 200));
+    if (!isCurrent()) return;
     await runAgent(artifactId, step.working, undefined, onLine =>
       completeUserStep(session.gameId, platform.id, session.stepIndex, sessions.get(artifactId)?.inputs ?? {}, step.after, { onLine }),
-    );
+    isCurrent);
     const latest = sessions.get(artifactId);
-    if (!latest || latest.platformId !== platform.id) return;
+    if (!latest || !isCurrent()) return;
     const next = latest.stepIndex + 1;
     if (next < platform.steps.length) {
       update(artifactId, { stepIndex: next, view: 'step', status: { tone: 'done', key: 'Agent: ready for your step' } });
@@ -200,7 +219,7 @@ export const gamePublishActions = {
       published: latest.published.includes(platform.id) ? latest.published : [...latest.published, platform.id],
       status: { tone: 'done', key: 'Agent: all done' },
     });
-    pushEntry(sessions.get(artifactId)!, { kind: 'result', title: platform.resultTitle, detail: platform.resultDetail, action: platform.resultAction });
+    pushEntry(sessions.get(artifactId)!, { kind: 'result', title: platform.resultTitle, detail: platform.resultDetail, action: platform.resultAction, href: platform.resultHref });
   },
 };
 
@@ -217,3 +236,15 @@ export function gamePublishSessionFor(artifactId: string): GamePublishSession | 
 
 /** Test helper. */
 export function resetGamePublishStore() { sessions.clear(); threads.clear(); entrySeq = 0; emit(); }
+
+/** Copies the published link and reports the real outcome. */
+export async function copyGamePublishLink(url: string | undefined, notify: ((message: string, tone?: 'info' | 'error') => void) | undefined, t: (key: string) => string) {
+  if (!url) return;
+  const full = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  try {
+    await navigator.clipboard.writeText(full);
+    notify?.(t('Link copied'));
+  } catch {
+    notify?.(t('Could not copy the link'), 'error');
+  }
+}

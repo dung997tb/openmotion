@@ -27,7 +27,6 @@
     "Uploading and submitting for review": "上传并提交审核",
     "Submitted to Xiaohongshu": "已提交小红书审核",
     "Usually reviewed within minutes; then you can attach it to a note": "一般几分钟审完，通过后可以挂到笔记里",
-    "View review status": "查看审核进度",
     "Douyin Interactive Space": "抖音 · 互动空间",
     "Invite code · review in 1 working day": "需邀请码 · 审核 1 个工作日",
     "Enter the invite code and scan": "填邀请码，扫码授权",
@@ -231,7 +230,9 @@
     "Export package (no account needed)": "导出包（无需连接账号）",
     "Playable ad export": "可玩广告",
     "Created the export package": "导出包已生成",
-    "Upload the package in your ad account": "到广告后台上传导出包"
+    "Upload the package in your ad account": "到广告后台上传导出包",
+    "Could not copy the link": "链接复制失败",
+    "Download is not connected yet in this preview (mock).": "预览版还没接通下载（mock）。"
   },
   "ja": {
     "WeChat Mini Game": "WeChat ミニゲーム",
@@ -261,7 +262,6 @@
     "Uploading and submitting for review": "アップロードして審査申請中",
     "Submitted to Xiaohongshu": "Xiaohongshu に審査申請済み",
     "Usually reviewed within minutes; then you can attach it to a note": "通常は数分で審査が終わり、承認後は投稿に追加できます",
-    "View review status": "審査状況を見る",
     "Douyin Interactive Space": "Douyin インタラクティブスペース",
     "Invite code · review in 1 working day": "招待コードが必要 · 審査は1営業日",
     "Enter the invite code and scan": "招待コードを入力してスキャン",
@@ -465,7 +465,9 @@
     "Export package (no account needed)": "パッケージを書き出す（アカウント不要）",
     "Playable ad export": "プレイアブル広告の書き出し",
     "Created the export package": "書き出しパッケージを作成済み",
-    "Upload the package in your ad account": "広告アカウントでパッケージをアップロード"
+    "Upload the package in your ad account": "広告アカウントでパッケージをアップロード",
+    "Could not copy the link": "リンクをコピーできませんでした",
+    "Download is not connected yet in this preview (mock).": "このプレビューではダウンロードはまだ接続されていません（モック）。"
   },
   "ko": {
     "WeChat Mini Game": "WeChat 미니게임",
@@ -495,7 +497,6 @@
     "Uploading and submitting for review": "업로드 및 심사 신청 중",
     "Submitted to Xiaohongshu": "Xiaohongshu에 심사 신청 완료",
     "Usually reviewed within minutes; then you can attach it to a note": "보통 몇 분 내 심사가 끝나며, 승인 후 게시물에 추가할 수 있습니다",
-    "View review status": "심사 상태 보기",
     "Douyin Interactive Space": "Douyin 인터랙티브 공간",
     "Invite code · review in 1 working day": "초대 코드 필요 · 심사 1영업일",
     "Enter the invite code and scan": "초대 코드 입력 후 스캔",
@@ -699,7 +700,9 @@
     "Export package (no account needed)": "패키지 내보내기(계정 불필요)",
     "Playable ad export": "플레이어블 광고 내보내기",
     "Created the export package": "내보내기 패키지 생성 완료",
-    "Upload the package in your ad account": "광고 계정에서 패키지 업로드"
+    "Upload the package in your ad account": "광고 계정에서 패키지 업로드",
+    "Could not copy the link": "링크를 복사하지 못했습니다",
+    "Download is not connected yet in this preview (mock).": "이 미리보기에서는 다운로드가 아직 연결되지 않았습니다(목업)."
   },
   "de": {
     "WeChat Mini Game": "WeChat-Minispiel",
@@ -729,7 +732,6 @@
     "Uploading and submitting for review": "Wird hochgeladen und zur Prüfung eingereicht",
     "Submitted to Xiaohongshu": "Bei Xiaohongshu eingereicht",
     "Usually reviewed within minutes; then you can attach it to a note": "Die Prüfung dauert meist wenige Minuten. Nach der Freigabe kannst du es einem Beitrag hinzufügen",
-    "View review status": "Prüfstatus ansehen",
     "Douyin Interactive Space": "Douyin-Interaktionsbereich",
     "Invite code · review in 1 working day": "Einladungscode nötig · Prüfung in 1 Werktag",
     "Enter the invite code and scan": "Einladungscode eingeben und scannen",
@@ -933,7 +935,9 @@
     "Export package (no account needed)": "Paket exportieren (kein Konto nötig)",
     "Playable ad export": "Export spielbarer Anzeigen",
     "Created the export package": "Exportpaket erstellt",
-    "Upload the package in your ad account": "Paket in deinem Werbekonto hochladen"
+    "Upload the package in your ad account": "Paket in deinem Werbekonto hochladen",
+    "Could not copy the link": "Link konnte nicht kopiert werden",
+    "Download is not connected yet in this preview (mock).": "Der Download ist in dieser Vorschau noch nicht angebunden (Mock)."
   },
   "fr": {
     "WeChat Mini Game": "Mini-jeu WeChat",
@@ -963,7 +967,6 @@
     "Uploading and submitting for review": "Envoi et demande de validation en cours",
     "Submitted to Xiaohongshu": "Envoyé à Xiaohongshu",
     "Usually reviewed within minutes; then you can attach it to a note": "La validation prend généralement quelques minutes. Vous pourrez ensuite l’ajouter à une publication",
-    "View review status": "Voir l’état de validation",
     "Douyin Interactive Space": "Espace interactif Douyin",
     "Invite code · review in 1 working day": "Code d’invitation requis · validation en 1 jour ouvré",
     "Enter the invite code and scan": "Saisissez le code d’invitation et scannez",
@@ -1167,7 +1170,9 @@
     "Export package (no account needed)": "Exporter le paquet (sans compte)",
     "Playable ad export": "Export de publicité jouable",
     "Created the export package": "Paquet d’export créé",
-    "Upload the package in your ad account": "Envoyez le paquet depuis votre compte publicitaire"
+    "Upload the package in your ad account": "Envoyez le paquet depuis votre compte publicitaire",
+    "Could not copy the link": "Impossible de copier le lien",
+    "Download is not connected yet in this preview (mock).": "Le téléchargement n'est pas encore branché dans cet aperçu (maquette)."
   },
   "ru": {
     "WeChat Mini Game": "Мини-игра WeChat",
@@ -1197,7 +1202,6 @@
     "Uploading and submitting for review": "Загрузка и отправка на проверку",
     "Submitted to Xiaohongshu": "Отправлено в Xiaohongshu",
     "Usually reviewed within minutes; then you can attach it to a note": "Проверка обычно занимает несколько минут. После одобрения можно добавить в публикацию",
-    "View review status": "Статус проверки",
     "Douyin Interactive Space": "Интерактивное пространство Douyin",
     "Invite code · review in 1 working day": "Нужен код приглашения · проверка за 1 рабочий день",
     "Enter the invite code and scan": "Введите код приглашения и сканируйте",
@@ -1401,7 +1405,9 @@
     "Export package (no account needed)": "Экспорт пакета (без аккаунта)",
     "Playable ad export": "Экспорт игровой рекламы",
     "Created the export package": "Пакет для экспорта создан",
-    "Upload the package in your ad account": "Загрузите пакет в своём рекламном аккаунте"
+    "Upload the package in your ad account": "Загрузите пакет в своём рекламном аккаунте",
+    "Could not copy the link": "Не удалось скопировать ссылку",
+    "Download is not connected yet in this preview (mock).": "В этом превью загрузка ещё не подключена (макет)."
   },
   "es": {
     "WeChat Mini Game": "Minijuego de WeChat",
@@ -1431,7 +1437,6 @@
     "Uploading and submitting for review": "Subiendo y enviando a revisión",
     "Submitted to Xiaohongshu": "Enviado a Xiaohongshu",
     "Usually reviewed within minutes; then you can attach it to a note": "La revisión suele tardar unos minutos; tras la aprobación, puedes añadirlo a una publicación",
-    "View review status": "Ver estado de revisión",
     "Douyin Interactive Space": "Espacio interactivo de Douyin",
     "Invite code · review in 1 working day": "Requiere invitación · revisión en 1 día laborable",
     "Enter the invite code and scan": "Introduce el código de invitación y escanea",
@@ -1635,7 +1640,9 @@
     "Export package (no account needed)": "Exportar paquete (sin cuenta)",
     "Playable ad export": "Exportación de anuncio jugable",
     "Created the export package": "Paquete de exportación creado",
-    "Upload the package in your ad account": "Sube el paquete en tu cuenta publicitaria"
+    "Upload the package in your ad account": "Sube el paquete en tu cuenta publicitaria",
+    "Could not copy the link": "No se pudo copiar el enlace",
+    "Download is not connected yet in this preview (mock).": "La descarga aún no está conectada en esta vista previa (simulación)."
   },
   "pt-BR": {
     "WeChat Mini Game": "Minijogo do WeChat",
@@ -1665,7 +1672,6 @@
     "Uploading and submitting for review": "Enviando o pacote e solicitando a revisão",
     "Submitted to Xiaohongshu": "Enviado ao Xiaohongshu",
     "Usually reviewed within minutes; then you can attach it to a note": "A revisão costuma levar alguns minutos; após a aprovação, você pode adicionar a uma publicação",
-    "View review status": "Ver status da revisão",
     "Douyin Interactive Space": "Espaço interativo do Douyin",
     "Invite code · review in 1 working day": "Exige convite · revisão em 1 dia útil",
     "Enter the invite code and scan": "Informe o código de convite e leia o QR code",
@@ -1869,7 +1875,9 @@
     "Export package (no account needed)": "Exportar pacote (sem conta)",
     "Playable ad export": "Exportação de anúncio jogável",
     "Created the export package": "Pacote de exportação criado",
-    "Upload the package in your ad account": "Envie o pacote pela sua conta de anúncios"
+    "Upload the package in your ad account": "Envie o pacote pela sua conta de anúncios",
+    "Could not copy the link": "Não foi possível copiar o link",
+    "Download is not connected yet in this preview (mock).": "O download ainda não está conectado nesta prévia (simulação)."
   },
   "it": {
     "WeChat Mini Game": "Minigioco WeChat",
@@ -1899,7 +1907,6 @@
     "Uploading and submitting for review": "Caricamento e invio in revisione",
     "Submitted to Xiaohongshu": "Inviato a Xiaohongshu",
     "Usually reviewed within minutes; then you can attach it to a note": "La revisione richiede in genere pochi minuti; dopo l’approvazione puoi aggiungerlo a un post",
-    "View review status": "Vedi stato della revisione",
     "Douyin Interactive Space": "Spazio interattivo Douyin",
     "Invite code · review in 1 working day": "Serve un invito · revisione in 1 giorno lavorativo",
     "Enter the invite code and scan": "Inserisci il codice di invito e scansiona",
@@ -2103,7 +2110,9 @@
     "Export package (no account needed)": "Esporta pacchetto (nessun account)",
     "Playable ad export": "Esportazione di annunci giocabili",
     "Created the export package": "Pacchetto di esportazione creato",
-    "Upload the package in your ad account": "Carica il pacchetto nel tuo account pubblicitario"
+    "Upload the package in your ad account": "Carica il pacchetto nel tuo account pubblicitario",
+    "Could not copy the link": "Impossibile copiare il link",
+    "Download is not connected yet in this preview (mock).": "Il download non è ancora collegato in questa anteprima (simulazione)."
   },
   "tr": {
     "WeChat Mini Game": "WeChat Mini Oyunu",
@@ -2133,7 +2142,6 @@
     "Uploading and submitting for review": "Yükleniyor ve incelemeye gönderiliyor",
     "Submitted to Xiaohongshu": "Xiaohongshu’ya gönderildi",
     "Usually reviewed within minutes; then you can attach it to a note": "İnceleme genellikle birkaç dakika sürer; onaydan sonra bir gönderiye ekleyebilirsiniz",
-    "View review status": "İnceleme durumunu gör",
     "Douyin Interactive Space": "Douyin Etkileşim Alanı",
     "Invite code · review in 1 working day": "Davet kodu gerekli · inceleme 1 iş günü",
     "Enter the invite code and scan": "Davet kodunu girin ve tarayın",
@@ -2337,6 +2345,8 @@
     "Export package (no account needed)": "Paketi dışa aktar (hesap gerekmez)",
     "Playable ad export": "Oynanabilir reklam dışa aktarma",
     "Created the export package": "Dışa aktarma paketi oluşturuldu",
-    "Upload the package in your ad account": "Paketi reklam hesabınızdan yükleyin"
+    "Upload the package in your ad account": "Paketi reklam hesabınızdan yükleyin",
+    "Could not copy the link": "Bağlantı kopyalanamadı",
+    "Download is not connected yet in this preview (mock).": "Bu önizlemede indirme henüz bağlı değil (taslak)."
   }
 }

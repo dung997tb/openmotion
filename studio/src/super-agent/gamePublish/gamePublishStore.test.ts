@@ -54,6 +54,29 @@ describe('gamePublishStore', () => {
     expect(gamePublishSessionFor(input.artifactId)).toMatchObject({ view: 'step', stepIndex: 1 });
   });
 
+  it('switching platforms during preparation does not leave the new platform waiting forever', async () => {
+    gamePublishActions.open(input);
+    gamePublishActions.choose(input.artifactId, 'wechat');
+    gamePublishActions.choose(input.artifactId, 'playable-ad');
+    expect(gamePublishSessionFor(input.artifactId)?.preparing).toBe(false);
+    gamePublishActions.pick(input.artifactId, 'Meta (≤2 MB)');
+    const next = gamePublishActions.completeStep(input.artifactId);
+    await flush(10000);
+    await next;
+    expect(gamePublishSessionFor(input.artifactId)).toMatchObject({ platformId: 'playable-ad', view: 'step', stepIndex: 1 });
+  });
+
+  it('a finished link publish does not pull the user out of a platform step', async () => {
+    gamePublishActions.open(input);
+    const link = gamePublishActions.publishLink(input.artifactId);
+    gamePublishActions.choose(input.artifactId, 'telegram');
+    await flush(10000);
+    await link;
+    const session = gamePublishSessionFor(input.artifactId)!;
+    expect(session.linkUrl).toBeTruthy();
+    expect(session).toMatchObject({ view: 'step', platformId: 'telegram' });
+  });
+
   it('reopening returns to the step in progress', () => {
     gamePublishActions.open(input);
     gamePublishActions.choose(input.artifactId, 'telegram');

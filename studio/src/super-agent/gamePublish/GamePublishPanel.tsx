@@ -2,7 +2,8 @@ import { Button } from 'open-design-ui/button';
 import type { ReactNode } from 'react';
 import { useI18n } from '../../i18n/I18n';
 import { RemixIcon } from '../../icons/RemixIcons';
-import { gamePublishActions, useGamePublishSession, type GamePublishSession } from './gamePublishStore';
+import { copyGamePublishLink, gamePublishActions, useGamePublishSession, type GamePublishSession } from './gamePublishStore';
+import { GamePublishResultAction } from './GamePublishThread';
 import { MOCK_PLAYABLE_SIZE_MB, playableNetwork } from './playableNetworks';
 import { GAME_PUBLISH_PLATFORMS, UNSUPPORTED_PLATFORMS_NOTE, gamePublishPlatform, type GamePublishPlatform } from './platforms';
 import './gamePublish.css';
@@ -111,7 +112,7 @@ export function GamePublishPanel({ artifactId, coverUrl, onNotify }: {
           <RemixIcon name="checkbox-circle-fill" size={30} className="om-gp-result-icon" />
           <strong>{t('Live')}</strong>
           <span className="om-gp-muted">{session.linkUrl}</span>
-          <Button variant="plain" type="button" className="om-gp-primary" onClick={() => onNotify?.(t('Link copied'))}>{t('Copy link')}</Button>
+          <Button variant="plain" type="button" className="om-gp-primary" onClick={() => void copyGamePublishLink(session.linkUrl, onNotify, t)}>{t('Copy link')}</Button>
         </div>
         <h3 className="om-gp-h3">{t('Also publish to (one at a time)')}</h3>
         {tiles(GAME_PUBLISH_PLATFORMS)}
@@ -174,7 +175,7 @@ export function GamePublishPanel({ artifactId, coverUrl, onNotify }: {
             </>
           )}
           {step.kind === 'checks' && <PlayableChecks networkName={session.picked} />}
-          {step.kind === 'download' && <PlayableDownload networkName={session.picked} />}
+          {step.kind === 'download' && <PlayableDownload networkName={session.picked} onNotify={onNotify} />}
           {(step.qr || step.links) && (
             <div className="om-gp-actions-row">
               {step.qr && <span className="om-gp-qr" role="img" aria-label={t('QR code (sample)')} />}
@@ -218,7 +219,7 @@ export function GamePublishPanel({ artifactId, coverUrl, onNotify }: {
             <RemixIcon name="checkbox-circle-fill" size={30} className="om-gp-result-icon" />
             <strong>{t(platform.resultTitle)}</strong>
             <span className="om-gp-muted">{t(platform.resultDetail)}</span>
-            <Button variant="plain" type="button" className="om-gp-primary">{t(platform.resultAction)}</Button>
+            <GamePublishResultAction action={platform.resultAction} href={platform.resultHref} onNotify={onNotify} />
           </div>
         </>
       );
@@ -292,13 +293,13 @@ function PlayableChecks({ networkName }: { networkName?: string }) {
 }
 
 /** Download the package, then upload it in the network's own console. */
-function PlayableDownload({ networkName }: { networkName?: string }) {
+function PlayableDownload({ networkName, onNotify }: { networkName?: string; onNotify?: (message: string, tone?: 'info' | 'error') => void }) {
   const { t } = useI18n();
   const network = playableNetwork(networkName);
   if (!network) return null;
   return (
     <div className="om-gp-download">
-      <Button variant="plain" type="button" className="om-gp-secondary">
+      <Button variant="plain" type="button" className="om-gp-secondary" onClick={() => onNotify?.(t('Download is not connected yet in this preview (mock).'))}>
         <RemixIcon name="download-2-line" size={14} />
         <span>{t('Download {file}', { file: network.format.startsWith('Zip') ? 'playable.zip' : 'index.html' })}</span>
       </Button>
