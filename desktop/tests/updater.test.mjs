@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_UPDATE_BASE_URL } from '../../shared/desktop-builtin-rules.ts';
+import { resolveDesktopReleaseVersion } from '../scripts/resolve-release-version.mjs';
 import {
   compareSemver,
   DesktopUpdaterController,
@@ -407,15 +408,27 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
     'utf8',
   );
 
-  // Manual workflow_dispatch only with channel (test | stable, default test) and publish (default false).
+  // Manual workflow_dispatch plus automatic push trigger on desktop-test branch for desktop & coupled shared paths.
+  assert.match(workflowYml, /push:\s*\n\s+branches:\s*\n\s+-\s*desktop-test\b/);
+  assert.match(workflowYml, /'desktop\/\*\*'/);
+  assert.match(workflowYml, /'shared\/desktop-\*\.ts'/);
+  assert.match(workflowYml, /'shared\/platform-host\.ts'/);
+  assert.match(workflowYml, /'shared\/signed-config\.ts'/);
+  assert.match(workflowYml, /'packages\/design-system\/brand\/\*\*'/);
+  assert.match(workflowYml, /'\.github\/workflows\/desktop-release\.yml'/);
   assert.match(workflowYml, /workflow_dispatch:/);
   assert.match(workflowYml, /default:\s*test/);
   assert.match(workflowYml, /-\s*test\b/);
   assert.match(workflowYml, /-\s*stable\b/);
   assert.match(workflowYml, /default:\s*false/);
 
-  // Main-only guard.
+  // Branch & channel release guards + Scheme A release version resolution.
   assert.match(workflowYml, /refs\/heads\/main/);
+  assert.match(workflowYml, /refs\/heads\/desktop-test/);
+  assert.match(workflowYml, /resolve-release-version\.mjs/);
+  assert.match(workflowYml, /-c\.extraMetadata\.version=/);
+  assert.match(workflowYml, /-c\.buildNumber=/);
+  assert.match(workflowYml, /-c\.buildVersion=/);
 
   // Per-architecture matrix jobs: macOS arm64, macOS x64, Windows x64.
   assert.match(workflowYml, /label:\s*macOS arm64/);
@@ -427,19 +440,31 @@ test('.github/workflows/desktop-release.yml enforces main-only per-arch builds w
   assert.match(workflowYml, /pack_script:\s*pack:mac:x64/);
   assert.match(workflowYml, /pack_script:\s*pack:win:x64/);
 
-  // Apple Developer ID signing & notarization env wiring.
-  assert.match(workflowYml, /CSC_LINK:/);
-  assert.match(workflowYml, /CSC_KEY_PASSWORD:/);
+  // Apple Developer ID signing & notarization env wiring (org-level secrets with fallback).
+  assert.match(workflowYml, /CSC_LINK:.*APPLE_SIGNING_CERTIFICATE_BASE64/);
+  assert.match(workflowYml, /CSC_KEY_PASSWORD:.*APPLE_SIGNING_CERTIFICATE_PASSWORD/);
   assert.match(workflowYml, /APPLE_ID:/);
   assert.match(workflowYml, /APPLE_APP_SPECIFIC_PASSWORD:/);
   assert.match(workflowYml, /APPLE_TEAM_ID:/);
   assert.match(workflowYml, /APPLE_API_KEY:/);
 
+  // Fast single-runner verification & Electron/electron-builder binary caching.
+  assert.match(workflowYml, /verify-desktop:/);
+  assert.match(workflowYml, /ELECTRON_SKIP_BINARY_DOWNLOAD:\s*'1'/);
+  assert.match(workflowYml, /uses:\s*actions\/cache@v4/);
+  assert.match(workflowYml, /desktop\/package-lock\.json/);
+
   // No GitHub Actions artifact upload or GitHub Release binary upload.
   assert.equal(workflowYml.includes('upload-artifact'), false);
   assert.equal(workflowYml.includes('gh release upload'), false);
 
-  // Direct object-storage upload targeting releases.open-design.ai / open-motion/desktop/<channel>/.
+  // Direct Cloudflare R2 / S3 upload targeting releases.open-design.ai / open-motion/desktop/<channel>/.
+  assert.match(workflowYml, /CLOUDFLARE_R2_RELEASES_BUCKET/);
+  assert.match(workflowYml, /CLOUDFLARE_R2_RELEASES_URL/);
+  assert.match(workflowYml, /CLOUDFLARE_R2_RELEASES_AK/);
+  assert.match(workflowYml, /CLOUDFLARE_R2_RELEASES_SK/);
+  assert.match(workflowYml, /AWS_DEFAULT_REGION:\s*auto/);
+  assert.match(workflowYml, /AWS_REQUEST_CHECKSUM_CALCULATION:\s*when_required/);
   assert.match(workflowYml, /releases\.open-design\.ai/);
   assert.match(workflowYml, /open-motion\/desktop\//);
   assert.match(workflowYml, /aws\s+.*s3 cp/);
@@ -482,4 +507,55 @@ test('resolvePackagedReleaseChannel preserves test channel from bundle metadata 
     }),
     'dev',
   );
+});
+
+test('resolveDesktopReleaseVersion implements Scheme A monotonic SemVer and Windows PE buildVersion', () => {
+  const test1 = resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 1 });
+  const test1Retry = resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 1, runAttempt: 2 });
+  const test2 = resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 2 });
+  const test10 = resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 10 });
+  const stableNext = resolveDesktopReleaseVersion({ baseVersion: '0.2.2', channel: 'stable', runNumber: 11 });
+
+  assert.equal(test1.version, '0.2.2-test.1');
+  assert.equal(test1.buildNumber, '1');
+  assert.equal(test1.buildVersion, '0.2.2.1');
+  assert.equal(test1Retry.version, '0.2.2-test.1.2');
+  assert.equal(test1Retry.buildVersion, '0.2.2.1');
+  assert.equal(test10.version, '0.2.2-test.10');
+  assert.equal(stableNext.version, '0.2.2');
+  assert.equal(stableNext.buildVersion, '0.2.2.11');
+
+  assert.ok(compareSemver('0.2.1', test1.version) < 0);
+  assert.ok(compareSemver(test1.version, test1Retry.version) < 0);
+  assert.ok(compareSemver(test1Retry.version, test2.version) < 0);
+  assert.ok(compareSemver(test2.version, test10.version) < 0);
+  assert.ok(compareSemver(test10.version, stableNext.version) < 0);
+
+  assert.throws(() => resolveDesktopReleaseVersion({ baseVersion: '0.2.1-test.1', channel: 'test', runNumber: 1 }));
+  assert.throws(() => resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'beta', runNumber: 1 }));
+  assert.throws(() => resolveDesktopReleaseVersion({ baseVersion: '0.2.1', channel: 'test', runNumber: 70000 }));
+});
+
+test('DesktopUpdaterController enables allowPrerelease on test channel and disables it on stable', async () => {
+  const testFake = createFakeAutoUpdater();
+  const testController = new DesktopUpdaterController({
+    currentVersion: '0.2.1',
+    isPackaged: true,
+    channel: 'test',
+    loadAutoUpdater: async () => testFake.updater,
+  });
+  await testController.checkForUpdates();
+  assert.equal(testFake.updater.allowPrerelease, true);
+  assert.equal(testFake.updater.channel, 'test');
+
+  const stableFake = createFakeAutoUpdater();
+  const stableController = new DesktopUpdaterController({
+    currentVersion: '0.2.1',
+    isPackaged: true,
+    channel: 'stable',
+    loadAutoUpdater: async () => stableFake.updater,
+  });
+  await stableController.checkForUpdates();
+  assert.equal(stableFake.updater.allowPrerelease, false);
+  assert.equal(stableFake.updater.channel, 'stable');
 });

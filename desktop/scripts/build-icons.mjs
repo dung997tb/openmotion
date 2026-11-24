@@ -84,9 +84,16 @@ function resolveElectronBinary() {
   return existsSync(full) ? full : null;
 }
 
-function rasterizeSvgViaElectron(svgPath, outPngPath, size = 1024) {
+function readPngWidth(pngBuffer) {
+  if (pngBuffer.length >= 24 && pngBuffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    return pngBuffer.readUInt32BE(16);
+  }
+  return null;
+}
+
+function rasterizeSvgTargetsViaElectron(svgPath, targets) {
   const electronBin = resolveElectronBinary();
-  if (!electronBin) return false;
+  if (!electronBin || !Array.isArray(targets) || targets.length === 0) return false;
 
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'om-icon-render-'));
   try {
@@ -108,25 +115,35 @@ app.whenReady().then(async () => {
     });
     const html = \`<!doctype html><html><body style="margin:0;background:transparent">
       <script>
-        window.__renderSvg = async (b64, size) => {
+        window.__renderSvgSizes = async (b64, sizes) => {
           const img = new Image();
           img.src = 'data:image/svg+xml;base64,' + b64;
           await img.decode();
-          const canvas = document.createElement('canvas');
-          canvas.width = size;
-          canvas.height = size;
-          const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, size, size);
-          ctx.drawImage(img, 0, 0, size, size);
-          return canvas.toDataURL('image/png');
+          const out = {};
+          for (const size of sizes) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, size, size);
+            ctx.drawImage(img, 0, 0, size, size);
+            out[String(size)] = canvas.toDataURL('image/png');
+          }
+          return out;
         };
       </script></body></html>\`;
     await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-    const dataUrl = await win.webContents.executeJavaScript(
-      'window.__renderSvg(' + JSON.stringify(${JSON.stringify(svgBase64)}) + ', ' + ${size} + ')'
+    const targets = ${JSON.stringify(targets)};
+    const sizes = [...new Set(targets.map(t => t.size))];
+    const rendered = await win.webContents.executeJavaScript(
+      'window.__renderSvgSizes(' + JSON.stringify(${JSON.stringify(svgBase64)}) + ', ' + JSON.stringify(sizes) + ')'
     );
-    const pngBase64 = dataUrl.replace(/^data:image\\/png;base64,/, '');
-    fs.writeFileSync(${JSON.stringify(outPngPath)}, Buffer.from(pngBase64, 'base64'));
+    for (const target of targets) {
+      const dataUrl = rendered[String(target.size)];
+      if (!dataUrl) throw new Error('Missing rendered frame for size ' + target.size);
+      const pngBase64 = dataUrl.replace(/^data:image\\/png;base64,/, '');
+      fs.writeFileSync(target.outPath, Buffer.from(pngBase64, 'base64'));
+    }
     win.destroy();
     app.exit(0);
   } catch (err) {
@@ -138,11 +155,15 @@ app.whenReady().then(async () => {
     writeFileSync(runnerPath, runnerSource, 'utf8');
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
-    const res = spawnSync(electronBin, [runnerPath], { env, stdio: 'pipe', timeout: 20_000 });
-    return res.status === 0 && existsSync(outPngPath);
+    const res = spawnSync(electronBin, [runnerPath], { env, stdio: 'pipe', timeout: 25_000 });
+    return res.status === 0 && targets.every(t => existsSync(t.outPath));
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+function rasterizeSvgViaElectron(svgPath, outPngPath, size = 1024) {
+  return rasterizeSvgTargetsViaElectron(svgPath, [{ size, outPath: outPngPath }]);
 }
 
 export function packPngFramesAsIco(frames) {
@@ -171,7 +192,9 @@ export function packPngFramesAsIco(frames) {
   return Buffer.concat([header, ...directory, ...frames.map(f => f.data)]);
 }
 
-function buildIcnsAndIcoFromPng(masterPngPath, outDir) {
+const ICO_SIZES = [16, 32, 48, 64, 128, 256];
+
+function buildIcnsAndIcoFromPng(masterPngPath, outDir, { preRenderedIcoFrames = null, fallbackPngPath = null } = {}) {
   const icnsPath = path.join(outDir, 'icon.icns');
   const icoPath = path.join(outDir, 'icon.ico');
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'om-icon-pack-'));
@@ -204,9 +227,8 @@ function buildIcnsAndIcoFromPng(masterPngPath, outDir) {
         rmSync(icnsPath, { force: true });
       }
 
-      const icoSizes = [16, 32, 48, 64, 128, 256];
       const frames = [];
-      for (const px of icoSizes) {
+      for (const px of ICO_SIZES) {
         const framePath = path.join(tempDir, `ico-${px}.png`);
         const res = spawnSync('sips', ['-z', String(px), String(px), masterPngPath, '--out', framePath], {
           stdio: 'ignore',
@@ -218,9 +240,21 @@ function buildIcnsAndIcoFromPng(masterPngPath, outDir) {
       if (frames.length > 0) {
         writeFileSync(icoPath, packPngFramesAsIco(frames));
       }
+    } else if (Array.isArray(preRenderedIcoFrames) && preRenderedIcoFrames.length > 0) {
+      writeFileSync(icoPath, packPngFramesAsIco(preRenderedIcoFrames));
     } else {
-      const pngData = readFileSync(masterPngPath);
-      writeFileSync(icoPath, packPngFramesAsIco([{ size: 256, data: pngData }]));
+      let pngData = readFileSync(masterPngPath);
+      let width = readPngWidth(pngData);
+      if ((!width || width > 256) && fallbackPngPath && existsSync(fallbackPngPath)) {
+        const fallbackData = readFileSync(fallbackPngPath);
+        const fallbackWidth = readPngWidth(fallbackData);
+        if (fallbackWidth && fallbackWidth <= 256) {
+          pngData = fallbackData;
+          width = fallbackWidth;
+        }
+      }
+      const frameSize = width && width <= 256 ? width : 256;
+      writeFileSync(icoPath, packPngFramesAsIco([{ size: frameSize, data: pngData }]));
     }
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
@@ -246,7 +280,25 @@ export function buildDesktopIcons({
     writeFileSync(targetSvg, buildAppIconSvg(sourceMarkSvg), 'utf8');
   }
 
-  const rasterized = existsSync(targetSvg) ? rasterizeSvgViaElectron(targetSvg, targetPng, 1024) : false;
+  let preRenderedIcoFrames = null;
+  let rasterized = false;
+  if (existsSync(targetSvg)) {
+    if (process.platform === 'darwin') {
+      rasterized = rasterizeSvgViaElectron(targetSvg, targetPng, 1024);
+    } else {
+      const icoTempDir = mkdtempSync(path.join(os.tmpdir(), 'om-ico-frames-'));
+      try {
+        const icoTargets = ICO_SIZES.map(size => ({ size, outPath: path.join(icoTempDir, `ico-${size}.png`) }));
+        rasterized = rasterizeSvgTargetsViaElectron(targetSvg, [{ size: 1024, outPath: targetPng }, ...icoTargets]);
+        if (rasterized) {
+          preRenderedIcoFrames = icoTargets.map(t => ({ size: t.size, data: readFileSync(t.outPath) }));
+        }
+      } finally {
+        rmSync(icoTempDir, { recursive: true, force: true });
+      }
+    }
+  }
+
   if (!rasterized) {
     if (!existsSync(fallbackPng)) {
       throw new Error(`Missing source icon: ${fallbackPng}`);
@@ -259,7 +311,10 @@ export function buildDesktopIcons({
     }
   }
 
-  const { iconIcns, iconIco } = buildIcnsAndIcoFromPng(targetPng, outDir);
+  const { iconIcns, iconIco } = buildIcnsAndIcoFromPng(targetPng, outDir, {
+    preRenderedIcoFrames,
+    fallbackPngPath: fallbackPng,
+  });
 
   return { iconPng: targetPng, iconSvg: targetSvg, iconIcns, iconIco };
 }
