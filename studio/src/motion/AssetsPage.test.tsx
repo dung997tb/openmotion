@@ -564,15 +564,32 @@ it('prepares a first-frame draft from a guide and an uploaded image without subm
   const { skillPreviewSnapshot } = await import('./skillCatalog');
   const fetchPreview = vi.fn(async () => new Response('sample', { headers: { 'Content-Type': 'application/octet-stream' } }));
   vi.stubGlobal('fetch', fetchPreview);
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+  const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  let setGuideVisibility: (isIntersecting: boolean) => void;
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+      setGuideVisibility = isIntersecting => callback([{ isIntersecting }]);
+    }
+    observe() {}
+    disconnect() {}
+  });
   const remember = vi.fn();
   const studio = { destination: studioDestination(findMediaStudio('cinema')!, 'image-to-video'),
     catalog: { catalog: undefined, failed: false, retry: vi.fn() }, remember, chooseModel: vi.fn() };
   await act(async () => root.render(<AssetsPage active studio={studio} />)); await flush();
   expect(container.querySelector('.om-scene-guide')).toBeTruthy();
   expect(fetchPreview).not.toHaveBeenCalled();
-  await click('Play');
+  await act(async () => setGuideVisibility(true));
   expect(fetchPreview).toHaveBeenCalledWith(skillPreviewSnapshot + 'light-shadow-product.mp4', expect.anything());
-  expect(container.querySelector('.om-scene-example-media video')?.getAttribute('src')).toMatch(/^blob:/);
+  const video = container.querySelector<HTMLVideoElement>('.om-scene-example-media video')!;
+  expect(video.src).toMatch(/^blob:/);
+  expect(video.muted).toBe(true);
+  expect(video.controls).toBe(true);
+  expect(play).toHaveBeenCalledTimes(1);
+  await act(async () => setGuideVisibility(false));
+  expect(pause).toHaveBeenCalledTimes(1);
   await click('Use this example');
   expect(remember.mock.lastCall?.[0].prompt).toMatch(/supplied frame/);
   const file = new File(['data'], 'still.png', { type: 'image/png' });
@@ -625,6 +642,10 @@ it('starts a focused image landing on its examples even when the user already ha
 
 it.each([
   {
+    scene: 'image-edit', image: 'sofa-edit.webp', title: 'Edit images with ease',
+    description: /describe what to change/,
+  },
+  {
     scene: 'remove-background', image: 'sofa-cutout.webp', title: 'Remove the background in one click',
     description: /Keep the sofa and coffee table/,
   },
@@ -632,7 +653,7 @@ it.each([
     scene: 'relight', image: 'sofa-relight.webp', title: 'Relight with flexible lighting controls',
     description: /Adjust light direction, color temperature, and mood/,
   },
-] as const)('shows only a comparison image and its caption in the $scene guide', async ({ scene, image, title, description }) => {
+] as const)('shows a comparison image and its caption in the $scene guide', async ({ scene, image, title, description }) => {
   const { mediaEditorDestination } = await import('./creativeStudios');
   const studio = { destination: mediaEditorDestination(scene),
     catalog: { catalog: undefined, failed: false, retry: vi.fn() }, remember: vi.fn(), chooseModel: vi.fn() };
@@ -643,7 +664,7 @@ it.each([
   expect(guide.querySelector('img')?.getAttribute('src')).toContain(image);
   expect(guide.querySelector('h2')?.textContent).toBe(title);
   expect(guide.querySelector('p')?.textContent).toMatch(description);
-  expect(guide.querySelector('video, button, ol')).toBeNull();
+  expect(guide.querySelector('video, ol, button')).toBeNull();
   await click('Generations');
   expect(container.querySelector('.om-scene-comparison')).toBeNull();
 });
