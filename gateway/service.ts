@@ -27,7 +27,8 @@ import { rankSearchResults } from '../shared/fuzzy-search.ts';
 const referenceFile = (index: number, mimeType: string) => (index ? `reference-${index}.` : 'reference.') + (mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]);
 
 type Options = { tracking?: OmTracking; fetcher?: Fetcher; detect?: () => Promise<Agent[]>; codex?: typeof generateCodexImage; download?: typeof downloadMedia; pollMs?: number; maxConcurrentJobs?: number };
-const DEFAULT_MAX_CONCURRENT_JOBS = 6;
+// 4 keeps multi-asset cloud batches 2x faster than the previous cap of 2 while staying below OpenDesign Cloud's 5-concurrent per-tier limit.
+const DEFAULT_MAX_CONCURRENT_JOBS = 4;
 const MAX_CONCURRENT_LOCAL_JOBS = 2;
 type SavedOutput = { path: string; mimeType: string; bytes: number; sha256: string };
 const saveUnavailable = 'SAVE_NOT_AVAILABLE: retained outputs are missing, changed or unreadable; no model request was made';

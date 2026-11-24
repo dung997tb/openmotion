@@ -480,7 +480,7 @@ test('resolvePublicAddresses resolves proxy Fake-IP (198.18.0.0/15) via public D
   );
 });
 
-test('gateway runs up to 6 remote jobs concurrently while keeping local codex jobs capped at 2', () => fixture(async store => {
+test('gateway runs up to 4 remote jobs concurrently while keeping local codex jobs capped at 2', () => fixture(async store => {
   let inflightRemote = 0, peakRemote = 0;
   const resolvers: (() => void)[] = [];
   const gateway = new ModelGateway(store, {
@@ -508,13 +508,13 @@ test('gateway runs up to 6 remote jobs concurrently while keeping local codex jo
   try {
     await gateway.configureProvider('opendesign', { apiKey: 'test-key', baseUrl: 'https://cloud.example' });
     const remoteJobs = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 6; i++) {
       remoteJobs.push(await gateway.submit({ modality: 'image', model: 'opendesign:seedream-5.0-flash', prompt: `Tile ${i}`, library: {} }));
     }
     await gateway.tick();
-    while (resolvers.length < 6) await new Promise(r => setTimeout(r, 5));
-    assert.equal(gateway.active.size, 6);
-    assert.equal(peakRemote, 6);
+    while (resolvers.length < 4) await new Promise(r => setTimeout(r, 5));
+    assert.equal(gateway.active.size, 4);
+    assert.equal(peakRemote, 4);
     while (resolvers.length) resolvers.shift()!();
     await Promise.all([...gateway.active.values()].map(task => task.done));
     await gateway.tick();
