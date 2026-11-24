@@ -18,6 +18,6 @@ export function saveCanvasDrag(
     if (version) return write(version);
   }
   const result = save();
-  byFile.set(path, { id, version: result.then(saved => saved?.confirmedCanvasVersion, () => undefined) });
+  byFile.set(path, { id, version: result.then(saved => saved?.savedCanvasVersion, () => undefined) });
   return result;
 }

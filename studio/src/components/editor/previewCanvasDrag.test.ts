@@ -62,7 +62,7 @@ it("holds the released layer, allows an unrelated source to move, and waits for 
   expect(gesture("start", "first")).toBeTruthy();
   expect(gesture("finish", "first")).toMatchObject({ sourceFile: "one.html", sha256: originalHash, left: 25, top: 50 });
   expect(one.style.left).toBe("25px");
-  expect(gesture("start", "same-source")).toBeNull();
+  expect(gesture("start", "same-source")).toEqual({ waitingForSource: true });
   expect(gesture("start", "second", { x: 1 })).toBeTruthy();
   gesture("move", "second");
   gesture("commit", "first", { changed: true });
@@ -71,7 +71,7 @@ it("holds the released layer, allows an unrelated source to move, and waits for 
   expect(two.style.left).toBe("25px");
   gesture("cancel", "second");
   expect(two.style.left).toBe("");
-  expect(gesture("start", "stale-source")).toBeNull();
+  expect(gesture("start", "stale-source")).toEqual({ waitingForSource: true });
 });
 
 it("captures the playhead and final local translation once at gesture completion", () => {

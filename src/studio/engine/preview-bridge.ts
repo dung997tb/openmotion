@@ -285,8 +285,9 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
       if(message.type==='canvas-drag'){
         var result=canvasDrag(message);
         if(message.phase==='start'){
-          const hit=result?drag.element:document.elementFromPoint(message.x * innerWidth,message.y * innerHeight)?.closest('[data-hf-id],[id]');
-          if(hit && hit!==document.body && hit!==document.documentElement) reportLayerSelection(hit, result?drag.selection:describe(hit));
+          const started=drag?.id===message.gestureId ? drag : null;
+          const hit=started?.element || document.elementFromPoint(message.x * innerWidth,message.y * innerHeight)?.closest('[data-hf-id],[id]');
+          if(hit && hit!==document.body && hit!==document.documentElement) reportLayerSelection(hit, started?.selection || describe(hit));
         }
         if(message.phase==='start' || message.phase==='finish') respond(requestId,result);
         return;

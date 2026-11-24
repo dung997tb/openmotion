@@ -49,8 +49,8 @@ export interface DomEditPatchBatchesResult {
   durable: boolean;
   allMatched: boolean;
   changed: boolean;
-  /** The exact receipt the isolated canvas verified in its mounted document. */
-  confirmedCanvasVersion?: string;
+  /** The exact non-divergent source version saved for this gesture. The visible document may still be rebuilding. */
+  savedCanvasVersion?: string;
 }
 
 export type PersistDomEditOperations = (

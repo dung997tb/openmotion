@@ -170,7 +170,7 @@ export function useDomEditCommits({
 
           const sourceFiles = batches.map((batch) => batch.sourceFile);
           // The server patch and its history entry hold every touched file's queue.
-          const { allMatched, changedPaths, reconcileFromServer, previewApplied, confirmedCanvasVersion, savedVersions } = await serializeStudioFileMutations(
+          const { allMatched, changedPaths, reconcileFromServer, previewApplied, savedVersions } = await serializeStudioFileMutations(
             writeProjectFile,
             sourceFiles,
             async () => {
@@ -180,10 +180,7 @@ export function useDomEditCommits({
                 const result = await submitIsolatedCanvasEdit(pid, intent.commands, intent.versions, history, previewIframeRef, options.coalesceKey);
                 const changed = result.changedPaths.length > 0;
                 if (changed) await editHistory.recordEdit({ ...options, files: {} });
-                const path = batches[0]!.sourceFile;
-                const confirmedCanvasVersion = !result.divergent.length && (result.previewApplied || !changed)
-                  ? result.versions[path] : undefined;
-                return { allMatched: true, changedPaths: result.changedPaths, reconcileFromServer: result.divergent.length > 0, previewApplied: result.previewApplied, confirmedCanvasVersion, savedVersions: result.versions };
+                return { allMatched: true, changedPaths: result.changedPaths, reconcileFromServer: result.divergent.length > 0, previewApplied: result.previewApplied, savedVersions: result.versions };
               }
               const atomicResult = await patchElementBatches(pid, batches, history);
               const files = Object.fromEntries(
@@ -220,7 +217,7 @@ export function useDomEditCommits({
                 allMatched:
                   atomicResult.durable && atomicResult.files.every((result) => result.allMatched),
                 changedPaths: Object.keys(files),
-                reconcileFromServer: false, previewApplied: false, confirmedCanvasVersion: undefined, savedVersions: undefined,
+                reconcileFromServer: false, previewApplied: false, savedVersions: undefined,
               };
             },
           );
@@ -238,7 +235,8 @@ export function useDomEditCommits({
             options.skipReload === true && batchesAreInlineStyleOnly(batches) && durable;
           if (!durable) reloadPreview();
           else if (changed && !skipSafe && !previewApplied) reloadPreview(changedPaths);
-          return { durable, allMatched, changed, ...(confirmedCanvasVersion && { confirmedCanvasVersion }) };
+          const savedCanvasVersion = batches.length === 1 ? savedVersions?.[batches[0]!.sourceFile] : undefined;
+          return { durable, allMatched, changed, ...(savedCanvasVersion && { savedCanvasVersion }) };
         },
       ).catch((error) => {
         if (error instanceof AtomicElementPatchConvergenceError) reloadPreview();

@@ -121,6 +121,46 @@ it.each(["replacement", "navigation"])("ignores a late finish after frame %s", a
   expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
 });
 
+it("saves a completed second drag against its stored predecessor after a preview replacement", async () => {
+  const receipt = Promise.withResolvers<{ durable: boolean; savedCanvasVersion: string }>();
+  state.commitDomEditPatchBatches.mockReturnValueOnce(receipt.promise);
+  pointer("pointerdown", 60);
+  pointer("pointerup", 90);
+  await reply("start", null);
+  await reply("finish", result);
+  const predecessor = messages[0]!.gestureId;
+  pointer("pointerdown", 70);
+  pointer("pointerup", 98);
+  await reply("start", null);
+  await reply("finish", { ...result, predecessor, left: 110 });
+  expect(state.commitDomEditPatchBatches).toHaveBeenCalledTimes(1);
+  state.previewIframeRef.current = document.createElement("iframe");
+  await act(async () => receipt.resolve({ durable: true, savedCanvasVersion: '"patch:latest"' }));
+  expect(state.commitDomEditPatchBatches).toHaveBeenCalledTimes(2);
+  expect(state.commitDomEditPatchBatches.mock.calls[1]![0]).toMatchObject([{
+    sourceFile: result.sourceFile, ifMatch: '"patch:latest"', box: { left: 110 },
+    patches: [{ target: { id: result.elementId } }],
+  }]);
+});
+
+it.each([true, false])("reports a moved but unmeasurable target only when it is waiting for its source (%s)", async waiting => {
+  pointer("pointerdown", 60);
+  await reply("start", waiting ? { waitingForSource: true } : null);
+  pointer("pointerup", 90);
+  await reply("finish", null);
+  expect(state.showToast).toHaveBeenCalledTimes(waiting ? 1 : 0);
+  expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
+});
+
+it("reports a moved gesture interrupted by the same frame loading another document", () => {
+  pointer("pointerdown", 60);
+  pointer("pointermove", 90);
+  act(() => frame.dispatchEvent(new Event("load")));
+  pointer("pointerup", 90);
+  expect(state.showToast).toHaveBeenCalledOnce();
+  expect(state.commitDomEditPatchBatches).not.toHaveBeenCalled();
+});
+
 async function openText() {
   act(() => canvas.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: 60, clientY: 60 })));
   const pick = messages.findLast(message => message.type === "inline-text" && message.phase === "pick")!;

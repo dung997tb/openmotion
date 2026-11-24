@@ -79,7 +79,7 @@ export const PREVIEW_CANVAS_DRAG = `
 
     const style = getComputedStyle(element);
     const makeRelative = style.position === 'static';
-    if (!canvasBase(selection.sourceFile, {corner, makeRelative})) return null;
+    if (!canvasBase(selection.sourceFile, {corner, makeRelative})) return { waitingForSource: true };
     const properties = makeRelative ? ['left', 'top', 'position'] : ['left', 'top'];
     const width = parseFloat(style.width), height = parseFloat(style.height);
     if (corner) {

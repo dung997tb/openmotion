@@ -2,7 +2,7 @@
 import { expect, it, vi } from "vitest";
 import { saveCanvasDrag } from "./saveCanvasDrag";
 
-const saved = (confirmedCanvasVersion?: string) => ({ durable: true, changed: true, allMatched: true, confirmedCanvasVersion });
+const saved = (savedCanvasVersion?: string) => ({ durable: true, changed: true, allMatched: true, savedCanvasVersion });
 
 it("submits each dependent measurement on the previous verified version", async () => {
   const frame = document.createElement("iframe");
@@ -20,7 +20,7 @@ it("submits each dependent measurement on the previous verified version", async 
   expect(writeThird).toHaveBeenCalledWith("v3");
 });
 
-it("drops descendants after a conflict or a save awaiting a replacement frame", async () => {
+it("drops descendants after a conflict or an unverified source write", async () => {
   const frame = document.createElement("iframe");
   const write = vi.fn(async () => saved("unexpected"));
   const conflict = saveCanvasDrag(frame, "a", "1", undefined, async () => { throw new Error("409"); });
