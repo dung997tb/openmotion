@@ -1,3 +1,5 @@
+import "./styles/components.css";
+import "../../packages/design-system/studio-editor.css";
 import { useTimelineSessionLocks } from "./hooks/useTimelineSessionLocks";
 import { TimelineCaptionActions } from './motion/TimelineCaptionActions';
 import { TimelineCaptionsMenu } from './motion/TimelineCaptionsMenu';

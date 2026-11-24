@@ -1957,7 +1957,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
 
   const amrIdentity =
     deps.amrIdentity ??
-    (config.AUTH_MODE === 'oidc' ? amrIdentityClientFromAppConfig(config, authCache) : undefined);
+    (config.AUTH_MODE === 'oidc' ? amrIdentityClientFromAppConfig(config, authCache, logger) : undefined);
 
   const authDeps: AuthMiddlewareDeps = {
     config,
@@ -2863,17 +2863,35 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     try {
       const rawHtml = await readFile(path.join(studioBuildDir, 'index.html'), 'utf8');
       const renderedHtml = injectRuntimeConfigIntoHtml(rawHtml, browserObservabilityConfig);
+      const preconnectHints = [
+        '<link rel="preconnect" href="https://r.open-design.ai" crossorigin>',
+        ...(previewHostIsolationEnabled && previewOriginUrl
+          ? [`<link rel="preconnect" href="${previewOriginUrl.origin}" crossorigin>`]
+          : []),
+      ].join('');
       const previewOriginMeta = previewHostIsolationEnabled && previewOriginUrl
         ? `<meta name="openmotion-preview-origin" content="${previewOriginUrl.origin}">`
         : '';
       const studioHtml = renderedHtml.replace('</head>',
-        `<meta name="openmotion-runtime" content="cloud-diskless" data-editor-open="1">${previewOriginMeta}</head>`);
+        `${preconnectHints}<meta name="openmotion-runtime" content="cloud-diskless" data-editor-open="1">${previewOriginMeta}</head>`);
       const bytes = Buffer.from(studioHtml, 'utf8');
+      const etag = `"sha256:${createHash('sha256').update(bytes).digest('hex')}"`;
+      if (c.req.header('if-none-match')?.trim() === etag) {
+        return new Response(null, {
+          status: 304,
+          headers: {
+            ETag: etag,
+            'Cache-Control': 'no-cache',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      }
       return new Response(headOnly ? null : bytes, {
         status: 200,
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Content-Length': String(bytes.byteLength),
+          ETag: etag,
           'Cache-Control': 'no-cache',
           'X-Content-Type-Options': 'nosniff',
         },

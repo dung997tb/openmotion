@@ -166,8 +166,57 @@ class ApiTestPgClient {
       order = ordM[1].trim();
       rem = rem.slice(0, ordM.index).trim();
     }
-    const whM = /^where\s+([\s\S]+)$/i.exec(rem);
-    if (whM) where = whM[1].trim();
+    const whereIdx = findKw(rem, 'where');
+    const joinsClause = whereIdx >= 0 ? rem.slice(0, whereIdx).trim() : /^left\s+/i.test(rem) ? rem : '';
+    if (whereIdx >= 0) where = rem.slice(whereIdx + 5).trim();
+
+    if (joinsClause) {
+      const joins: { table: string; on: string }[] = [];
+      let jc = joinsClause;
+      while (jc) {
+        const jm = /^left\s+(?:outer\s+)?join\s+"([^"]+)"\s+on\s+/i.exec(jc);
+        if (!jm) throw new Error(`Unsupported JOIN: ${sqlText}`);
+        const joinTable = jm[1];
+        const afterOn = jc.slice(jm[0].length);
+        const nextJoinIdx = findKw(afterOn, 'left');
+        const onExpr = nextJoinIdx >= 0 ? afterOn.slice(0, nextJoinIdx).trim() : afterOn.trim();
+        joins.push({ table: joinTable, on: onExpr });
+        jc = nextJoinIdx >= 0 ? afterOn.slice(nextJoinIdx).trim() : '';
+      }
+      let combined: Map<string, Row | null>[] = this.rows(table).map((r) => new Map([[table, r]]));
+      for (const j of joins) {
+        const next: Map<string, Row | null>[] = [];
+        for (const rowMap of combined) {
+          let found = false;
+          for (const candidate of this.rows(j.table)) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, candidate);
+            if (evalJoinedW(merged, j.on, params)) {
+              next.push(merged);
+              found = true;
+            }
+          }
+          if (!found) {
+            const merged = new Map(rowMap);
+            merged.set(j.table, null);
+            next.push(merged);
+          }
+        }
+        combined = next;
+      }
+      if (where) combined = combined.filter((rowMap) => evalJoinedW(rowMap, where, params));
+      if (offset > 0) combined = combined.slice(offset);
+      if (limit !== null) combined = combined.slice(0, limit);
+      const specs = splitTop(selectList, ',').map(qualifiedCol);
+      const out = combined.map((rowMap) =>
+        rowMode === 'array'
+          ? specs.map((s) => (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(table)?.[s.col]) ?? null)
+          : Object.fromEntries(
+              specs.map((s) => [s.col, (s.table ? rowMap.get(s.table)?.[s.col] : rowMap.get(table)?.[s.col]) ?? null]),
+            ),
+      );
+      return { rows: out };
+    }
 
     let matched = this.rows(table).filter((r) => (where ? evalW(r, where, params) : true));
     if (/^COALESCE\s*\(\s*MAX\s*\(/i.test(selectList)) {
@@ -291,6 +340,36 @@ class ApiTestPgClient {
 function colName(expr: string): string {
   const m = [...expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').matchAll(/"([^"]+)"/g)];
   return m.length > 0 ? m[m.length - 1][1] : expr.trim();
+}
+function qualifiedCol(expr: string): { table?: string; col: string } {
+  const trimmed = expr.trim().replace(/\s+as\s+"[^"]+"$/i, '').trim();
+  const m = [...trimmed.matchAll(/"([^"]+)"/g)];
+  if (m.length >= 2) return { table: m[m.length - 2][1], col: m[m.length - 1][1] };
+  return { col: m.length === 1 ? m[0][1] : trimmed };
+}
+function evalJoinedOperand(rowMap: Map<string, Row | null>, expr: string, params: unknown[]): unknown {
+  const t = expr.trim();
+  const qm = /^"([^"]+)"\."([^"]+)"$/.exec(t);
+  if (qm) return rowMap.get(qm[1])?.[qm[2]] ?? null;
+  return evalSc(t, params);
+}
+function evalJoinedW(rowMap: Map<string, Row | null>, raw: string, params: unknown[]): boolean {
+  const terms = splitAnd(stripP(raw));
+  if (terms.length > 1) return terms.every((t) => evalJoinedW(rowMap, t, params));
+  const term = stripP(terms[0]);
+  let m: RegExpExecArray | null;
+  if ((m = /^([\s\S]+?)\s+is\s+null$/i.exec(term))) return evalJoinedOperand(rowMap, m[1], params) == null;
+  if ((m = /^([\s\S]+?)\s+is\s+not\s+null$/i.exec(term))) return evalJoinedOperand(rowMap, m[1], params) != null;
+  if ((m = /^([\s\S]+?)\s+in\s*\(([\s\S]+)\)$/i.exec(term))) {
+    const lv = evalJoinedOperand(rowMap, m[1], params);
+    return lv != null && splitTop(m[2], ',').map((v) => evalJoinedOperand(rowMap, v, params)).includes(lv);
+  }
+  if ((m = /^([\s\S]+?)\s*=\s*([\s\S]+)$/.exec(term))) {
+    const lv = evalJoinedOperand(rowMap, m[1], params);
+    const rv = evalJoinedOperand(rowMap, m[2], params);
+    return lv !== null && rv !== null && lv === rv;
+  }
+  throw new Error(`Unsupported joined WHERE: ${term}`);
 }
 function splitTop(input: string, sep: string): string[] {
   const out: string[] = [];
@@ -1376,6 +1455,10 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
     assert.equal(fontRes.status, 200);
     assert.equal(fontRes.headers.get('access-control-allow-origin'), '*');
 
+    const woff2Res = await app.request('/web/design-system/fonts/AlbertSans-VariableFont_wght.woff2');
+    assert.equal(woff2Res.status, 200);
+    assert.equal(woff2Res.headers.get('access-control-allow-origin'), '*');
+
     const runtimeJsRes = await app.request('/api/runtime.js');
     assert.equal(runtimeJsRes.status, 200);
     assert.match(runtimeJsRes.headers.get('content-type') ?? '', /javascript/);
@@ -1428,6 +1511,36 @@ describe('Cloud API Entrypoint — Static Assets, Read-Only GSAP & API 404 vs SP
     const spaRes = await app.request('/projects/client-route');
     const studioBuilt = existsSync(path.join(REPO_ROOT, 'studio/build/index.html'));
     assert.equal(spaRes.status, studioBuilt ? 200 : 503);
+    if (studioBuilt) {
+      const spaHtml = await spaRes.text();
+      assert.match(spaHtml, /<link rel="preconnect" href="https:\/\/r\.open-design\.ai" crossorigin>/);
+      const spaEtag = spaRes.headers.get('etag') ?? '';
+      assert.match(spaEtag, /^"sha256:[a-f0-9]{64}"$/);
+      const spaNotModified = await app.request('/projects/client-route', {
+        headers: { 'If-None-Match': spaEtag },
+      });
+      assert.equal(spaNotModified.status, 304);
+      assert.equal(spaNotModified.headers.get('etag'), spaEtag);
+
+      const isolated = createApiFixture({
+        config: {
+          AUTH_MODE: 'dev',
+          PREVIEW_PUBLIC_ORIGIN: 'https://preview.example.test',
+          PREVIEW_TOKEN_SECRET: 'test-preview-secret-0123456789abcdef',
+        },
+      });
+      const isolatedSpa = await isolated.app.request('/explore');
+      assert.equal(isolatedSpa.status, 200);
+      const isolatedHtml = await isolatedSpa.text();
+      assert.match(
+        isolatedHtml,
+        /<link rel="preconnect" href="https:\/\/preview\.example\.test" crossorigin>/,
+      );
+      assert.match(
+        isolatedHtml,
+        /<link rel="preconnect" href="https:\/\/r\.open-design\.ai" crossorigin>/,
+      );
+    }
   });
 });
 

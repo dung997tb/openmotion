@@ -176,8 +176,9 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
     });
     const validator = c.req.header('if-none-match');
     const expectedTag = tag(project.revision);
-    c.header('Cache-Control', 'no-store');
-    if (validator === expectedTag && await deps.files.getFile(auth, projectId, compPath ?? 'index.html')) {
+    if (validator === expectedTag && await deps.files.hasFile(auth, projectId, compPath ?? 'index.html')) {
+      c.header('Cache-Control', 'private, no-cache');
+      c.header('Vary', 'Cookie, Authorization');
       c.header('ETag', expectedTag);
       return c.body(null, 304);
     }
@@ -207,21 +208,26 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
         return html === null ? null : { html, templateBase, revision: virtual.revision };
       });
       if (!doc) {
+        c.header('Cache-Control', 'no-store');
         return c.json(compPath === undefined
           ? { error: 'Entry composition index.html not found' }
           : { error: 'Sub-composition not found', path: compPath }, 404);
       }
+      c.header('Cache-Control', 'private, no-cache');
+      c.header('Vary', 'Cookie, Authorization');
       c.header('ETag', tag(doc.revision));
       c.header('Content-Type', 'text/html; charset=utf-8');
       return c.body(assetBase ? doc.html.replaceAll(doc.templateBase, () => assetBase) : doc.html, 200);
     } catch (error) {
       if (error instanceof PreviewBuildBusy) {
         const retryAfterSeconds = 1;
+        c.header('Cache-Control', 'no-store');
         c.header('Retry-After', String(retryAfterSeconds));
         if (assetBase) return c.html(createPreviewBuildBusyHtml(projectId, retryAfterSeconds), 503);
         return c.json({ error: 'Preview builders are busy.' }, 503);
       }
       if (compPath !== undefined) throw error;
+      c.header('Cache-Control', 'no-store');
       c.header('Content-Type', 'text/html; charset=utf-8');
       return c.body(previewErrorHtml(error instanceof Error ? error.message : 'Preview bundling failed'), 500);
     }
@@ -338,13 +344,10 @@ export function createStudioPreviewRoutes(deps: DisklessStudioDeps): Hono<{ Vari
       });
     }
 
-    const presigned = await deps.files.presignFileGet(auth, projectId, safePath, {
+    const presigned = await deps.files.presignResolvedFileGet(auth.workspaceId, file, {
       expiresInSec: 300,
       responseContentType: file.mimeType,
     });
-    if (!presigned) {
-      return c.json({ error: 'Preview asset not found', path: safePath }, 404);
-    }
 
     return new Response(null, {
       status: 302,

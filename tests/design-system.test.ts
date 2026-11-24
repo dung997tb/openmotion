@@ -79,9 +79,12 @@ test('public package assets and their transitive imports work through both HTTP 
       assert.equal((await fetch(target)).status, 200, `${file} -> ${target.pathname}`);
     }
   }
-  for (const file of ['tokens.css', 'fonts/AlbertSans-VariableFont_wght.ttf', 'brand/loading-mark.svg']) {
+  for (const file of ['tokens.css', 'fonts/AlbertSans-VariableFont_wght.woff2', 'fonts/IBMPlexMono-Regular.woff2', 'fonts/AlbertSans-VariableFont_wght.ttf', 'brand/loading-mark.svg']) {
     assert.deepEqual(Buffer.from(await (await fetch(`${origin}/web/design-system/${file}`)).arrayBuffer()), await readFile(new URL(file, packageRoot)));
   }
+  const fontsCss = await readFile(new URL('fonts.css', packageRoot), 'utf8');
+  assert.match(fontsCss, /AlbertSans-VariableFont_wght\.woff2.*format\('woff2'\)/);
+  assert.match(fontsCss, /IBMPlexMono-Regular\.woff2.*format\('woff2'\)/);
   assert.equal((await fetch(`${origin}/design-system`)).status, 200);
   for (const file of ['package.json', 'index.js', 'loading.ts', 'brand/BRANDKIT.md', '../package.json', '%2e%2e%2fpackage.json']) {
     assert.equal(resolveDesignSystemFile(`/design-system/${file}`), undefined, file);

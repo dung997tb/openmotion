@@ -1616,6 +1616,8 @@ describe('Catalog Hono Routes (src/routes/catalog.ts)', () => {
     assert.ok(Number(headPoster.headers.get('content-length')) > 1000);
     assert.match(headPoster.headers.get('etag') ?? '', /^"sha256:[a-f0-9]{64}"$/);
     assert.equal(headPoster.headers.get('accept-ranges'), 'bytes');
+    assert.equal(headPoster.headers.get('cache-control'), 'public, max-age=300, s-maxage=300');
+    assert.equal(headPoster.headers.get('vary'), 'Origin');
     assert.equal(await headPoster.text(), '');
 
     const headSource = await app.request(`/api/template-source/${WELCOME_TEMPLATE_ID}/assets/horizon.webp`, {
@@ -1629,13 +1631,13 @@ describe('Catalog Hono Routes (src/routes/catalog.ts)', () => {
     assert.equal(storage.presignGetCalls, presignBeforeHead, 'HEAD must NEVER call S3 presignGet');
     assert.equal(storage.headCalls, headBeforeHead, 'HEAD must answer directly from PG, never S3 headObject');
 
-    // 4. GET poster & binary source asset -> 302 presigned GET with required Cache-Control & Vary headers
+    // 4. GET poster & binary source asset -> 302 presigned GET with public CDN Cache-Control & Vary headers
     const getPoster = await app.request(`/api/templates/${WELCOME_TEMPLATE_ID}/poster`);
     assert.equal(getPoster.status, 302);
     const posterLocation = getPoster.headers.get('location') ?? '';
     assert.match(posterLocation, /^https:\/\/s3\.example\.test\/openmotion\/catalog\/blobs\/[a-f0-9]{64}\?/);
-    assert.equal(getPoster.headers.get('cache-control'), 'private, max-age=60');
-    assert.equal(getPoster.headers.get('vary'), 'Origin, Cookie');
+    assert.equal(getPoster.headers.get('cache-control'), 'public, max-age=300, s-maxage=300');
+    assert.equal(getPoster.headers.get('vary'), 'Origin');
 
     const getBinarySource = await app.request(`/api/templates/${WELCOME_TEMPLATE_ID}/source/assets/horizon.webp`);
     assert.equal(getBinarySource.status, 302);
@@ -1672,8 +1674,8 @@ describe('Catalog Hono Routes (src/routes/catalog.ts)', () => {
       getCasPreview.headers.get('location') ?? '',
       new RegExp(`^https://s3\\.example\\.test/openmotion/catalog/blobs/${String(orbitPreviewRow.sha256)}\\?`),
     );
-    assert.equal(getCasPreview.headers.get('cache-control'), 'private, max-age=60');
-    assert.equal(getCasPreview.headers.get('vary'), 'Origin, Cookie');
+    assert.equal(getCasPreview.headers.get('cache-control'), 'public, max-age=300, s-maxage=300');
+    assert.equal(getCasPreview.headers.get('vary'), 'Origin');
 
     // motion.md?download=1 serves inline text with attachment disposition
     const motionDownload = await app.request('/api/template-source/motion-orbit-launch/motion.md?download=1');
@@ -1685,14 +1687,24 @@ describe('Catalog Hono Routes (src/routes/catalog.ts)', () => {
     const getBeforeGuide = storage.getCalls;
     const guideRes = await app.request('/api/template-source/motion-orbit-launch/preview.html');
     assert.equal(guideRes.status, 200);
+    const guideEtag = guideRes.headers.get('etag') ?? '';
+    assert.match(guideEtag, /^"sha256:[a-f0-9]{64}"$/);
     const guideHtml = await guideRes.text();
     assert.ok(guideHtml.includes('id="openmotion-guide-page"'));
     assert.equal(storage.getCalls, getBeforeGuide + 1);
 
-    // Second request hits HotTextCache (0 extra S3 getObjectBuffer calls)
+    // Second request hits HotTextCache (0 extra S3 getObjectBuffer calls) and supports 304 via If-None-Match
     const guideRes2 = await app.request('/api/template-source/motion-orbit-launch/preview.html');
     assert.equal(guideRes2.status, 200);
     assert.equal(storage.getCalls, getBeforeGuide + 1, 'HotTextCache must serve repeated catalog text reads');
+
+    const guideNotModified = await app.request('/api/template-source/motion-orbit-launch/preview.html', {
+      headers: { 'If-None-Match': guideEtag },
+    });
+    assert.equal(guideNotModified.status, 304);
+    assert.equal(guideNotModified.headers.get('etag'), guideEtag);
+    assert.equal(guideNotModified.headers.get('cache-control'), 'public, max-age=300, s-maxage=300');
+    assert.equal(guideNotModified.headers.get('vary'), 'Origin');
 
     const guideRedirect = await app.request('/api/template-source/motion-orbit-launch/preview.html?redirect=1');
     assert.equal(guideRedirect.status, 302);

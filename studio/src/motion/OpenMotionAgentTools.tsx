@@ -8,17 +8,21 @@ import { registerStudioTools } from '../webmcp/registrar';
 
 const log = makeStudioDebugLogger('webmcp');
 
-export function OpenMotionAgentTools() {
+export function OpenMotionAgentTools({ polyfillOnly = false }: { polyfillOnly?: boolean } = {}) {
   useEffect(() => {
     if (readStudioUiPreferences().agentToolsEnabled === false) return;
+    if (polyfillOnly && getModelContext()) return;
     const controller = new AbortController();
     let idleHandle: number | undefined;
     let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | undefined;
 
     const registerTools = () => {
       if (controller.signal.aborted) return;
+      if (polyfillOnly && getModelContext()) return;
       void (async () => {
-        const context = getModelContext() ?? await loadModelContextPolyfill();
+        const context = polyfillOnly
+          ? await loadModelContextPolyfill()
+          : (getModelContext() ?? await loadModelContextPolyfill());
         if (!context || controller.signal.aborted) return;
         const { buildOpenMotionWebMcpTools } = await import('../../../shared/webmcp-tools');
         if (controller.signal.aborted) return;
@@ -50,6 +54,6 @@ export function OpenMotionAgentTools() {
         globalThis.clearTimeout(timeoutHandle);
       }
     };
-  }, []);
+  }, [polyfillOnly]);
   return null;
 }

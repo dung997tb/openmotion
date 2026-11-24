@@ -21,9 +21,13 @@ export const PREVIEW_PEER_TIMING = `
       for (const [name, from, to] of change.styles) {
         const actual = node.style.getPropertyValue(name) || '';
         const applied = pending?.element === node ? pending.applied?.[name] : undefined;
+        const newer = newerDragStyle(pending, node, name);
         if (!presentationStyles.has(name) || typeof from !== 'string' || typeof to !== 'string' ||
-            Math.max(from.length,to.length) > 256 || (actual !== from && !(local && (actual === to || actual === applied))) ||
+            (newer !== undefined && actual !== newer) ||
+            Math.max(from.length,to.length) > 256 || (actual !== from && !(local && (actual === to || actual === applied || actual === newer))) ||
             (typeof node.style.getPropertyPriority === 'function' && node.style.getPropertyPriority(name))) return false;
+        // This receipt advances storage. A later gesture owns the live CSS value.
+        if (local && actual === newer) continue;
         effects.push(forward => {
           const value = forward ? to : actual;
           if (value) node.style.setProperty(name, value);
@@ -48,7 +52,8 @@ export const PREVIEW_PEER_TIMING = `
     const temporary = m.type === 'peer-presentation' && m.temporary === true;
     const local = !temporary && m.type === 'peer-presentation' && m.localSave === true;
     const pending = local && pendingDrags.get(m.gestureId);
-    const base = pending && pending.selection.sourceFile === m.path ? pending.sha256 : sourceVersions[m.path];
+    const ownDrag = pending && pendingForSource(m.path)[0] === pending;
+    const base = ownDrag ? pending.confirmedVersion || pending.sha256 : sourceVersions[m.path];
     const position = settings.liveEdits?.position === true && m.type === 'peer-presentation' &&
       Array.isArray(m.changes) && m.changes.length <= 32 && isPositionEdit(m.changes);
     const media = settings.liveEdits?.mediaTiming === true && m.type === 'peer-timing' &&
@@ -57,7 +62,7 @@ export const PREVIEW_PEER_TIMING = `
     if (!target || m.documentId !== target || (temporary ? !!timingDocumentId : !position && m.path !== compositionPath) ||
         !before || !after || before !== base ||
         !Number.isFinite(m.expiresAt) || Date.now() >= m.expiresAt ||
-        drag || pendingDrags.size > (pending ? 1 : 0) ||
+        (!ownDrag && (drag || pendingDrags.size)) ||
         (inlineText && !(local && inlineText.id === m.gestureId && inlineText.after !== undefined)) || !p || typeof p.seek !== 'function' ||
         typeof p.getTime !== 'function' || typeof window.__hfForceTimelineRebind !== 'function' ||
         !Array.isArray(m.changes) || !m.changes.length || m.changes.length > 32) return false;
@@ -65,7 +70,7 @@ export const PREVIEW_PEER_TIMING = `
     for (const change of m.changes) {
       if (!change || (!change.hfId && !change.id && !change.compositionId) || !Array.isArray(change.attributes) ||
           (!change.attributes.length && !change.styles && !change.text) || change.attributes.length > timingAttributes.size) return false;
-      if (temporary && (!change.styles || change.text || change.attributes.length)) return false;
+      if ((temporary || ownDrag) && (!change.styles || change.text || change.attributes.length)) return false;
       const selector = change.hfId ? '[data-hf-id="'+CSS.escape(change.hfId)+'"]' :
         change.id ? '#'+CSS.escape(change.id) : '[data-composition-id="'+CSS.escape(change.compositionId)+'"]';
       const matches = Array.from(document.querySelectorAll(selector)).filter(node =>
@@ -102,7 +107,10 @@ export const PREVIEW_PEER_TIMING = `
     try { run(() => update('to')); }
     catch (_) { try { run(() => update('old')); } catch (_) {} return false; }
     // Only a complete rebind advances the revision used for future edits and selections.
-    if (!temporary) sourceVersions[m.path] = after;
+    if (!temporary) {
+      if (ownDrag) pending.verifiedVersion = after;
+      confirmCanvasVersion(m.path, after);
+    }
     return true;
   }
 `;
