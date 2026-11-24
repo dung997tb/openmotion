@@ -418,7 +418,7 @@ it('renders Super Agent empty home, opens Resource Picker, and applies selected 
 
   expect(document.body.textContent).toContain('What can I create for you?');
   expect(container.querySelector('.om-sa-home-hero + .om-sa-starter-grid')).toBeTruthy();
-  expect(container.querySelector('.om-sa-stream > .om-sa-messages + .om-sa-composer-wrap textarea')).toBeTruthy();
+  expect(container.querySelector('.om-sa-stream > .om-sa-messages + .om-sa-composer-wrap .om-sa-composer-editor')).toBeTruthy();
   expect([...container.querySelectorAll('.om-sa-starter-card strong')].map(node => node.textContent)).toEqual([
     'Build a game', 'Design Studio', 'Motion graphics', 'Make a video', 'Create slides', 'Explore more',
   ]);
@@ -762,7 +762,7 @@ it('displays active conversation, tool steps, approvals, and multi-tab Artifact 
   });
   await flush();
 
-  expect(container.querySelector('.om-sa-stream > .om-sa-messages + .om-sa-composer-wrap textarea')).toBeTruthy();
+  expect(container.querySelector('.om-sa-stream > .om-sa-messages + .om-sa-composer-wrap .om-sa-composer-editor')).toBeTruthy();
 
   // Artifact Viewer stays closed by default on initial load / refresh and opens manually
   expect(document.querySelector('.om-sa-viewer')).toBeNull();
@@ -2926,7 +2926,7 @@ it('renders persistent live progress dock, ticking step timers, and Continue rec
   expect(document.querySelector('.om-sa-work-summary-timer')).toBeTruthy();
   expect(document.querySelectorAll('.om-sa-reasoning-row')).toHaveLength(1);
   expect(document.querySelector('.om-sa-reasoning-label')?.textContent).toMatch(/Thinking… · \d+(?:\.\d+)?s/);
-  expect(document.querySelector('.om-sa-work-summary-label')?.textContent).toBe('Running steps (2)');
+  expect(document.querySelector('.om-sa-work-summary-label')?.textContent).toMatch(/Working for \d+/);
 
   // 2. Cancelled mid-run turn renders recovery card with step summary and Continue button
   const cancelledChat: SuperAgentChat = {
@@ -3091,8 +3091,8 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   await flush();
   expect(container.querySelector('.om-sa-composer-chips')?.textContent).toContain('The Little Prince: Star Journey');
 
-  const gameInput = container.querySelector<HTMLTextAreaElement>('textarea')!;
-  expect(gameInput.value).toBe(communityGames.find(game => game.id === 'community-little-prince')!.description);
+  const gameInput = getComposerEditor(container);
+  expect(gameInput.textContent).toBe(communityGames.find(game => game.id === 'community-little-prince')!.description);
 
   // Top fanned Hero carousel rotates smoothly via Next/Previous controls and side-card clicks
   const initialCenterLabel = container.querySelector('.om-sa-game-fan-item[data-slot="0"] .om-sa-game-fan-card')?.getAttribute('aria-label');
@@ -3120,16 +3120,13 @@ it('auto-enters Game mode when opened from Game Studio, plays games in Artifact 
   const racingGame = communityGames.find(game => game.id === 'community-turbo-kart')!;
   const racingCard = container.querySelector<HTMLButtonElement>(`.om-sa-game-tile-cover[aria-label="Remix: ${racingGame.title}"]`)!;
   await act(async () => racingCard.click());
-  expect(gameInput.value).toBe(racingGame.description);
+  expect(gameInput.textContent).toBe(racingGame.description);
   await act(async () => racingCard.click());
-  expect(gameInput.value).toBe('');
+  expect(gameInput.textContent).toBe('');
   await act(async () => racingCard.click());
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(gameInput, 'Make the race three laps.');
-    gameInput.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typeInComposer(gameInput, ' Make the race three laps.');
   await act(async () => racingCard.click());
-  expect(gameInput.value).toBe('Make the race three laps.');
+  expect(gameInput.textContent).toBe(`${racingGame.description} Make the race three laps.`);
 
   const listPlayBtn = container.querySelector('.om-sa-game-tile .om-sa-game-tile-play') as HTMLButtonElement;
   expect(listPlayBtn).toBeTruthy();

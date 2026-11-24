@@ -256,7 +256,7 @@ const gameGuideSections: Readonly<Record<string, string>> = {
 };
 
 function workflowGuideDetail(event: SuperAgentToolEvent, t: Translate): string | undefined {
-  const tool = event.tool.replace(/^mcp_+openmotion_+/, '');
+  const tool = (event.tool ?? '').replace(/^mcp_+openmotion_+/, '');
   if (tool !== 'openmotion_read_workflow' || !event.inputPreview || event.status === 'failed') {
     return event.summary;
   }

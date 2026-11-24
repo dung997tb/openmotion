@@ -2714,7 +2714,7 @@ export function ArtifactBrowserPane({
                     <Tooltip label={t('Capture frame')}>
                       <IconButton
                         variant="ghost"
-                        className="motion-icon-button om-sa-toolbar-secondary-tool"
+                        className="motion-icon-button"
                         aria-label={t('Capture frame')}
                         disabled={capturingMotionFrame}
                         onClick={async () => {

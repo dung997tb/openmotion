@@ -527,7 +527,8 @@ function validationDecision(output: unknown): boolean | undefined {
   return typeof value.passed === 'boolean' ? value.passed : undefined;
 }
 
-export function gameValidationPassed(tool: string, output: unknown): boolean | undefined {
+export function gameValidationPassed(tool: string | undefined, output: unknown): boolean | undefined {
+  if (typeof tool !== 'string' || !tool) return undefined;
   const name = tool.replace(/^mcp_+openmotion_+/, '');
   if (name !== 'openmotion_game_validate' && name !== 'motion_game_validate') return undefined;
   const value = parseValidationOutput(output);

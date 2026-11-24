@@ -97,25 +97,32 @@ export async function compositeDesignAnnotationPng(
     if (!ctx) return baseDataUrl;
     ctx.drawImage(img, 0, 0, w, h);
 
+    const rootStyles = typeof window !== 'undefined' ? window.getComputedStyle(document.documentElement) : null;
+    const accentColor = rootStyles?.getPropertyValue('--motion-accent').trim() || 'CanvasText';
+    const dangerColor = rootStyles?.getPropertyValue('--motion-danger').trim() || 'CanvasText';
+
     const sx = w / Math.max(1, viewport.width);
     const sy = h / Math.max(1, viewport.height);
     const highlightRect = draft.region ?? draft.element?.box;
     if (highlightRect) {
       ctx.save();
-      ctx.strokeStyle = '#3b82f6';
+      ctx.strokeStyle = accentColor;
       ctx.lineWidth = Math.max(2, Math.round(2 * sx));
-      ctx.fillStyle = 'rgba(59, 130, 246, 0.14)';
+      ctx.fillStyle = accentColor;
       const rx = highlightRect.x * sx;
       const ry = highlightRect.y * sy;
       const rw = highlightRect.width * sx;
       const rh = highlightRect.height * sy;
+      ctx.save();
+      ctx.globalAlpha = 0.14;
       ctx.fillRect(rx, ry, rw, rh);
+      ctx.restore();
       ctx.strokeRect(rx, ry, rw, rh);
       ctx.restore();
     }
     if (draft.annotation?.marks.length) {
       ctx.save();
-      ctx.strokeStyle = '#ef4444';
+      ctx.strokeStyle = dangerColor;
       ctx.lineWidth = Math.max(3, Math.round(3 * sx));
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
