@@ -190,12 +190,18 @@ it('switches client-specific setup, copies example prompts and performs no mutat
   await act(async () => button('Copy example prompt').click());
   const example = copy.mock.calls[0][0];
   expect(example).toMatch(/^@OpenDesign Adapt template "Glean Agents Launch"/);
-  await act(async () => button('Copy setup and prompt').click());
+  expect(example).toContain('[OpenMotion template: motion-f6f244d1-c549-4081-8a5d-f0e1e3660044]');
+  expect(example).not.toContain('openmotion#quick-start');
+  for (const actions of document.querySelectorAll('.om-mcp-demo-actions')) {
+    expect(actions.querySelectorAll('button')).toHaveLength(1);
+  }
+  await act(async () => button('Copy setup instructions for Claude Code').click());
   expect(copy.mock.calls[1][0]).toContain('Claude Code');
   expect(copy.mock.calls[1][0]).toContain('https://github.com/nexu-io/openmotion#quick-start');
   expect(copy.mock.calls[1][0]).not.toContain('127.0.0.1');
-  expect(copy.mock.calls[1][0]).toContain(example);
-  expect(document.querySelector('.motion-feedback-layer [role=status]')?.textContent).toContain('Copied to clipboard');
+  expect(copy.mock.calls[1][0]).not.toContain(example);
+  const feedback = [...document.querySelectorAll('.motion-feedback-layer [role=status]')].map(status => status.textContent);
+  expect(feedback).toContain('Copied. Paste into Claude Code to finish setup.');
   expect(document.querySelector('.om-mcp-content [role=status]')).toBeNull();
   await act(async () => button('All 30+ templates').click()); expect(openLibrary).toHaveBeenCalledOnce();
   expect([...document.querySelectorAll('.om-mcp-entitlement-strip button')].map(node => node.textContent)).toEqual(['Claim now']);
@@ -214,7 +220,6 @@ it('explains unavailable remote connections for existing ChatGPT links', async (
   try { await mount(); } finally { history.replaceState(null, '', previousUrl); }
   expect(document.body.textContent).toContain('Remote connection unavailable');
   expect(button('Copy example prompt').disabled).toBe(false);
-  expect(document.querySelector('.om-mcp-demo-try')).toBeNull();
   expect(document.querySelector('a[download]')).toBeNull();
 
 });
@@ -424,6 +429,26 @@ it('plays the workflow clips through, then resumes rotation after manual selecti
   } finally {
     vi.useRealTimers();
   }
+});
+
+it.each([
+  ['.om-mcp-stage-col', '.om-mcp-stage-prompt-copy'],
+  ['#band-ecom', '.om-mcp-carousel-primary'],
+])('offers the complete failed clipboard payload below %s and clears it on retry', async (section, selector) => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(info)));
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  copy.mockRejectedValueOnce(new Error('Clipboard unavailable'));
+  await mount();
+  const scope = document.querySelector(section)!;
+  const trigger = scope.querySelector<HTMLButtonElement>(selector)!;
+  await act(async () => trigger.click());
+  const fallback = scope.querySelector('textarea');
+  expect(fallback?.readOnly).toBe(true);
+  expect(fallback?.value).toBe(copy.mock.calls[0][0]);
+  expect(fallback?.value).toMatch(/\[OpenMotion template: motion-[\w-]+\]/);
+  await act(async () => trigger.click());
+  expect(copy.mock.calls[1][0]).toBe(copy.mock.calls[0][0]);
+  expect(scope.querySelector('textarea')).toBeNull();
 });
 
 it('renders the 4-step hero stage, 3 feature carousels, standalone 6-item FAQ and collapsed developer drawer', async () => {

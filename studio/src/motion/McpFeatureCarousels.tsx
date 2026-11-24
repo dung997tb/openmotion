@@ -1,8 +1,9 @@
 import { Button } from 'open-design-ui/button';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Tab, TabPanel, Tabs, TabsList } from '../components/ui/Tabs';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
+import { McpCopyFallback } from './McpCopyFallback';
 import { formatMcpAgentPrompt, localizedMcpExample, mcpShowcaseModules, type McpShowcaseModule, type McpShowcaseSlide } from './mcpShowcaseData';
 
 function FeatureModuleCarousel({
@@ -22,7 +23,9 @@ function FeatureModuleCarousel({
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [manualCopy, setManualCopy] = useState<string | null>(null);
   const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
+  const latestCopy = useRef(0);
   const slides = module.slides;
   const total = slides.length;
   const current: McpShowcaseSlide = slides[index];
@@ -52,11 +55,21 @@ function FeatureModuleCarousel({
     return () => window.clearTimeout(timer);
   }, [copiedId]);
 
-  const step = (delta: number) => setIndex(prev => (prev + delta + total) % total);
+  function selectSlide(next: number | ((previous: number) => number)) {
+    latestCopy.current += 1;
+    setManualCopy(null);
+    setIndex(next);
+  }
+
+  const step = (delta: number) => selectSlide(prev => (prev + delta + total) % total);
 
   async function handleCopy() {
-    const full = formatMcpAgentPrompt(currentText.prompt, current.target);
-    if (await onCopy(current.id, full)) setCopiedId(current.id);
+    const attempt = ++latestCopy.current;
+    const instruction = formatMcpAgentPrompt(currentText.prompt, current.target);
+    const ok = await onCopy(current.id, instruction);
+    if (attempt !== latestCopy.current) return;
+    setCopiedId(ok ? current.id : null);
+    setManualCopy(ok ? null : instruction);
   }
 
   return (
@@ -64,7 +77,7 @@ function FeatureModuleCarousel({
       value={current.id}
       onValueChange={value => {
         const next = slides.findIndex(slide => slide.id === value);
-        if (next >= 0) setIndex(next);
+        if (next >= 0) selectSlide(next);
       }}
       className="om-mcp-carousel-module"
       id={module.id}
@@ -175,6 +188,7 @@ function FeatureModuleCarousel({
           <img key={nextSlide.id} src={nextSlide.image} alt="" decoding="async" />
         </Button>
       </TabPanel>
+      {manualCopy && <div className="om-mcp-carousel-copy-fallback"><McpCopyFallback instruction={manualCopy} /></div>}
     </Tabs>
   );
 }

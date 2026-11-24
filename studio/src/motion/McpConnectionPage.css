@@ -99,6 +99,7 @@
 .om-mcp-stage-prompt-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px 10px 16px; }
 .om-mcp-stage-prompt-text { min-width: 0; flex: 1; }
 .om-mcp-stage-prompt-copy { flex: none; }
+.om-mcp-carousel-copy-fallback { width: min(680px, calc(100% - 44px)); margin-block-start: var(--motion-space-12); }
 
 /* 3 Higgsfield-style centered cinematic feature carousels */
 .om-mcp-carousel-modules { display: flex; flex-direction: column; gap: 100px; }
@@ -155,7 +156,6 @@
 .om-mcp-template-caption h3 { margin: 0; overflow-wrap: anywhere; }
 .om-mcp-template-caption p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; flex: 1; }
 .om-mcp-demo-actions { margin-top: var(--motion-space-8); padding-top: var(--motion-space-12); display: flex; align-items: center; flex-wrap: wrap; gap: var(--motion-space-8); }
-.om-mcp-demo-actions .om-mcp-demo-copy { flex: 1; }
 .om-mcp-gallery-more { display: flex; justify-content: center; margin-top: 44px; }
 .om-mcp-demo-library { display: inline-flex; align-items: center; gap: var(--motion-space-8); max-inline-size: 100%; white-space: nowrap; }
 .om-mcp-demo-library span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }

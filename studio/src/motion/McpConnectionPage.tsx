@@ -506,15 +506,11 @@ export function McpConnectionPage({
         <McpTemplateShowcase
           enabled={previewsEnabled}
           initialCategory={galleryPosition?.category ?? 'all'}
-          canCopySetup={supported && !desktop}
           openLibrary={openLibrary('mcp_templates')}
           onOpenTarget={openCaseTarget}
           onCategory={value => click('mcp_templates', 'category_select', { option: value })}
           onPreview={id => click('mcp_templates', 'open_detail', { capability: id })}
-          onCopy={async (id, examplePrompt, includeSetup) => {
-            const instruction = includeSetup ? `${prompt}\n\n${examplePrompt}` : examplePrompt;
-            if (!await copy(instruction, { kind: 'capability_example', capability: id, includesSetup: includeSetup })) return instruction;
-          }}
+          onCopy={(id, instruction) => copy(instruction, { kind: 'capability_example', capability: id, includesSetup: false })}
         />
 
         {/* 3 Advantage Pillar Cards */}

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { Tabs, TabsList, Tab, TabPanel } from '../components/ui/Tabs';
 import { RemixIcon } from '../icons/RemixIcons';
+import { McpCopyFallback } from './McpCopyFallback';
 import { mcpGalleryCards, mcpGalleryCategories, recordMcpGalleryPosition, type McpGalleryCard, type McpGalleryCategory } from './mcpGallery';
 import { formatMcpAgentPrompt, localizedMcpExample, type McpCaseTarget } from './mcpShowcaseData';
 
@@ -21,11 +22,10 @@ function cardTarget(card: McpGalleryCard, title: string): McpCaseTarget | null {
   return null;
 }
 
-export function McpTemplateShowcase({ enabled, initialCategory, canCopySetup, onCopy, openLibrary, onOpenTarget, onCategory, onPreview }: {
+export function McpTemplateShowcase({ enabled, initialCategory, onCopy, openLibrary, onOpenTarget, onCategory, onPreview }: {
   enabled: boolean;
   initialCategory: McpGalleryCategory;
-  canCopySetup: boolean;
-  onCopy: (id: string, prompt: string, includeSetup: boolean) => Promise<string | undefined>;
+  onCopy: (id: string, prompt: string) => Promise<boolean>;
   openLibrary: (trigger: HTMLElement) => void;
   onOpenTarget: (target: Exclude<McpCaseTarget, { kind: 'template' }>) => void;
   onCategory: (category: McpGalleryCategory) => void;
@@ -36,7 +36,7 @@ export function McpTemplateShowcase({ enabled, initialCategory, canCopySetup, on
   const [preview, setPreview] = useState<McpGalleryCard | null>(null);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
-  const [copied, setCopied] = useState<{ cardId: string; includeSetup: boolean } | null>(null);
+  const [copiedCardId, setCopiedCardId] = useState<string | null>(null);
   const [manualCopy, setManualCopy] = useState<{ id: string; instruction: string } | null>(null);
   const previewTrigger = useRef<HTMLButtonElement>(null);
   const latestCopy = useRef(0);
@@ -51,29 +51,29 @@ export function McpTemplateShowcase({ enabled, initialCategory, canCopySetup, on
   };
 
   useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(null), 1600);
+    if (!copiedCardId) return;
+    const timer = setTimeout(() => setCopiedCardId(null), 1600);
     return () => clearTimeout(timer);
-  }, [copied]);
+  }, [copiedCardId]);
 
   useEffect(() => {
     if (!enabled) setPreview(null);
   }, [enabled]);
 
-  async function copyPrompt(card: McpGalleryCard, includeSetup = false) {
+  async function copyPrompt(card: McpGalleryCard) {
     const attempt = ++latestCopy.current;
-    setCopied(null);
+    setCopiedCardId(null);
     setManualCopy(null);
     const target = cardTarget(card, content(card).title);
-    const failedInstruction = await onCopy(card.id, formatMcpAgentPrompt(content(card).prompt, target), includeSetup);
+    const instruction = formatMcpAgentPrompt(content(card).prompt, target);
+    const copied = await onCopy(card.id, instruction);
     if (attempt !== latestCopy.current) return;
-    if (failedInstruction) setManualCopy({ id: card.id, instruction: failedInstruction });
-    else setCopied({ cardId: card.id, includeSetup });
+    if (copied) setCopiedCardId(card.id);
+    else setManualCopy({ id: card.id, instruction });
   }
 
   const copyFallback = (card: McpGalleryCard) => manualCopy?.id === card.id &&
-    <textarea className="om-field w-full" aria-label={t('Creation instruction')} readOnly rows={5}
-      value={manualCopy.instruction} onFocus={event => event.currentTarget.select()} />;
+    <McpCopyFallback instruction={manualCopy.instruction} />;
 
   return <section className="om-mcp-section om-mcp-demo-gallery" aria-labelledby="mcp-templates" id="gallery">
     <h2 id="mcp-templates">{t('Explore more scene templates')}</h2>
@@ -91,8 +91,7 @@ export function McpTemplateShowcase({ enabled, initialCategory, canCopySetup, on
       <TabPanel value={category}>
         <div className="om-mcp-template-grid">
           {visible.map(card => {
-            const copiedPrompt = copied?.cardId === card.id && !copied.includeSetup;
-            const copiedSetup = copied?.cardId === card.id && copied.includeSetup;
+            const copiedPrompt = copiedCardId === card.id;
             const playHoverVideo = enabled && !reducedMotion && hoveredCard === card.id && Boolean(card.video) && !videoErrors[card.id];
             return <article
               key={card.id}
@@ -132,11 +131,6 @@ export function McpTemplateShowcase({ enabled, initialCategory, canCopySetup, on
                   <Button variant="plain" className="om-mcp-demo-copy" data-copied={copiedPrompt || undefined} onClick={() => void copyPrompt(card)}>
                     {t(copiedPrompt ? 'Copied' : 'Copy example prompt')}
                   </Button>
-                  {canCopySetup && (
-                    <Button variant="plain" className="om-mcp-demo-try" data-copied={copiedSetup || undefined} onClick={() => void copyPrompt(card, true)}>
-                      {t(copiedSetup ? 'Copied' : 'Copy setup and prompt')}
-                    </Button>
-                  )}
                 </div>
                 {!preview && copyFallback(card)}
               </div>
@@ -209,8 +203,8 @@ export function McpTemplateShowcase({ enabled, initialCategory, canCopySetup, on
                   </Button>
                 ) : null;
               })()}
-              <Button variant="plain" className="om-mcp-demo-copy om-mcp-demo-confirm" data-copied={copied?.cardId === preview.id && !copied.includeSetup || undefined} onClick={() => void copyPrompt(preview)}>
-                {t(copied?.cardId === preview.id && !copied.includeSetup ? 'Copied' : 'Copy Prompt')}
+              <Button variant="plain" className="om-mcp-demo-copy om-mcp-demo-confirm" data-copied={copiedCardId === preview.id || undefined} onClick={() => void copyPrompt(preview)}>
+                {t(copiedCardId === preview.id ? 'Copied' : 'Copy Prompt')}
               </Button>
             </footer>
           </>}

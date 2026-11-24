@@ -272,12 +272,10 @@
 .om-mcp-template-caption h3 { color: var(--motion-strong); font-size: 15.5px; font-weight: var(--motion-weight-semibold); line-height: 1.35; }
 .om-mcp-template-caption p { color: var(--motion-mcp-gallery-muted); font-size: var(--motion-text-md); line-height: var(--motion-leading-body); }
 .om-mcp-demo-actions { border-top: 1px solid var(--motion-mcp-gallery-border); }
-[data-motion-studio] :is(.om-mcp-demo-copy, .om-mcp-demo-try, .om-mcp-demo-library) { height: 34px; padding-inline: 13px; border-radius: var(--motion-radius-full); font-size: 12.5px; }
+[data-motion-studio] :is(.om-mcp-demo-copy, .om-mcp-demo-library) { height: 34px; padding-inline: 13px; border-radius: var(--motion-radius-full); font-size: 12.5px; }
 [data-motion-studio] .om-mcp-demo-copy { border: 1px solid var(--motion-mcp-gallery-border-strong); background: color-mix(in srgb, var(--motion-strong) 4%, transparent); color: var(--motion-strong); }
 [data-motion-studio] .om-mcp-demo-copy:hover { background: color-mix(in srgb, var(--motion-strong) 11%, transparent); }
 [data-motion-studio] .om-mcp-demo-copy[data-copied] { border-color: var(--motion-accent); background: var(--motion-accent); color: var(--motion-on-action); }
-[data-motion-studio] .om-mcp-demo-try { background: color-mix(in srgb, var(--motion-brand) 12%, transparent); color: var(--motion-mcp-gallery-try); font-weight: var(--motion-weight-semibold); }
-[data-motion-studio] .om-mcp-demo-try:not(:disabled):hover { background: color-mix(in srgb, var(--motion-brand) 22%, transparent); }
 [data-motion-studio] .om-mcp-demo-library { height: 44px; padding-inline: var(--motion-space-24); border: 1px solid var(--motion-mcp-gallery-border-strong); background: var(--motion-mcp-gallery-panel); color: var(--motion-strong); font-size: var(--motion-text-body); }
 [data-motion-studio] .om-mcp-demo-library:hover { background: var(--motion-raised); }
 [data-motion-studio] .om-mcp-demo-dialog { padding: var(--motion-space-24); background: var(--motion-mcp-gallery-panel); border-color: var(--motion-mcp-gallery-border-strong); border-radius: var(--motion-radius-xl); }

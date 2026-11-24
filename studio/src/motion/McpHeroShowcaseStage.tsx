@@ -1,9 +1,10 @@
 import { Button } from 'open-design-ui/button';
 import { IconButton } from 'open-design-ui/icon-button';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Tooltip } from '../components/ui/Tooltip';
 import { useI18n } from '../i18n/I18n';
 import { RemixIcon } from '../icons/RemixIcons';
+import { McpCopyFallback } from './McpCopyFallback';
 import { formatMcpAgentPrompt, localizedMcpExample, mcpHeroBeats } from './mcpShowcaseData';
 
 function nextBeat(index: number) {
@@ -21,7 +22,9 @@ export function McpHeroShowcaseStage({
   const [activeBeat, setActiveBeat] = useState(0);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [manualCopy, setManualCopy] = useState<string | null>(null);
   const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
+  const latestCopy = useRef(0);
 
   const current = mcpHeroBeats[activeBeat];
   const currentText = localizedMcpExample(current.content, locale, t);
@@ -42,9 +45,20 @@ export function McpHeroShowcaseStage({
     return () => window.clearTimeout(timer);
   }, [copied]);
 
+  function selectBeat(index: number) {
+    latestCopy.current += 1;
+    setManualCopy(null);
+    setCopied(false);
+    setActiveBeat(index);
+  }
+
   async function handleCopy() {
-    const ok = await onCopyPrompt(formatMcpAgentPrompt(currentText.prompt, current.target));
-    if (ok) setCopied(true);
+    const attempt = ++latestCopy.current;
+    const instruction = formatMcpAgentPrompt(currentText.prompt, current.target);
+    const ok = await onCopyPrompt(instruction);
+    if (attempt !== latestCopy.current) return;
+    setCopied(ok);
+    setManualCopy(ok ? null : instruction);
   }
 
   return (
@@ -61,7 +75,7 @@ export function McpHeroShowcaseStage({
                 className="om-mcp-stage-step"
                 data-active={isActive || undefined}
                 aria-pressed={isActive}
-                onClick={() => setActiveBeat(index)}
+                onClick={() => selectBeat(index)}
               >
                 <span className="om-mcp-stage-step-head">
                   <span className="om-mcp-stage-step-num">{beat.num}</span>
@@ -118,7 +132,7 @@ export function McpHeroShowcaseStage({
                   className="om-mcp-beat-dot"
                   data-active={index === activeBeat || undefined}
                   aria-label={t('Showcase step {index}', { index: index + 1 })}
-                  onClick={() => setActiveBeat(index)}
+                  onClick={() => selectBeat(index)}
                 />
               ))}
             </div>
@@ -139,6 +153,7 @@ export function McpHeroShowcaseStage({
               />
             </Tooltip>
           </div>
+          {manualCopy && <McpCopyFallback instruction={manualCopy} />}
         </div>
       </div>
     </section>
