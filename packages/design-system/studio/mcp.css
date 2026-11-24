@@ -392,6 +392,12 @@
   }
   [data-motion-studio] .om-mcp-btn-primary { transition: background-color var(--motion-duration-fast) var(--motion-ease-out); }
   .om-mcp-pillar h3 { transition: color var(--motion-duration-normal) var(--motion-ease-out); }
+  [data-motion-studio] .om-mcp-stage-steps:not(:has(.om-mcp-stage-step:focus-visible)) .om-mcp-stage-step {
+    transition: background-color var(--motion-duration-normal) var(--motion-ease-out);
+  }
+  .om-mcp-stage-steps:not(:has(.om-mcp-stage-step:focus-visible)) :is(.om-mcp-stage-step-head, .om-mcp-stage-step-num, .om-mcp-stage-step-desc) {
+    transition: color var(--motion-duration-fast) var(--motion-ease-out);
+  }
   .om-mcp-stage-slide { transition: opacity .7s ease; }
   .om-mcp-stage-slide img { transition: transform 4.5s ease-out; }
   .om-mcp-beat-dot { transition: background .2s, width .2s; }
