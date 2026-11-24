@@ -9,7 +9,8 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { languages, useI18n, type Locale } from '../i18n/I18n';
 import { setStudioTheme, useStudioThemePreference } from '../utils/studioTheme';
 import { useWorkspaceChrome } from './WorkspaceFrame';
-import { buildLoginUrl, useAccountSummary } from './AccountSettings';
+import { useAccountSummary } from './AccountSettings';
+import { openEntitlementModal } from './entitlementModalBus';
 import { CommunityLink } from './CommunityLink';
 import { clickMethod, clickOption, trackStudioClick } from './editorTracking';
 import { GitHubLink } from './GitHubLink';
@@ -204,7 +205,7 @@ export function ApplicationAccountMenu({ settings, openSettings }: { settings: S
               <span className="om-menu-label"><RemixIcon name="login-box-line" mirrored size={16} />{t('Sign out')}</span>
             </MenuItem>
           ) : (
-            <MenuItem onClick={() => window.location.assign(buildLoginUrl())}>
+            <MenuItem onClick={() => openEntitlementModal({ mode: 'guest', hookId: 'header_signin' })}>
               <span className="om-menu-label"><RemixIcon name="login-box-line" size={16} />{t('Sign in with OpenDesign')}</span>
             </MenuItem>
           )}

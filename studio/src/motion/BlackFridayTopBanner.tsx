@@ -4,6 +4,7 @@ import { useI18n } from '../i18n/I18n';
 import flameArtUrl from './bf-dusk-flame.jpg';
 import styles from './BlackFridayTopBanner.module.css';
 import { BLACK_FRIDAY_CAMPAIGN, BLACK_FRIDAY_ENDS_AT, blackFridayActive, campaignPricingUrl, newCampaignEntryId } from './campaignAttribution';
+import { markExternalCheckoutPending } from './entitlementModalBus';
 import type { CreativePage } from './exploreTracking';
 import { trackMotion } from './tracking';
 
@@ -42,7 +43,7 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
   useEffect(() => {
     if (impressionReported) return;
     impressionReported = true;
-    void trackMotion('surface_view', { page_name: trackingPage, area: 'campaign_banner', element: 'banner', campaign_id: BLACK_FRIDAY_CAMPAIGN });
+    void trackMotion('surface_view', { page_name: trackingPage, area: 'campaign_banner', element: 'banner', campaign_id: BLACK_FRIDAY_CAMPAIGN, hook_id: 'bf_banner' });
   }, [trackingPage]);
 
   useEffect(() => {
@@ -81,7 +82,8 @@ export function BlackFridayTopBanner({ onClose, onExpire, trackingPage }: { onCl
   const pricingHref = campaignPricingUrl(locale, 'openmotion_bf_banner', entryId);
   const method = (event: MouseEvent) => event.detail === 0 ? 'keyboard' as const : 'pointer' as const;
   function claimOffer(event: MouseEvent<HTMLAnchorElement>) {
-    void trackMotion('ui_click', { page_name: trackingPage, area: 'campaign_banner', element: 'claim_offer', campaign_id: BLACK_FRIDAY_CAMPAIGN, entry_id: entryId, interaction_method: method(event) });
+    markExternalCheckoutPending('bf_banner', entryId);
+    void trackMotion('ui_click', { page_name: trackingPage, area: 'campaign_banner', element: 'claim_offer', campaign_id: BLACK_FRIDAY_CAMPAIGN, entry_id: entryId, hook_id: 'bf_banner', interaction_method: method(event) });
     // Stamp the click time on the address the browser is about to open, then replace the id for the next click.
     event.currentTarget.href = campaignPricingUrl(locale, 'openmotion_bf_banner', entryId);
     window.setTimeout(() => setEntryId(newCampaignEntryId()), 0);

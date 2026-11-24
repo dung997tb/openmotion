@@ -167,22 +167,37 @@ function normalizeAccountSummary(raw: CloudSummaryApiResponse): CloudAccountSumm
   };
 }
 
-export function buildLoginUrl(returnTo?: string): string {
+export function buildLoginUrl(returnTo?: string, attribution?: { hookId?: string; entryId?: string }): string {
   const target = returnTo ?? (typeof window !== 'undefined'
     ? `${window.location.pathname}${window.location.search}${window.location.hash}`
     : '/');
-  return `/auth/login?returnTo=${encodeURIComponent(target || '/')}`;
+  const params = new URLSearchParams({ returnTo: target || '/' });
+  if (attribution?.hookId) params.set('hook_id', attribution.hookId);
+  if (attribution?.entryId) params.set('entry_id', attribution.entryId);
+  return `/auth/login?${params.toString()}`;
 }
 
-export function useAccountSummary() {
-  const [account, updateAccount] = useState<CloudAccountSummary | null>(null);
+export function upgradePlan(account: CloudAccountSummary | null | undefined): 'free' | 'go' | undefined {
+  const plan = account?.state === 'signed-in' && !account.billingUnavailable ? account.plan?.trim().toLowerCase() : undefined;
+  return plan === 'free' || plan === 'go' ? plan : undefined;
+}
+
+let cachedAccountSummary: CloudAccountSummary | null = null;
+
+export function useAccountSummary(options?: { eager?: boolean }) {
+  const eager = options?.eager ?? true;
+  const [account, updateAccountState] = useState<CloudAccountSummary | null>(() => cachedAccountSummary);
+  const updateAccount = useCallback((value: CloudAccountSummary) => {
+    cachedAccountSummary = value;
+    updateAccountState(value);
+  }, []);
   const [error, setError] = useState(false);
   const request = useRef(0);
   const setAccount = useCallback((value: CloudAccountSummary) => {
     request.current++;
     updateAccount(value);
     setError(false);
-  }, []);
+  }, [updateAccount]);
   const refresh = useCallback(async (billing = false) => {
     const current = ++request.current;
     try {
@@ -201,16 +216,16 @@ export function useAccountSummary() {
       }
       setError(true);
     }
-  }, []);
+  }, [updateAccount]);
   useEffect(() => {
-    void refresh();
+    if (eager) void refresh();
     const update = () => void refresh();
     window.addEventListener('motion:account-changed', update);
     return () => {
       request.current++;
       window.removeEventListener('motion:account-changed', update);
     };
-  }, [refresh]);
+  }, [eager, refresh]);
   return { account, error, refresh, setAccount };
 }
 function formatDate(iso: string | null | undefined): string {

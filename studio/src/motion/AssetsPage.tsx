@@ -37,10 +37,16 @@ import { isSupportedReferenceMime, OPEN_DESIGN_MAX_REFERENCE_BYTES, prepareRefer
 import { imageModelLabel, isOpenDesignProvider } from './imageMenuModels';
 import { AssetGalleryToolbar } from './AssetGalleryToolbar';
 import { useCloudFeatureEnabled } from '../utils/cloudFeatures';
+import { useAccountSummary } from './AccountSettings';
+import { isCloudWebMode, openEntitlementModal } from './entitlementModalBus';
+import { AssetsGuestEmptyState } from './EntitlementTouchpointCards';
 import './assets.css';
 
 export function AssetsPage({ active, hasProject = false, studio, routeId, routeVersion, onAssetRoute }: { routeId?: string | null; routeVersion?: string | null; onAssetRoute?: (id: string | null, version: string | null) => void; active: boolean; hasProject?: boolean; studio?: StudioCreation }) {
   const { t } = useI18n(), toast = useToast();
+  const { account } = useAccountSummary({ eager: false });
+  const isCloudGuest = isCloudWebMode() && account?.state !== 'signed-in';
+  const cloudGuestAssets = !studio && isCloudGuest;
   const [kind, setKind] = useState<AssetKind>(studio?.destination.scene.modality ?? 'all'), [revision, setRevision] = useState(0), [creating, setCreating] = useState(Boolean(studio) && !studio?.openCreate), [picking, setPicking] = useState(false), [pickerMulti, setPickerMulti] = useState(false), [uploading, setUploading] = useState(false), [selected, setSelected] = useState<LibraryAsset>(), [versionId, setVersionId] = useState(''), [jobs, setJobs] = useState<GenerationJob[]>([]), [sessionJobIds, setSessionJobIds] = useState<string[]>([]), [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => new Set());
   const [draft, setDraft] = useState<AssetDraft>(() => studio?.initialDraft ?? { modality: studio?.destination.scene.modality ?? 'image', prompt: '', references: [] });
   const [draftKeyState, setDraftKeyState] = useState(studio?.draftKey);
@@ -535,7 +541,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
   const taskMenu = <AssetTaskMenu {...history} disabled={selectingTask} />;
   const composer = <AssetComposer studio={studioForm} key={taskEpoch} active={active} draft={draft} setDraft={setDraft} promptAppliedToken={promptAppliedToken} jobs={jobs} showCurrentJob={mediaGenerations ? false : !showLibraryPlaceholders} taskId={taskId} history={history} selectingTask={selectingTask}
     onNew={() => startDraft({ modality: draft.modality, prompt: '', references: [] })}
-    onCancel={cancelJob} onRetrySave={retrySave} onResume={resumeJob} onView={viewJob} uploadingReferences={uploadingReferences} onUploadReference={studioForm ? () => referenceUpload.current?.click() : undefined} onUploadFiles={studioForm ? (files, source) => { void uploadReferenceFiles(files, source === 'paste' ? 'other' : 'library_drop'); } : undefined} onReference={openReferencePicker} onCreated={job => {
+    onCancel={cancelJob} onRetrySave={retrySave} onResume={resumeJob} onView={viewJob} uploadingReferences={uploadingReferences} onUploadReference={studioForm ? () => { if (isCloudGuest) { openEntitlementModal({ mode: 'guest', hookId: 'studio_generate' }); return; } referenceUpload.current?.click(); } : undefined} onUploadFiles={studioForm ? (files, source) => { if (isCloudGuest) { openEntitlementModal({ mode: 'guest', hookId: 'studio_generate' }); return; } void uploadReferenceFiles(files, source === 'paste' ? 'other' : 'library_drop'); } : undefined} onReference={() => { if (isCloudGuest) { openEntitlementModal({ mode: 'guest', hookId: 'studio_generate' }); return; } openReferencePicker(); }} onCreated={job => {
       knownJobs.current = mergeAssetJobs(knownJobs.current, [job]); setJobs(knownJobs.current); setTaskId(job.id);
       setSessionJobIds(prev => prev.includes(job.id) ? prev : [...prev, job.id]);
       setDismissedJobIds(prev => { if (!prev.has(job.id)) return prev; const next = new Set(prev); next.delete(job.id); return next; });
@@ -632,7 +638,7 @@ export function AssetsPage({ active, hasProject = false, studio, routeId, routeV
         <Button variant="plain" className="om-nav-item" aria-pressed={!guide} onClick={() => setStudioTab('library')}>{t('Generations')}{activePlaceholderCount > 0 && <span className="om-badge om-tab-count" role="status">{activePlaceholderCount}</span>}</Button>
       </div> : <h2 className="om-subtitle">{t('Generations')}</h2>}{!mediaGenerations && <div className="om-asset-actions">{taskMenu}</div>}</header> : <header className="om-assets-heading"><div><h1 className="om-title">{t(kind === 'trash' ? 'Trash' : 'Workspace assets')}</h1><p className="om-muted">{t('One library for every creation.')}</p></div><div className="om-asset-actions">{taskMenu}<Button variant="ghost" className="om-button h-auto" disabled={uploading} onClick={() => { tracking.reportAssetsClick('assets_library', 'upload'); upload.current?.click(); }}><RemixIcon name="upload-2-line" size={16} />{t(uploading ? 'Uploading…' : 'Upload')}</Button><Button variant="ghost" className="om-button h-auto" data-primary onClick={create}><RemixIcon name="add-line" size={16} />{t('AI Create')}</Button></div></header>}
 
-      {guide && studio ? <StudioIdeas destination={studio.destination} active={active} currentPrompt={draft.prompt} onPrompt={applyPrompt} /> : studio && (studio.destination.scene.modality === 'image' || studio.destination.scene.modality === 'video') ? (
+      {cloudGuestAssets ? <AssetsGuestEmptyState /> : guide && studio ? <StudioIdeas destination={studio.destination} active={active} currentPrompt={draft.prompt} onPrompt={applyPrompt} /> : studio && isCloudGuest ? <AssetsGuestEmptyState /> : studio && (studio.destination.scene.modality === 'image' || studio.destination.scene.modality === 'video') ? (
         <MediaGenerationHistory
           modality={studio.destination.scene.modality}
           browser={browser}

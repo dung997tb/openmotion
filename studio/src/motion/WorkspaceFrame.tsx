@@ -45,6 +45,7 @@ import type { ScenarioId } from '../../../shared/scenarios';
 import { isWorkspacePageOpen, resolveNavTrackingPage, resolveRouteArrival } from '../router/routeRegistry';
 import { RouteViewport } from '../router/RouteViewport';
 import { OverlayLayer } from '../router/OverlayLayer';
+import { EntitlementModalHost } from './EntitlementModalHost';
 import { StudioRouterProvider } from '../router/createAppRouter';
 import { useWorkspaceBlocker } from '../router/useWorkspaceBlocker';
 import { isCloudFeatureEnabled, useCloudFeatureEnabled } from '../utils/cloudFeatures';
@@ -578,6 +579,7 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     </div>
     </Dialog.Root>
     <OverlayLayer {...overlaySharedProps} placement="portal" />
+    <EntitlementModalHost />
   </WorkspaceChromeContext.Provider>;
 }
 

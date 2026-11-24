@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { isCloudError } from '../contracts/errors.ts';
+import { sanitizeEntryId, sanitizeHookId, type CloudTrackingHandle } from '../cloud-tracking.ts';
 import { isUuid } from '../../shared/project-validation.ts';
 import { createAuthMiddleware, getAuthContext, type AuthEnv, type AuthMiddlewareDeps } from './middleware.ts';
 import {
@@ -50,6 +51,23 @@ function parseBasicClientAuth(header: string | undefined): { clientId: string; c
 
 export interface AuthRoutesDeps extends AuthMiddlewareDeps {
   oauth21?: OAuth21Config;
+  cloudTracking?: CloudTrackingHandle;
+}
+
+const AUTH_ATTR_COOKIE_NAME = 'om_auth_attr';
+
+function parseAuthAttributionCookie(raw: string | undefined): { hookId?: string; entryId?: string; startedAt?: number } {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw)) as { hookId?: unknown; entryId?: unknown; startedAt?: unknown };
+    return {
+      hookId: typeof parsed.hookId === 'string' ? sanitizeHookId(parsed.hookId) : undefined,
+      entryId: typeof parsed.entryId === 'string' ? sanitizeEntryId(parsed.entryId) : undefined,
+      startedAt: typeof parsed.startedAt === 'number' && Number.isFinite(parsed.startedAt) ? parsed.startedAt : undefined,
+    };
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -99,6 +117,8 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
 
   app.get('/auth/login', async (c) => {
     const returnTo = assertSafeReturnTo(c.req.query('returnTo'));
+    const hookId = sanitizeHookId(c.req.query('hook_id'));
+    const entryId = sanitizeEntryId(c.req.query('entry_id'));
     const switchAccount = c.req.query('switch') === '1';
     const prompt = c.req.query('prompt') ?? (switchAccount ? 'login' : null);
 
@@ -131,6 +151,22 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
         maxAgeSec: 600,
       }),
     );
+    if (hookId || entryId) {
+      headers.append(
+        'Set-Cookie',
+        serializeCookie(
+          AUTH_ATTR_COOKIE_NAME,
+          encodeURIComponent(JSON.stringify({ hookId, entryId, startedAt: Date.now() })),
+          {
+            httpOnly: true,
+            secure: secureCookie,
+            sameSite: 'Lax',
+            path: '/auth',
+            maxAgeSec: 600,
+          },
+        ),
+      );
+    }
     headers.set('Location', authorizationUrl);
     return new Response(null, { status: 302, headers });
   });
@@ -148,6 +184,7 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
     const oauthError = c.req.query('error') ?? null;
     const cookies = parseCookies(c.req.header('cookie'));
     const txCookieValue = cookies[OIDC_TX_COOKIE_NAME] ?? null;
+    const authAttribution = parseAuthAttributionCookie(cookies[AUTH_ATTR_COOKIE_NAME]);
 
     try {
       const { membership, returnTo } = await deps.oidc.completeCallback(deps.store, {
@@ -165,8 +202,17 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Hono<AuthEnv> {
         ttlSec: DEFAULT_SESSION_TTL_SEC,
       });
 
+      deps.cloudTracking?.trackWebSignInResult({
+        outcome: 'success',
+        hookId: authAttribution.hookId,
+        entryId: authAttribution.entryId,
+        userId: membership.user.id,
+        durationMs: authAttribution.startedAt ? Date.now() - authAttribution.startedAt : 0,
+      });
+
       const headers = new Headers();
       headers.append('Set-Cookie', clearCookie(OIDC_TX_COOKIE_NAME, secureCookie, '/auth'));
+      headers.append('Set-Cookie', clearCookie(AUTH_ATTR_COOKIE_NAME, secureCookie, '/auth'));
       headers.append(
         'Set-Cookie',
         serializeCookie(SESSION_COOKIE_NAME, session.token, {

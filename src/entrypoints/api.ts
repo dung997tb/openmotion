@@ -1,4 +1,5 @@
 import { readMcpProjectFile, type ProjectFileQuery } from '../mcp/project-file-read.ts';
+import { createCloudTracking } from '../cloud-tracking.ts';
 import { PrismMotionCatalog } from '../services/prism-motion-catalog.ts';
 import { commitCaptionCommand } from '../mcp/caption-mutations.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -2295,7 +2296,9 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
   // 2. Auth & OAuth 2.1 Routes (`/auth/*`, `/.well-known/*`, `/oauth/*`, `/motion-api/tokens*`)
   // -------------------------------------------------------------------------
 
-  app.route('/', createAuthRoutes(authDeps));
+  const cloudTracking = createCloudTracking(VERSION);
+
+  app.route('/', createAuthRoutes({ ...authDeps, cloudTracking }));
 
   // -------------------------------------------------------------------------
   // 3. Streamable HTTP MCP (`/mcp` — Strict Bearer-Only Auth + 10 MiB Limit)
@@ -2426,11 +2429,16 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
     });
   });
 
-  app.get('/motion-api/tracking', authMiddleware, (c) => {
-    return c.json({ enabled: false, locked: true, reason: 'cloud' });
+  app.get('/motion-api/tracking', (c) => {
+    return c.json({ enabled: cloudTracking.isEnabled(), locked: true, reason: 'cloud' });
   });
-  app.post('/motion-api/tracking', authMiddleware, (c) => {
-    return c.json({ ok: true, accepted: false }, 202);
+  app.post('/motion-api/tracking', async (c) => {
+    if (!cloudTracking.isEnabled()) {
+      return c.json({ ok: true, accepted: false }, 202);
+    }
+    const body = await c.req.json().catch(() => null);
+    const acceptedCount = cloudTracking.acceptBrowserBatch(body);
+    return c.json({ ok: true, accepted: acceptedCount > 0, acceptedCount }, 202);
   });
   const trackingPreferencesPayload = {
     enabled: false,

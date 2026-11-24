@@ -28,6 +28,9 @@ import { attachableReferenceLimit, creationModels } from './creationModels';
 import { isOpenDesignProvider, modelFamilyLabel, providerDisplayName } from './imageMenuModels';
 import { registeredProvider } from '../../../shared/provider-registry';
 import { ProviderSetupNotice } from './ProviderSetupNotice';
+import { upgradePlan, useAccountSummary } from './AccountSettings';
+import { hasEntitlementModalListeners, isCloudWebMode, openEntitlementModal } from './entitlementModalBus';
+import { FreePlanGenerationGate } from './EntitlementTouchpointCards';
 
 export interface AssetDraft { modality: Modality; prompt: string; relight?: RelightChoices; videoChoices?: Record<string, string>; shotPreferences?: { aspect: string; duration?: number }; preferredModel?: string; model?: string; parameters?: Record<string, unknown>; target?: { asset: LibraryAsset; versionId: string }; references: { reference: AssetReference; name: string }[] }
 export function AssetComposer({ active, studio, draft, setDraft, promptAppliedToken = 0, jobs, showCurrentJob = true, taskId, history, selectingTask, onNew, onCancel, onView, onRetrySave, onResume, onReference, onUploadReference, onUploadFiles, uploadingReferences = false, onCreated, onError, onInfo, onClose }: {
@@ -281,7 +284,9 @@ export function AssetComposer({ active, studio, draft, setDraft, promptAppliedTo
   </div>;
 
   const configureProvider = (providerId: string) => providerId === 'account'
-    ? (openAccountSettings ?? openModelSettings)()
+    ? (hasEntitlementModalListeners()
+      ? openEntitlementModal({ mode: 'guest', hookId: 'studio_generate' })
+      : (openAccountSettings ?? openModelSettings)())
     : openProviderSettings ? openProviderSettings(providerId) : openModelSettings();
   const providerSetupMessage = t('Configure a provider or sign in to use media models.');
   const openDesignSetupMessage = t('This feature uses OpenDesign models. Add an OpenDesign Cloud API key or sign in to continue.');
@@ -307,7 +312,15 @@ export function AssetComposer({ active, studio, draft, setDraft, promptAppliedTo
     {modelHeading}
     {failed ? <Button variant="ghost" className="om-button h-auto" onClick={retry}><RemixIcon name="refresh-line" size={16} />{t('Retry loading models')}</Button> : !gateway ? <Skeleton className="om-asset-model-skeleton" /> : openDesignMissing ? openDesignSetup : manageProvidersNotice}
   </>;
-  const setup = <>
+  const { account } = useAccountSummary({ eager: false });
+  const cloudWeb = isCloudWebMode();
+  const cloudGuestSubmit = cloudWeb && account?.state !== 'signed-in';
+  const isHostedSelected = Boolean(selected && (cloudWeb || isOpenDesignProvider(selected.provider) || selected.provider === 'account'));
+  const hostedPlanUpgrade = isHostedSelected ? upgradePlan(account) : undefined;
+  const entitlementGate = hostedPlanUpgrade
+    ? <FreePlanGenerationGate onOpenProviders={cloudWeb ? undefined : openModelSettings} hookId="studio_free_gate" />
+    : null;
+  const setup = cloudGuestSubmit ? null : <>
       {unconfiguredPreferred && (imageWorkspace
         ? <ProviderSetupNotice message={t('{provider} needs setup before generating.', { provider: providerLabel })}>
           <Button variant="ghost" className="om-button h-auto" onClick={() => configureProvider(preferred!.provider)}>
@@ -335,7 +348,12 @@ export function AssetComposer({ active, studio, draft, setDraft, promptAppliedTo
       try { setDraft({ ...draft, model: parameterModel.id, parameters: requestParameters(value, parameterModel, draft.references.length > 0, activeDefaultValues) }); }
       catch { /* Keep invalid JSON or conflicting parameters in the local editor until corrected. */ }
     }} />;
-  const generate = !imageWorkspace && setupProvider ? <Button variant="plain" className="om-button om-creation-submit-button" data-primary onClick={() => configureProvider(setupProvider)}>
+  const generate = cloudGuestSubmit ? <Button variant="plain" className="om-button om-creation-submit-button" data-primary
+    disabled={busy || uploadingReferences}
+    onClick={() => openEntitlementModal({ mode: 'guest', hookId: 'studio_generate' })}>
+    <RemixIcon name="sparkling-fill" size={19} />{t(featureRule?.actionLabel ?? kind.action)}
+    <RemixIcon name="arrow-right-line" size={18} />
+  </Button> : !imageWorkspace && setupProvider ? <Button variant="plain" className="om-button om-creation-submit-button" data-primary onClick={() => configureProvider(setupProvider)}>
     <RemixIcon name="plug-line" size={19} />{t('Set up to generate')}<RemixIcon name="arrow-right-line" size={18} />
   </Button> : <Button variant="plain" className="om-button om-creation-submit-button" data-primary
     disabled={busy || uploadingReferences || !selected || !promptReady || invalidReferences} onClick={() => void submit()}>
@@ -429,9 +447,9 @@ export function AssetComposer({ active, studio, draft, setDraft, promptAppliedTo
         {setup}
         {modelNotice}
       </div>
-      <div className="om-image-submit">{generate}</div>
+      <div className="om-image-submit">{entitlementGate}{generate}</div>
     </>}
     </div>
-    {!imageWorkspace && <div className="om-creation-submit">{generate}<p className="om-creation-save-note"><RemixIcon name="stack-line" size={13} />{t('Saved automatically to your library')}</p><p className="om-eyebrow om-creation-billing">{t('Model usage is billed to your OpenDesign platform account.')}</p></div>}
+    {!imageWorkspace && <div className="om-creation-submit">{entitlementGate}{generate}<p className="om-creation-save-note"><RemixIcon name="stack-line" size={13} />{t('Saved automatically to your library')}</p><p className="om-eyebrow om-creation-billing">{t('Model usage is billed to your OpenDesign platform account.')}</p></div>}
   </aside>;
 }
