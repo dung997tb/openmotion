@@ -77,7 +77,11 @@ test('every distribution preserves public workflow dependencies and licenses whi
     assert([...files].some(file => /^studio\/build\/editor-assets\/soundtrack-[\w-]+\.m4a$/.test(file)), 'The bundled Music scene soundtrack must ship');
     assert([...files].some(file => /^studio\/build\/editor-assets\/sfx-whoosh-[\w-]+\.m4a$/.test(file)), 'Sound Studio template previews must ship');
     assert(![...files].some(file => /^studio\/build\/editor-assets\/three-js-.*\.webp$/.test(file)), 'Skill posters are hosted and loaded on demand');
-    assert(![...files].some(file => /^studio\/build\/.+\.(?:mp4|gif|webm)$/.test(file)), 'Skill preview animations are loaded on demand');
+    const studioVideos = [...files].filter(file => /^studio\/build\/.+\.(?:mp4|gif|webm)$/.test(file));
+    assert.equal(studioVideos.length, 2, 'Only the offline MCP workflow videos should ship. Skill previews load on demand.');
+    for (const name of ['studio-editing', 'template-brief']) {
+      assert(studioVideos.some(file => new RegExp(`^studio/build/editor-assets/${name}-[\\w-]+\\.mp4$`).test(file)), `Missing offline MCP workflow video: ${name}`);
+    }
     assert(files.has('studio/skill-cover-attribution.md'));
     assert(![...files].some(file => /^(?:\.agents\/skills\/|tests\/|studio\/(?:src|tests)\/)|\.map$|publish-test-package|acceptance\.md$/.test(file)));
     for (const [workflow, definition] of Object.entries(workflowRegistry)) {
