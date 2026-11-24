@@ -803,4 +803,236 @@ describe('preview-thumbnail-capture embedded bridge script', () => {
     assert.deepEqual(brotliDecompressSync(brBuf), rawBuf);
     assert.deepEqual(gunzipSync(gzipBuf), rawBuf);
   });
+
+  it('never skips frames when selector resolves directly to a <canvas> target and uses 2-frame settle', async () => {
+    let drawCalls = 0;
+    let rafCalls = 0;
+    let observedTarget: unknown = null;
+    class FakeMutationObserver {
+      observe(el: unknown) { observedTarget = el; }
+      takeRecords() { return []; }
+      disconnect() {}
+    }
+
+    const canvasTarget = {
+      nodeType: 1,
+      tagName: 'CANVAS',
+      getBoundingClientRect: () => ({ width: 800, height: 450 }),
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    };
+    const fakeRoot = {
+      nodeType: 1,
+      tagName: 'DIV',
+      clientWidth: 1920,
+      clientHeight: 1080,
+      getAttribute: (name: string) => (name === 'data-width' ? '1920' : name === 'data-height' ? '1080' : null),
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      getBoundingClientRect: () => ({ width: 1920, height: 1080 }),
+    };
+    const outCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({ clearRect: () => {}, drawImage: () => { drawCalls += 1; } }),
+      toBlob: (cb: (blob: { arrayBuffer: () => Promise<ArrayBuffer> }) => void) => {
+        cb({ arrayBuffer: () => Promise.resolve(new Uint8Array([0xff, 0xd8, drawCalls]).buffer) });
+      },
+    };
+    const sandbox: Record<string, unknown> = {
+      URL, Promise, Array, Object, Number, Math, String, Boolean, Error,
+      MutationObserver: FakeMutationObserver,
+      setTimeout, clearTimeout,
+      location: { origin: 'https://preview.example.test', href: 'https://preview.example.test/api/projects/p1/preview?capture=1&pt=tok' },
+      requestAnimationFrame: (fn: () => void) => { rafCalls += 1; return setTimeout(fn, 0); },
+      player: () => ({ pause: () => {}, seek: () => {} }),
+      document: {
+        documentElement: fakeRoot,
+        body: fakeRoot,
+        fonts: { ready: Promise.resolve() },
+        getAnimations: () => [],
+        querySelector: () => fakeRoot,
+        querySelectorAll: (sel: string) => (sel === '#layer-canvas' ? [canvasTarget] : []),
+        createElement: (tag: string) => (tag === 'canvas' ? { ...outCanvas } : {}),
+      },
+      window: { innerWidth: 1920, innerHeight: 1080, fetch: () => Promise.resolve({ ok: true }) },
+    };
+
+    const capturePreviewFrames = vm.runInNewContext(
+      `(function(){${PREVIEW_THUMBNAIL_CAPTURE}; return capturePreviewFrames;})()`,
+      sandbox,
+    ) as (msg: Record<string, unknown>) => Promise<{ frames: ArrayBuffer[] }>;
+
+    const result = await capturePreviewFrames({ times: [0.5, 1.5, 2.5], selector: '#layer-canvas' });
+    assert.equal(result.frames.length, 3);
+    assert.equal(observedTarget, null, 'direct <canvas> target must not attach static-reuse observer');
+    assert.equal(drawCalls, 3, 'every timestamp on a direct <canvas> target must draw fresh pixels');
+    assert.equal(rafCalls, 6, 'direct <canvas> target must use 2-frame settle');
+    assert.deepEqual(
+      Array.from(result.frames, (buf) => new Uint8Array(buf)[2]),
+      [1, 2, 3],
+    );
+  });
+
+  it('tracks documentElement mutations for selector captures so ancestor style/class edits trigger fresh SnapDOM captures', async () => {
+    let snapCalls = 0;
+    let observedNode: unknown = null;
+    let observerCb: (() => void) | null = null;
+    class FakeMutationObserver {
+      private cb: () => void;
+      constructor(cb: () => void) { this.cb = cb; }
+      observe(el: unknown) { observedNode = el; observerCb = this.cb; }
+      takeRecords() { return []; }
+      disconnect() {}
+    }
+
+    const docEl = { nodeType: 1, tagName: 'HTML' };
+    const selectedEl = {
+      nodeType: 1,
+      tagName: 'DIV',
+      textContent: 'Card',
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      getBoundingClientRect: () => ({ width: 400, height: 225 }),
+    };
+    const fakeRoot = {
+      nodeType: 1,
+      tagName: 'DIV',
+      clientWidth: 1920,
+      clientHeight: 1080,
+      getAttribute: (name: string) => (name === 'data-width' ? '1920' : name === 'data-height' ? '1080' : null),
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      getBoundingClientRect: () => ({ width: 1920, height: 1080 }),
+    };
+    const outCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({ clearRect: () => {}, drawImage: () => {} }),
+      toBlob: (cb: (blob: { arrayBuffer: () => Promise<ArrayBuffer> }) => void) => {
+        cb({ arrayBuffer: () => Promise.resolve(new Uint8Array([0xff, 0xd8, snapCalls]).buffer) });
+      },
+    };
+    const sandbox: Record<string, unknown> = {
+      URL, Promise, Array, Object, Number, Math, String, Boolean, Error,
+      MutationObserver: FakeMutationObserver,
+      setTimeout, clearTimeout,
+      location: { origin: 'https://preview.example.test', href: 'https://preview.example.test/api/projects/p1/preview?capture=1&pt=tok' },
+      requestAnimationFrame: (fn: () => void) => setTimeout(fn, 0),
+      player: () => ({
+        pause: () => {},
+        // Simulate an ancestor class/CSS-var mutation on documentElement at t=2 (not inside #card).
+        seek: (t: number) => { if (t === 2) observerCb?.(); },
+      }),
+      document: {
+        documentElement: docEl,
+        body: fakeRoot,
+        fonts: { ready: Promise.resolve() },
+        getAnimations: () => [],
+        querySelector: () => fakeRoot,
+        querySelectorAll: (sel: string) => (sel === '#card' ? [selectedEl] : []),
+        createElement: (tag: string) => (tag === 'canvas' ? { ...outCanvas } : {}),
+      },
+      window: {
+        innerWidth: 1920,
+        innerHeight: 1080,
+        fetch: () => Promise.resolve({ ok: true }),
+        snapdom: async () => { snapCalls += 1; return { toCanvas: async () => ({}) }; },
+      },
+    };
+
+    const capturePreviewFrames = vm.runInNewContext(
+      `(function(){${PREVIEW_THUMBNAIL_CAPTURE}; return capturePreviewFrames;})()`,
+      sandbox,
+    ) as (msg: Record<string, unknown>) => Promise<{ frames: ArrayBuffer[] }>;
+
+    const result = await capturePreviewFrames({ times: [1, 2, 3], selector: '#card' });
+    assert.equal(observedNode, docEl, 'selector capture must observe documentElement for inherited ancestor changes');
+    assert.equal(snapCalls, 2, 'frame 0 and ancestor-mutated frame 1 capture fresh; unchanged frame 2 reuses');
+    assert.deepEqual(Array.from(result.frames, (buf) => new Uint8Array(buf)[2]), [1, 2, 2]);
+  });
+
+  it('discards a tainted scratch canvas after a cross-origin image inline error so subsequent images still inline', async () => {
+    const attrs1: Record<string, string> = { src: 'https://foreign.example/no-cors.png' };
+    const attrs2: Record<string, string> = { src: 'assets/local.png' };
+    const makeImg = (attrs: Record<string, string>, tainted: boolean) => ({
+      complete: true,
+      naturalWidth: 200,
+      naturalHeight: 100,
+      src: attrs.src,
+      currentSrc: attrs.src,
+      tainted,
+      getAttribute: (name: string) => attrs[name] ?? null,
+      setAttribute: (name: string, val: string) => { attrs[name] = val; },
+      hasAttribute: (name: string) => name in attrs,
+      removeAttribute: (name: string) => { delete attrs[name]; },
+    });
+    const img1 = makeImg(attrs1, true);
+    const img2 = makeImg(attrs2, false);
+    const fakeStage = {
+      nodeType: 1,
+      tagName: 'DIV',
+      clientWidth: 1280,
+      clientHeight: 720,
+      textContent: 'Images',
+      getAttribute: (name: string) => (name === 'data-width' ? '1280' : name === 'data-height' ? '720' : null),
+      querySelectorAll: (sel: string) => (sel === 'img' ? [img1, img2] : []),
+      querySelector: () => null,
+      getBoundingClientRect: () => ({ width: 1280, height: 720 }),
+    };
+
+    let createdCanvases = 0;
+    const makeCanvas = () => {
+      createdCanvases += 1;
+      let isTainted = false;
+      return {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          clearRect: () => {},
+          drawImage: (source: { tainted?: boolean }) => {
+            if (source && source.tainted) isTainted = true;
+          },
+        }),
+        toDataURL: () => {
+          if (isTainted) throw new Error('SecurityError: tainted canvas');
+          return 'data:image/png;base64,CLEAN=';
+        },
+        toBlob: (cb: (blob: { arrayBuffer: () => Promise<ArrayBuffer> }) => void) => {
+          cb({ arrayBuffer: () => Promise.resolve(new Uint8Array([0xff, 0xd8]).buffer) });
+        },
+      };
+    };
+
+    const sandbox: Record<string, unknown> = {
+      URL, Promise, Array, Object, Number, Math, String, Boolean, Error,
+      setTimeout, clearTimeout,
+      location: { origin: 'https://preview.example.test', href: 'https://preview.example.test/api/projects/p1/preview?capture=1&pt=tok' },
+      requestAnimationFrame: (fn: () => void) => setTimeout(fn, 0),
+      player: () => ({ pause: () => {}, seek: () => {} }),
+      document: {
+        body: fakeStage,
+        fonts: { ready: Promise.resolve() },
+        querySelector: () => fakeStage,
+        querySelectorAll: () => [],
+        createElement: (tag: string) => (tag === 'canvas' ? makeCanvas() : {}),
+      },
+      window: {
+        innerWidth: 1280,
+        innerHeight: 720,
+        fetch: () => Promise.resolve({ ok: true }),
+        snapdom: async () => ({ toCanvas: async () => ({}) }),
+      },
+    };
+
+    const capturePreviewFrames = vm.runInNewContext(
+      `(function(){${PREVIEW_THUMBNAIL_CAPTURE}; return capturePreviewFrames;})()`,
+      sandbox,
+    ) as (msg: Record<string, unknown>) => Promise<{ frames: ArrayBuffer[] }>;
+
+    await capturePreviewFrames({ times: [1] });
+    assert.equal(attrs1.src, 'https://foreign.example/no-cors.png', 'tainted image stays untouched');
+    assert.equal(attrs2.src, 'data:image/png;base64,CLEAN=', 'subsequent local image must inline on a fresh canvas');
+    assert.ok(createdCanvases >= 3, 'expected a fresh scratch canvas after taint plus output canvas');
+  });
 });

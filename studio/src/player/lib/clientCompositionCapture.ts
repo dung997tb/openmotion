@@ -879,9 +879,15 @@ function findPureCanvasTarget(root: Element, stageW: number, stageH: number): HT
   return rect.width >= stageW * 0.9 && rect.height >= stageH * 0.9 ? canvas : null;
 }
 
+function isOrContainsDynamicVisual(el: Element): boolean {
+  const tag = el.tagName.toUpperCase();
+  if (tag === "CANVAS" || tag === "VIDEO") return true;
+  return Boolean(el.querySelector("canvas,video"));
+}
+
 function canSkipUnchangedFrame(doc: Document, target: Element): boolean {
   if (typeof MutationObserver !== "function" || typeof doc.getAnimations !== "function") return false;
-  if (target.querySelector("canvas,video")) return false;
+  if (isOrContainsDynamicVisual(target)) return false;
   try {
     return doc.getAnimations().length === 0;
   } catch {
@@ -1051,17 +1057,18 @@ async function captureSameOrigin(
       for (let i = 0; i < times.length; i++) order.push(i);
     }
 
-    const hasAsyncVisual = Boolean(target.querySelector("canvas,video"));
+    const hasAsyncVisual = isOrContainsDynamicVisual(target);
     const settleFrames = hasAsyncVisual ? 2 : 1;
     const outCanvas = document.createElement("canvas");
     let observer: MutationObserver | null = null;
     let observedMutated = false;
-    if (times.length > 1 && canSkipUnchangedFrame(doc, target)) {
+    const observeRoot = doc.documentElement ?? (target === root ? root : null);
+    if (times.length > 1 && observeRoot && canSkipUnchangedFrame(doc, target)) {
       try {
         observer = new MutationObserver(() => {
           observedMutated = true;
         });
-        observer.observe(target, {
+        observer.observe(observeRoot, {
           subtree: true,
           attributes: true,
           childList: true,

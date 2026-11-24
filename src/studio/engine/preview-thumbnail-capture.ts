@@ -131,6 +131,8 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
           dataUrl=scratch.toDataURL('image/png');
           cache[key]=dataUrl;
         } catch(_){
+          // A tainted cross-origin image permanently taints this canvas; discard it so later images still inline.
+          scratch=null;
           cache[key]=null;
           continue;
         }
@@ -199,10 +201,16 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
     if(rect.width>=stageW*0.9&&rect.height>=stageH*0.9) return c;
     return null;
   }
+  function isOrContainsDynamicVisual(el){
+    if(!el) return false;
+    var tag=el.tagName?String(el.tagName).toUpperCase():'';
+    if(tag==='CANVAS'||tag==='VIDEO') return true;
+    return Boolean(typeof el.querySelector==='function'&&el.querySelector('canvas,video'));
+  }
   function canSkipUnchangedFrame(target){
     if(typeof MutationObserver!=='function') return false;
     if(!document||typeof document.getAnimations!=='function') return false;
-    if(target&&typeof target.querySelector==='function'&&target.querySelector('canvas,video')) return false;
+    if(isOrContainsDynamicVisual(target)) return false;
     try {
       var anims=document.getAnimations();
       if(anims&&anims.length>0) return false;
@@ -263,15 +271,18 @@ export const PREVIEW_THUMBNAIL_CAPTURE = `
     var snapdomReady=findPureCanvasTarget(target,stageW,stageH)?Promise.resolve(null):loadSnapdom();
     return waitForCaptureMedia(2000).then(function(){
       inlineDecodedCaptureImages(target,Math.min(320,Math.max(240,outW*2)));
-      var hasAsyncVisual=Boolean(target&&typeof target.querySelector==='function'&&target.querySelector('canvas,video'));
+      var hasAsyncVisual=isOrContainsDynamicVisual(target);
       var settleFrames=hasAsyncVisual?2:1;
       var outCanvas=document.createElement('canvas');
       var observer=null;
       var observedMutated=false;
-      if(times.length>1&&canSkipUnchangedFrame(target)){
+      // Observe documentElement when available so ancestor class/style/CSS-var edits
+      // invalidate selector captures too; if ancestors cannot be tracked, skip reuse.
+      var observeRoot=(document&&document.documentElement)||(target===root?root:null);
+      if(times.length>1&&observeRoot&&canSkipUnchangedFrame(target)){
         try {
           observer=new MutationObserver(function(){ observedMutated=true; });
-          observer.observe(target,{subtree:true,attributes:true,childList:true,characterData:true});
+          observer.observe(observeRoot,{subtree:true,attributes:true,childList:true,characterData:true});
         } catch(_){
           observer=null;
         }
