@@ -15,11 +15,11 @@ function scopedScript(configuration: string, body: string): string {
   return `(function(){
   var SOURCE='openmotion-preview-bridge', PARENT='openmotion-studio', VERSION=1;
   ${configuration}
-  var token=new URL(location.href).searchParams.get('pt');
+  var token=new globalThis.URL(location.href).searchParams.get('pt');
   if(!token || window.parent===window) return;
   var parentWindow=window.parent;
   var parentOrigin='*';
-  try { if(document.referrer) parentOrigin=new URL(document.referrer).origin; } catch (_) {}
+  try { if(document.referrer) parentOrigin=new globalThis.URL(document.referrer).origin; } catch (_) {}
   function post(type,payload,requestId){
     var message=Object.assign({source:SOURCE,version:VERSION,type:type,projectId:projectId,token:token},payload||{});
     if(requestId) message.requestId=requestId;
@@ -206,14 +206,22 @@ export const PREVIEW_BRIDGE_SCRIPT = scopedScript(`
 
 export const PREVIEW_BRIDGE_PATH = '/api/preview-bridge.js';
 export const PREVIEW_BRIDGE_VERSION = createHash('sha256').update(PREVIEW_BRIDGE_SCRIPT).digest('hex');
+export const PREVIEW_BRIDGE_ASSET = '/api/preview-bridge/' + PREVIEW_BRIDGE_VERSION + '.js';
+export const PREVIEW_BRIDGE_ASSET_RE = /^\/api\/preview-bridge\/([a-f0-9]{64})\.js$/;
+const bridgeIntegrity = 'sha256-' + Buffer.from(PREVIEW_BRIDGE_VERSION, 'hex').toString('base64');
+
+function htmlAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
 export function bridgeDocumentTags(origin: string, projectId: string, compositionPath: string, sourceVersions: Record<string, string>, studioOrigin?: string, canRebindTiming?: boolean, htmlSources?: string[], liveEdits?: PreviewLiveEdits) {
-  const src = new URL(PREVIEW_BRIDGE_PATH, origin);
-  src.searchParams.set('v', PREVIEW_BRIDGE_VERSION);
-  const settings = JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, htmlSources, liveEdits, ...(canRebindTiming && { canRebindTiming }) })
-    .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const src = new URL(PREVIEW_BRIDGE_ASSET, origin);
+  const settings = htmlAttribute(JSON.stringify({ projectId, compositionPath, sourceVersions, studioOrigin, htmlSources, liveEdits, ...(canRebindTiming && { canRebindTiming }) }));
+  // A pod from before this route existed may still serve an asset request
+  // during rollout. Reuse the player's bounded preview retry if loading fails.
+  const retry = htmlAttribute(previewBuildBusyScript(projectId, 1));
   return {
-    preload: `<link rel="preload" as="script" href="${src.href}">`,
-    script: `<script src="${src.href}" data-openmotion-preview="${settings}"></script>\n`,
+    preload: `<link rel="preload" as="script" href="${src.href}" integrity="${bridgeIntegrity}">`,
+    script: `<script src="${src.href}" data-openmotion-preview="${settings}" integrity="${bridgeIntegrity}" onerror="${retry}"></script>\n`,
   };
 }
