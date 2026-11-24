@@ -151,7 +151,10 @@ test('exact endpoint schemas preserve provider types and never guess from a mode
   assert.equal(generationOptions({ ...seedance, modelId: 'unknown', label: seedance.label }), undefined);
   const flux = builtinModels.find(m => m.modelId === 'fal-ai/flux/schnell')!;
   validateGenerationOptions(flux, { image_size: { width: 1280, height: 720 } });
+  for (const num_images of [1, 2, 3, 4]) validateGenerationOptions(flux, { num_images });
+  assert.throws(() => validateGenerationOptions(flux, { num_images: 0 }), /Output count/);
   assert.throws(() => validateGenerationOptions(flux, { num_images: 1.5 }), /Output count/);
+  assert.throws(() => validateGenerationOptions(flux, { num_images: 5 }), /Output count/);
   const codex = builtinModels.find(m => m.provider === 'codex')!;
   assert.equal(generationOptions(codex)?.delivery, 'prompt');
 });

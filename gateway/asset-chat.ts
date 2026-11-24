@@ -11,6 +11,9 @@ import { AssetLibrary, assetHash, atomicAssetJson, libraryId } from './asset-lib
 import { assetOperation } from './asset-operations.ts';
 import { gatewayFor } from './service.ts';
 import { resolveAgent } from './agents.ts';
+import { agentInvocation } from './agent-discovery.ts';
+
+const codexAppServerArgs = ['app-server', '--listen', 'stdio://'];
 
 /** Line-delimited app-server JSON-RPC; stderr is deliberately never returned to the browser. */
 export class AssetAgentRpc {
@@ -21,10 +24,10 @@ export class AssetAgentRpc {
   private killTimer?: NodeJS.Timeout;
   private readonly exitPromise: Promise<void>;
   readonly child: ChildProcessWithoutNullStreams;
-  constructor(bin: string, cwd: string, onMessage: (message: any) => void, onClose: (error: Error) => void) {
+  constructor(bin: string, cwd: string, onMessage: (message: any) => void, onClose: (error: Error) => void, args = codexAppServerArgs) {
     let resolveExit!: () => void;
     this.exitPromise = new Promise<void>(resolve => { resolveExit = resolve; });
-    this.child = spawn(bin, ['app-server', '--listen', 'stdio://'], { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    this.child = spawn(bin, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     this.child.stderr.resume();
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', (chunk: string) => {
@@ -193,10 +196,11 @@ export class AssetConversations {
   }
   private async run(active: ActiveChat, bin: string, input: AssetChatInput) {
     const cwd = await this.store.safePath(`conversation-work/${active.chat.id}`, new AssetLibrary(this.store).root); await mkdir(cwd, { recursive: true, mode: 0o700 });
+    const command = await agentInvocation(bin, codexAppServerArgs);
     if (active.stopped) return;
-    const rpc = new (this.options.rpc ?? AssetAgentRpc)(bin, cwd, message => {
+    const rpc = new (this.options.rpc ?? AssetAgentRpc)(command.bin, cwd, message => {
       if (!active.stopped) void this.receive(active, message).catch(error => this.stop(active.chat.id, String(error)));
-    }, error => { if (!active.stopped) void this.stop(active.chat.id, error.message); });
+    }, error => { if (!active.stopped) void this.stop(active.chat.id, error.message); }, command.args);
     active.rpc = rpc;
     await rpc.request('initialize', { clientInfo: { name: 'openmotion_assets', title: 'OpenMotion Assets', version: '1.0.0' }, capabilities: { experimentalApi: true } });
     rpc.send({ method: 'initialized' });

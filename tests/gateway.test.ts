@@ -1,7 +1,7 @@
 import test from 'node:test';
 import https from 'node:https';
 import { Readable } from 'node:stream';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { mediaBytes } from './media-fixtures.ts';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -17,7 +17,8 @@ import { callTool } from '../mcp.ts';
 import { createTracker, validProperties, type PendingEvent } from '../tracking/core.ts';
 import { omEvents, studioEvents } from '../tracking/events.ts';
 import type { Agent } from '../shared/gateway.ts';
-import { generateCodexImage } from '../gateway/agents.ts';
+import { detectAgents, generateCodexImage } from '../gateway/agents.ts';
+import { AssetConversations, type AssetAgentRpc } from '../gateway/asset-chat.ts';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=', 'base64');
 test('Codex adapter retains service authorization failures, imports a fresh raster and rejects references or symlinks', { skip: process.platform === 'win32' }, () => fixture(async store => {
@@ -50,6 +51,80 @@ test('Codex adapter retains service authorization failures, imports a fresh rast
     await assert.rejects(generateCodexImage('Edit sky', work, controller.signal, reference), /Cancelled fixture/);
   } finally { if (previous === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = previous; }
 }, false));
+
+test('Codex media detection, image generation and asset chat use the newer bundled CLI', { timeout: 10_000 }, t => fixture(async store => {
+  const windows = process.platform === 'win32';
+  const standalone = path.join(store.directory, windows ? 'codex.cmd' : 'codex');
+  const bundled = path.join(store.directory, 'bundled codex.cmd');
+  const bundledScript = path.join(store.directory, 'bundled.cjs');
+  const work = path.join(store.directory, 'codex-work');
+  await mkdir(work);
+  const staleCli = windows ? String.raw`@"%~dp0\standalone.cjs" %*` : `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\\n' 'codex-cli 0.99.0'
+else
+  exit 1
+fi
+`;
+  await writeFile(standalone, staleCli, { mode: 0o700 });
+  if (windows) await writeFile(path.join(store.directory, 'standalone.cjs'), "if (process.argv[2] === '--version') console.log('codex-cli 0.99.0'); else process.exitCode = 1;");
+  await writeFile(bundled, String.raw`@"%~dp0\bundled.cjs" %*`, { mode: 0o700 });
+  await writeFile(bundledScript, `
+const [command, arg] = process.argv.slice(2);
+if (command === '--version') console.log('codex-cli 0.100.0');
+else if (command === 'login' && arg === 'status') console.log('Logged in');
+else if (command === 'features' && arg === 'list') console.log('image_generation stable true');
+else if (command === 'exec' && arg === '--help') console.log('--ephemeral');
+else if (command === 'exec' && arg === '--ephemeral') {
+  process.stdin.resume();
+  process.stdin.on('end', () => require('node:fs').writeFileSync('image.png', Buffer.from('${png.toString('base64')}', 'base64')));
+} else process.exitCode = 1;
+`, { mode: 0o700 });
+
+  const connections = new EventEmitter();
+  class FakeRpc {
+    readonly command: { bin: string; args: string[] };
+    constructor(bin: string, _cwd: string, _onMessage: unknown, _onClose: unknown, args: string[]) {
+      this.command = { bin, args };
+    }
+    async request(method: string) {
+      if (method === 'thread/start') return { thread: { id: 'fixture-thread' } };
+      if (method === 'turn/start') {
+        connections.emit('started', this.command);
+        return { turn: { id: 'fixture-turn' } };
+      }
+      return {};
+    }
+    send() {}
+    close() {}
+  }
+  const chats = new AssetConversations(store, { rpc: FakeRpc as unknown as typeof AssetAgentRpc });
+  const envKeys = ['PATH', 'CODEX_BIN', 'CODEX_APP_RUNTIME_CLI_PATH'] as const;
+  const previous = envKeys.map(key => process.env[key]);
+  process.env.PATH = store.directory;
+  delete process.env.CODEX_BIN;
+  process.env.CODEX_APP_RUNTIME_CLI_PATH = bundled;
+  try {
+    const codex = (await detectAgents()).find(agent => agent.id === 'codex');
+    assert.equal(codex?.available, true, codex?.reason);
+    assert.deepEqual(await generateCodexImage('A lake', work, t.signal), png);
+
+    const chat = await chats.create();
+    const [[command]] = await Promise.all([
+      once(connections, 'started', { signal: t.signal }),
+      chats.start(chat.id, { requestId: 'fixture-request', text: 'A lake' }),
+    ]);
+    assert.deepEqual(command, { bin: process.execPath, args: [bundledScript, 'app-server', '--listen', 'stdio://'] });
+  } finally {
+    for (const [index, key] of envKeys.entries()) {
+      const before = previous[index];
+      if (before === undefined) delete process.env[key];
+      else process.env[key] = before;
+    }
+    await chats.close();
+  }
+}, false));
+
 const agents = async (): Promise<Agent[]> => [{ id: 'codex', label: 'Codex', installed: true, authenticated: true, imageGeneration: true, available: true, reason: 'ready' }];
 const fetcher = (callback: (url: string, init: RequestInit) => unknown): Fetcher => (async (url, init = {}) => {
   const body = callback(String(url), init);

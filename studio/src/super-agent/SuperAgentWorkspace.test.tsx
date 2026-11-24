@@ -4731,11 +4731,16 @@ it('drives Image SSOT model switching, collapsible advanced parameters, paramete
   await act(async () => fluxRow.click());
   await flushMore();
 
-  // Open FLUX Schnell Parameters popover, pick png + set Seed 123 inside collapsible Advanced parameters
+  // Check the FLUX Schnell count bounds, then set PNG and Seed in Advanced parameters.
   const paramTrigger = [...topBar.querySelectorAll('button')].find(b => b.textContent?.includes('1×')) as HTMLButtonElement;
   expect(paramTrigger).toBeTruthy();
   await act(async () => paramTrigger.click());
   await flush();
+
+  const outputCount = document.querySelector<HTMLInputElement>('input[type="number"][aria-label="Output count"]');
+  expect(outputCount?.min).toBe('1');
+  expect(outputCount?.max).toBe('4');
+  expect(outputCount?.step).toBe('1');
 
   const advDetails = document.querySelector('details.om-sa-adv-params') as HTMLDetailsElement;
   expect(advDetails).toBeTruthy();
