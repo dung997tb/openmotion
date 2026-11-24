@@ -53,9 +53,9 @@ export function creationModels(
   const recommended = (models: typeof listed) => recommendedId ? models.find(model => model.modelId === recommendedId) : undefined;
   const accountPreviews = accountPrompt ? compatible.filter(model => model.provider === 'account') : [];
   const preferred = pinned ?? (modelId && !featureScene ? undefined
-    : accountPreviews.find(model => model.modelId === templateModelId) ?? recommended(accountPreviews) ?? accountPreviews[0]
-      ?? available.find(model => model.modelId === templateModelId) ?? recommended(available)
+    : available.find(model => model.modelId === templateModelId) ?? recommended(available)
       ?? available.find(model => model.id === gateway?.status.routes[modality]) ?? available[0]
+      ?? accountPreviews.find(model => model.modelId === templateModelId) ?? recommended(accountPreviews) ?? accountPreviews[0]
       ?? (scene ? recommended(compatible) ?? compatible[0] : undefined));
   const selected = available.find(model => model.id === preferred?.id);
   const choices = scene ? compatible : available;

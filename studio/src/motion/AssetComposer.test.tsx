@@ -896,6 +896,13 @@ it.each([
   gatewayRequest.mockResolvedValue({ state: 'signed-out' });
   for (const state of ['guest', 'locked'] as const) {
     await render(state);
+    if (hasCodex) {
+      expect(picker('Provider').textContent).toBe('Codex');
+      expect(picker('Generation model').textContent).toContain('Codex Image');
+      expect(container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.disabled).toBe(false);
+      expect(container.querySelector('[data-generation-offer]')).toBeNull();
+      await render(state, featureModels().accountGpt.id);
+    }
     expect(container.querySelector('.om-creation-prompt-footer, .om-creation-save-note, .om-creation-billing')).toBeNull();
     expect(picker('Provider').querySelector('.om-picker-trigger-label')?.textContent).toBe('OpenDesign');
     expect(picker('Generation model').textContent).toContain(state === 'guest' ? 'Plus and above' : 'Requires upgrade to Plus');
@@ -983,6 +990,13 @@ it.each(['free', 'go'])('previews locked account models and lets a %s account sw
   const submit = () => container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!;
   const click = (el: HTMLElement) => act(async () => el.click());
   const choose = (name: string) => click([...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(el => el.querySelector('strong')?.textContent === name)!);
+  if (cloudReady) {
+    expect(picker('Provider').textContent).toBe('OpenDesign Cloud');
+    expect(submit().disabled).toBe(false);
+    expect(container.querySelector('[data-generation-offer]')).toBeNull();
+    await click(picker('Provider'));
+    await choose('OpenDesign');
+  }
   expect(picker('Provider').textContent).toBe('OpenDesign');
   const badge = 'Requires upgrade to Plus';
   expect(picker('Generation model').querySelector('.om-account-offer-callout')?.textContent).toBe(badge);
@@ -1032,7 +1046,7 @@ it('keeps the default background removal model on the account after returning fr
   function Harness({ upgraded }: { upgraded: boolean }) {
     const [draft, setDraft] = useState<AssetDraft>({ modality: 'image', prompt: '', references: [reference('product')] });
     const catalog = { models: upgraded ? [sunburst, accountGpt] : [sunburst], status: { routes: { image: sunburst.id }, providers: [
-      { id: 'opendesign', label: 'OpenDesign Cloud', available: true },
+      { id: 'opendesign', label: 'OpenDesign Cloud', available: upgraded },
       { id: 'account', label: 'OpenDesign', available: true, mediaEntitlement: upgraded ? 'included' as const : 'not-included' as const },
     ] } };
     return <AssetComposer {...props} draft={draft} setDraft={setDraft} studio={{
