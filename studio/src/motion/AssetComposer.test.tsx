@@ -844,7 +844,7 @@ it.each(['free', 'plus'])('keeps the background removal draft through sign-in an
   const submit = () => container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!;
   expect(submit().disabled).toBe(true);
   const card = container.querySelector('[data-generation-offer="sign_in"]')!;
-  expect(card.querySelector('h3')?.textContent).toBe('7 days of unlimited image generation');
+  expect(card.querySelector('h3')?.textContent).toBe('7 days of unlimited flagship image generation');
   expect(card.querySelector('p')?.textContent).toBe('Available with Plus or higher');
   expect(provider.closest('.om-generation-picker')?.nextElementSibling).toBe(card);
   expect(card.nextElementSibling?.querySelector('button[aria-label="Generation model"]')).toBeTruthy();
@@ -900,13 +900,11 @@ it.each([
     expect(picker('Provider').querySelector('.om-picker-trigger-label')?.textContent).toBe('OpenDesign');
     expect(picker('Generation model').textContent).toContain(state === 'guest' ? 'Plus and above' : 'Requires upgrade to Plus');
     expect(container.querySelector('[data-generation-offer] button')?.textContent).toBe(state === 'guest' ? 'Sign in now' : 'Upgrade');
-    if (state === 'guest') {
-      expect(container.querySelector('[data-generation-offer="sign_in"] h3')?.textContent)
-        .toBe(modality === 'image' ? '7 days of unlimited image generation' : 'Black Friday: up to 50% off your first year');
-    } else {
-      expect(container.querySelector('[data-generation-offer="upgrade"] h3')?.textContent)
-        .toBe(modality === 'image' ? '7 days of unlimited image generation' : 'Unlock popular AI models');
-    }
+    const offer = container.querySelector(`[data-generation-offer="${state === 'guest' ? 'sign_in' : 'upgrade'}"]`)!;
+    expect(offer.querySelector('h3')?.textContent)
+      .toBe(modality === 'image' ? '7 days of unlimited flagship image generation' : 'Black Friday: up to 50% off your first year');
+    const imageDetails = state === 'guest' ? 'Available with Plus or higher' : 'Black Friday: the year’s best deals, up to 50% off';
+    expect(offer.querySelector('p')?.textContent).toBe(modality === 'image' ? imageDetails : 'Enjoy this offer with Plus or higher');
     expect(container.querySelector<HTMLButtonElement>('.om-creation-submit-button')!.disabled).toBe(true);
     await click(picker('Provider'));
     expect(optionNames()).toEqual(['OpenDesign', 'OpenDesign Cloud', ...(hasCodex ? ['Codex'] : [])]);
@@ -994,8 +992,8 @@ it.each(['free', 'go'])('previews locked account models and lets a %s account sw
   expect([...document.querySelectorAll('[role="option"]')].every(el => el.querySelector('.om-account-offer-callout')?.textContent === badge)).toBe(true);
   await choose('GPT Image 2.6 Flare');
   const offer = container.querySelector('section[data-generation-offer="upgrade"]')!;
-  expect(offer.querySelector('h3')?.textContent).toBe('7 days of unlimited image generation');
-  expect(offer.querySelector('p')?.textContent).toBe('Black Friday’s lowest prices of the year! 7 days of unlimited use');
+  expect(offer.querySelector('h3')?.textContent).toBe('7 days of unlimited flagship image generation');
+  expect(offer.querySelector('p')?.textContent).toBe('Black Friday: the year’s best deals, up to 50% off');
   expect(submit().disabled).toBe(true);
   gatewayRequest.mockResolvedValue({ opened: true });
   const upgrade = offer.querySelector<HTMLButtonElement>('button')!;

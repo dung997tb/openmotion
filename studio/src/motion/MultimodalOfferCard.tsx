@@ -30,11 +30,11 @@ export function MultimodalUpgradeButton({ subscription, label }: { subscription:
   </Button>;
 }
 
-export function MultimodalUpgradeCard({ subscription, visit, title, buttonLabel }: {
-  subscription: ReturnType<typeof useSubscriptionOpener>; visit?: OfferVisit; title?: string; buttonLabel?: string;
+export function MultimodalUpgradeCard({ subscription, visit, title, details, buttonLabel }: {
+  subscription: ReturnType<typeof useSubscriptionOpener>; visit?: OfferVisit; title?: string; details?: string; buttonLabel?: string;
 }) {
   const { t } = useI18n();
-  return <MultimodalOfferCard kind="upgrade" visit={visit} title={title ?? t('Unlock multimodal creation')} details={t('Black Friday’s lowest prices of the year! 7 days of unlimited use')}>
+  return <MultimodalOfferCard kind="upgrade" visit={visit} title={title ?? t('Unlock multimodal creation')} details={details ?? t('Black Friday’s lowest prices of the year! 7 days of unlimited use')}>
     <MultimodalUpgradeButton subscription={subscription} label={buttonLabel} />
   </MultimodalOfferCard>;
 }
