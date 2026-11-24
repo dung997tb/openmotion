@@ -86,4 +86,30 @@ describe("copyTextToClipboard", () => {
     expect(writeText).toHaveBeenCalledWith("copy me");
     expect(document.querySelector("textarea")).toBeNull();
   });
+
+  it("mounts fallback textarea inside the active open modal dialog so inert body on Windows does not block copying", async () => {
+    const mountedParents: (Element | null)[] = [];
+    const execCommand = vi.fn((command: string) => {
+      if (command !== "copy") return false;
+      const ta = document.querySelector("textarea");
+      mountedParents.push(ta?.parentElement ?? null);
+      return true;
+    });
+    const writeText = vi.fn((_text: string) => Promise.reject(new Error("blocked")));
+
+    installDocument(execCommand);
+    installNavigator(writeText);
+
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    const trigger = document.createElement("button");
+    dialog.appendChild(trigger);
+    document.body.appendChild(dialog);
+    trigger.focus();
+
+    await expect(copyTextToClipboard("dialog copy")).resolves.toBe(true);
+
+    expect(mountedParents[0]).toBe(dialog);
+    expect(document.querySelector("textarea")).toBeNull();
+  });
 });

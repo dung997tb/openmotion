@@ -21,6 +21,7 @@ import { generationOptions, resolveGenerationParameters, validateGenerationOptio
 import { loadRegistry, toOpenMotionGenerationOptions } from '../packages/multimodal-models/src/query.ts';
 import { audioAssetTitle, classifyAudioKind } from '../shared/audio-kind.ts';
 import { MAX_ASSET_BYTES } from '../shared/asset-limits.ts';
+import { rankSearchResults } from '../shared/fuzzy-search.ts';
 
 /** Queued input-image snapshot; the first keeps its historical name for older jobs. */
 const referenceFile = (index: number, mimeType: string) => (index ? `reference-${index}.` : 'reference.') + (mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]);
@@ -180,9 +181,18 @@ export class ModelGateway {
         await atomic(path.join(this.root, 'catalog.json'), merged);
       });
     }
-    const query = String(input.query ?? '').toLowerCase();
-    const all = (await this.models()).filter(model => (!input.provider || model.provider === input.provider) && (!input.modality || model.modality === input.modality)
-      && (!query || `${model.id} ${model.label} ${model.mode} ${model.description ?? ''}`.toLowerCase().includes(query)));
+    const query = String(input.query ?? '').trim();
+    const scoped = (await this.models()).filter(model => (!input.provider || model.provider === input.provider) && (!input.modality || model.modality === input.modality));
+    const all = query
+      ? rankSearchResults(scoped, query, model => ({
+          id: model.modelId,
+          title: model.label,
+          subtitle: model.provider,
+          description: model.description,
+          tags: [model.modality, model.mode, model.provider],
+          aliases: [model.id],
+        })).map(result => result.item)
+      : scoped;
     const offset = input.offset ?? 0, limit = input.limit ?? 100;
     if (!Number.isInteger(offset) || Number(offset) < 0 || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 100) throw new Error('Invalid model pagination');
     return { models: all.slice(Number(offset), Number(offset) + Number(limit)), total: all.length,

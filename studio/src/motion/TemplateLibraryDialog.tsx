@@ -12,7 +12,7 @@ import { GalleryIntro } from './GalleryIntro';
 import { BrandLogo } from "../../../packages/design-system/react/BrandLogo";
 import { GithubLogo } from '@phosphor-icons/react';
 import { templateRepositoryUrl } from './githubRepository';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { BrandSeriesCard, BrandStoriesDialog } from './BrandStories';
 import { discoveryInsertions, groupBrandSeries, type BrandSeries } from './brandStoryData';
 import { seriesId, seriesContext, reportSeriesCard, openSeriesView, type SeriesView } from './brandStoryTracking';
@@ -31,6 +31,7 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { Popover } from '../components/ui/Popover';
 import { StudioToastViewport } from '../components/StudioToastViewport';
 import { useToast } from '../hooks/useToast';
+import { copyTextToClipboard } from '../utils/clipboard';
 import { releaseMediaElement } from '../utils/releaseMediaElement';
 import { orderedPurposes } from './templateDiscoveryTaxonomy';
 import { templateContributionUrl, templateSubmissionPrompt } from './templateContribution';
@@ -41,7 +42,7 @@ import { facetValues as values, templateFacets as facets, templateAspect, templa
 import { TemplateGalleryCard as TemplateCard, TopBrandsLabel, TemplatePoster, TemplateIdentity as Identity } from './TemplateGalleryCard';
 import { useTemplatePlayback } from './useTemplatePlayback';
 import { useTemplateImpressions } from './useTemplateImpressions';
-import { matchesTemplateSearch, normalizedTemplateQuery } from './templateSearch';
+import { normalizedTemplateQuery, prepareTemplateSearchIndex, scoreTemplateSearchMap } from './templateSearch';
 import { TemplateReferenceDialog, TemplateSearchRecovery } from './TemplateSearchRecovery';
 import { useTemplateSearchContext } from './useTemplateSearchContext';
 import * as tracking from './templateLibraryTracking';
@@ -167,10 +168,26 @@ export function TemplateLibraryDialog(props: Props) {
     if (campaignSearching) setCampaignSearch(current => ({ ...current, filter }));
     else setSelectedCampaignFilter(filter);
   };
+  const templateSearchIndex = useMemo(() => prepareTemplateSearchIndex(catalog, t), [catalog, t]);
+  const [settledKeyword, setSettledKeyword] = useState(''), [searchComposing, setSearchComposing] = useState(false);
+  const committedCampaignQueryRef = useRef(campaignQuery);
+  if (!searchComposing) committedCampaignQueryRef.current = campaignQuery;
+  const deferredCampaignQuery = useDeferredValue(searchComposing ? committedCampaignQueryRef.current : campaignQuery);
   const campaignStages = useMemo(() => blackFridayTemplates(catalog, locale), [catalog, locale]);
-  const campaignItems = useMemo(() => campaignStages.flatMap(stage =>
-    activeCampaignFilter === null || stage.id === activeCampaignFilter ? stage.items : [])
-    .filter(item => matchesTemplateSearch(item, campaignQuery, t)), [campaignStages, activeCampaignFilter, campaignQuery, t]);
+  const campaignSearchScores = useMemo(() => {
+    const trimmed = deferredCampaignQuery.trim();
+    if (!trimmed) return null;
+    const allCampaignItems = campaignStages.flatMap(stage => stage.items);
+    return scoreTemplateSearchMap(prepareTemplateSearchIndex(allCampaignItems, t), trimmed);
+  }, [campaignStages, deferredCampaignQuery, t]);
+  const campaignItems = useMemo(() => {
+    const base = campaignStages.flatMap(stage =>
+      activeCampaignFilter === null || stage.id === activeCampaignFilter ? stage.items : []);
+    if (!campaignSearchScores) return base;
+    return base
+      .filter(item => campaignSearchScores.has(item.id))
+      .sort((a, b) => (campaignSearchScores.get(b.id) ?? 0) - (campaignSearchScores.get(a.id) ?? 0));
+  }, [campaignStages, activeCampaignFilter, campaignSearchScores]);
   useEffect(() => {
     if (!blackFriday || !props.open) {
       setSelectedCampaignFilter(null);
@@ -280,7 +297,6 @@ export function TemplateLibraryDialog(props: Props) {
   useEffect(() => { if (guideOpen && preview) tracking.reportGuideShown(preview, detailView.current); }, [guideOpen, preview?.id]);
   const pendingResult = useRef<FilterAction | undefined>(undefined), composing = useRef(false), shownCards = useRef(new Set<string>()), instructionShown = useRef<string | undefined>(undefined);
   const [settle, setSettle] = useState(0);
-  const [settledKeyword, setSettledKeyword] = useState(''), [searchComposing, setSearchComposing] = useState(false);
   const [recoveryExpanded, setRecoveryExpanded] = useState(false), [catalogVersion, setCatalogVersion] = useState('');
   const [referenceTrigger, setReferenceTrigger] = useState<HTMLButtonElement | null>(null);
   const referenceShownFor = useRef<string | undefined>(undefined);
@@ -347,13 +363,28 @@ export function TemplateLibraryDialog(props: Props) {
   const industries = available.find(facet => facet.key === 'industries')?.values ?? [];
   const sortOptions = [['recommended', 'Recommended order'], ['name', 'Name A–Z'], ['reverse', 'Name Z–A'], ['duration', 'Duration']] as const;
   const hasFilters = Boolean(format || libraryQuery || editableOnly || brandsOnly || compareWithout || Object.values(selected).some(items => items?.length));
-  const searchable = useMemo(() => catalog.filter(item => (props.creators || ((!format || matchesTemplateCategory(item, format)) && (!brandsOnly || Boolean(item.brand?.trim())) && (!compareWithout || item.brand !== compareWithout))) && matchesTemplateSearch(item, libraryQuery, t)), [catalog, libraryQuery, format, brandsOnly, compareWithout, props.creators, t]);
+  const committedLibraryQueryRef = useRef(libraryQuery);
+  if (!searchComposing) committedLibraryQueryRef.current = libraryQuery;
+  const deferredLibraryQuery = useDeferredValue(searchComposing ? committedLibraryQueryRef.current : libraryQuery);
+  const librarySearchScores = useMemo(
+    () => (deferredLibraryQuery.trim() ? scoreTemplateSearchMap(templateSearchIndex, deferredLibraryQuery) : null),
+    [templateSearchIndex, deferredLibraryQuery],
+  );
+  const searchable = useMemo(
+    () => catalog.filter(item =>
+      (props.creators || ((!format || matchesTemplateCategory(item, format)) && (!brandsOnly || Boolean(item.brand?.trim())) && (!compareWithout || item.brand !== compareWithout)))
+      && (!librarySearchScores || librarySearchScores.has(item.id)),
+    ),
+    [catalog, librarySearchScores, format, brandsOnly, compareWithout, props.creators],
+  );
   const draftCount = useMemo(() => filtersOpen ? searchable.filter(item => matchesFilters(item, draftFilters, draftEditable)).length : 0, [filtersOpen, searchable, draftFilters, draftEditable]);
   const hasDraftFilters = draftEditable || Object.values(draftFilters).some(items => items?.length);
   const visible = useMemo(() => {
     if (props.creators) return props.creator ? searchable.filter(item => templateCredit(item)?.id === props.creator) : [];
-    return searchable.filter(item => matchesFilters(item, selected, editableOnly)).sort((a, b) => sort === 'recommended' ? (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity) : sort === 'duration' ? (a.duration ?? Infinity) - (b.duration ?? Infinity) : a.title.localeCompare(b.title, locale) * (sort === 'reverse' ? -1 : 1));
-  }, [searchable, selected, sort, locale, editableOnly, props.creators, props.creator]);
+    return searchable.filter(item => matchesFilters(item, selected, editableOnly)).sort((a, b) => sort === 'recommended'
+      ? (librarySearchScores ? (librarySearchScores.get(b.id) ?? 0) - (librarySearchScores.get(a.id) ?? 0) : 0) || ((a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity))
+      : sort === 'duration' ? (a.duration ?? Infinity) - (b.duration ?? Infinity) : a.title.localeCompare(b.title, locale) * (sort === 'reverse' ? -1 : 1));
+  }, [searchable, selected, sort, locale, editableOnly, props.creators, props.creator, librarySearchScores]);
   useEffect(() => { if (dialog.current) dialog.current.scrollTop = 0; }, [libraryQuery, selected, sort, editableOnly, brandsOnly, compareWithout, blackFriday]);
   const filterCount = Number(Boolean(format)) + Object.values(selected).flat().length + Number(editableOnly) + Number(brandsOnly) + Number(Boolean(compareWithout));
   const hasAppliedFilters = filterCount > 0;
@@ -397,7 +428,7 @@ export function TemplateLibraryDialog(props: Props) {
   const showEmptyRecovery = !loading && !error && !visible.length;
   const suggestedRemoval = useMemo(() => {
     if (!showEmptyRecovery || !stableSearch || !hasAppliedFilters || !catalog.length) return;
-    const matches = catalog.filter(item => (!format || matchesTemplateCategory(item, format)) && (!compareWithout || item.brand !== compareWithout) && matchesTemplateSearch(item, libraryQuery, t));
+    const matches = catalog.filter(item => (!format || matchesTemplateCategory(item, format)) && (!compareWithout || item.brand !== compareWithout) && (!librarySearchScores || librarySearchScores.has(item.id)));
     const count = (filters: Filters, editable: boolean, brands: boolean) => matches.filter(item =>
       (!brands || Boolean(item.brand?.trim())) && matchesFilters(item, filters, editable)).length;
     const options = facets.flatMap(([key]) => (selected[key] ?? []).map(value => ({
@@ -614,7 +645,8 @@ export function TemplateLibraryDialog(props: Props) {
     const template = preview, view = detailView.current, attemptId = tracking.newTrackingId();
     if (template) tracking.reportUseClicked(template, submit ? 'recreate_submit' : 'recreate', view, attemptId);
     try {
-      await navigator.clipboard.writeText(text);
+      const copied = await copyTextToClipboard(text);
+      if (!copied) throw new Error('Clipboard copy failed');
       if (previewLatest.current?.id === template?.id && detailView.current?.id === view?.id) { setManualCopy(''); showToast(handoffPreview ? t(submit ? 'Contribution instruction copied. Paste into your Agent to prepare a reusable template and contribution PR.' : 'Copied. Paste into your Agent, add your materials and requirements, then send.') : 'Copied. Paste into your Agent.', 'info'); }
       if (template) tracking.reportCopyResult(template, 'clipboard_written', attemptId, submit, view);
     } catch {
@@ -637,10 +669,11 @@ export function TemplateLibraryDialog(props: Props) {
     }
     let copyTimeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([
-        navigator.clipboard.writeText(text),
+      const copied = await Promise.race([
+        copyTextToClipboard(text),
         new Promise<never>((_, reject) => { copyTimeout = setTimeout(() => reject(new Error('Clipboard permission timed out')), 8000); }),
       ]);
+      if (!copied) throw new Error('Clipboard copy failed');
       showToast(t(submit ? 'Contribution instruction copied. Paste into your Agent to prepare a reusable template and contribution PR.' : 'Copied. Paste into your Agent, add your materials and requirements, then send.'), 'info');
       tracking.reportCopyResult(template, 'clipboard_written', attemptId, submit, view); return null;
     } catch {
@@ -828,7 +861,7 @@ export function TemplateLibraryDialog(props: Props) {
             </section>}
             {!handoffPreview && preview.description && <p className={styles.description}>{preview.description}</p>}
             {handoffPreview && <>
-              <TemplateDetailReview template={preview} onCopyColor={color => { tracking.reportDetailAction(preview, 'copy_color', detailView.current); void navigator.clipboard.writeText(color).then(() => showToast(t('Copied {color}', { color }), 'info')).catch(() => showToast(t('Could not copy color. Try again.'), 'error')); }} onFilter={filterBy} />
+              <TemplateDetailReview template={preview} onCopyColor={color => { tracking.reportDetailAction(preview, 'copy_color', detailView.current); void copyTextToClipboard(color).then(copied => { if (copied) showToast(t('Copied {color}', { color }), 'info'); else showToast(t('Could not copy color. Try again.'), 'error'); }); }} onFilter={filterBy} />
             </>}
             <section ref={instructionText} className={`${styles.instruction} ${handoffPreview ? styles.reviewCreation : ''}`} aria-label={t(handoffPreview ? 'Template recreation instruction' : 'Template instruction')}><header><h3>{t(handoffPreview ? 'Template recreation instruction' : 'Template instruction')}</h3>
               {handoffPreview && <Popover key={preview.id} container={detail} align="end" openOnHover aria-label={t('After copying')} className={styles.handoffPopover} initialFocus={false} onOpenChange={open => { if (open) tracking.reportDetailAction(preview, 'handoff_help', detailView.current); }}

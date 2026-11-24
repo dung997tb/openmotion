@@ -820,6 +820,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
           kind: url.searchParams.get('kind') ?? undefined,
           query: url.searchParams.get('query') ?? undefined,
           limit: url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined,
+          locale: url.searchParams.get('locale') ?? undefined,
         }));
       }
       if (url.pathname === '/api/super-agent/uploads' && req.method === 'POST') {
@@ -1182,7 +1183,7 @@ export async function handler(req: IncomingMessage, res: ServerResponse, store =
         const { error_code, invalid_field, validation_rule } = toolFailureFields(error);
         return json(res, 400, { error: message, ...(error_code !== 'TOOL_FAILED' ? { code: error_code } : {}),
           ...(invalid_field ? { invalid_field, validation_rule } : {}),
-          applied: (error as any)?.applied === false || message.startsWith('VERSION_NOT_RESTORABLE:') ? false : 'unknown' });
+          applied: (error as any)?.applied === false || /^(NATIVE_RUNTIME_NOT_READY|INVALID_|VERSION_CONFLICT|VERSION_NOT_RESTORABLE|VERSION_NOT_FOUND|PROJECT_NOT_|PROJECT_SESSION_|PROJECT_TRASHED|PROJECT_VALIDATION_FAILED|REQUEST_ID_CONFLICT|SESSION_NOT_FOUND|MCP_TOOL_NOT_EXPOSED|EXPORT_NOT_|TEMPLATE_NOT_|WORK_CLOSED|WORK_VERSION_MISMATCH|WORK_GENERATION_UNTRACKED|WORK_ID_CONFLICT|WORK_NOT_FOUND|GENERATION_CONTENT_UNCHANGED|GENERATION_ARTIFACT_INVALID|DUPLICATE_ITEM_ID|ITEM_ID_CONFLICT|DUPLICATE_FILE_PATH|CONFLICTING_FILE_PATHS|SOURCE_BATCH_TOO_LARGE|REVIEW_VERSION_MISMATCH|REVIEW_OBJECT_MISMATCH|PREVIEW_TARGET_MISMATCH)(?::|$)/.test(message) ? false : 'unknown' });
       }
     }
     if (req.method === 'GET' && ['/api/integration', '/connect/guide', '/connect/config'].includes(url.pathname)) {

@@ -2,6 +2,7 @@ import { IconButton } from 'open-design-ui/icon-button';
 import { Button } from 'open-design-ui/button';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useI18n } from '../i18n/I18n';
+import { copyTextToClipboard } from '../utils/clipboard';
 import { MotionIcon } from './icons';
 import { RemixIcon } from '../icons/RemixIcons';
 import { assetMediaUrl, type AssetReference } from '../../../shared/asset-library';
@@ -123,7 +124,8 @@ export function TemplateSearchRecovery(props: RequestCallbacks & (SearchRecovery
     const sourceKind = mode === 'reference' ? source : 'description';
     tracking.reportRecoveryAction('copy_brief', actionContext, entry, sourceKind);
     try {
-      await navigator.clipboard.writeText(brief); setManual(null);
+      if (!(await copyTextToClipboard(brief))) throw new Error('Clipboard copy failed');
+      setManual(null);
       tracking.reportSearchHandoff(sourceKind, attemptId, 'clipboard_written', actionContext, entry);
       showToast(t('Request copied. Paste the request in your chat and send it.'), 'info');
     } catch {

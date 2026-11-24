@@ -5,6 +5,7 @@ import { FieldInput } from "../components/ui/FormField";
 import { DisclosureRow } from "../../../packages/design-system/react/DisclosureRow";
 import { useProjectArchives, ProjectArchiveMenu, type ProjectArchiveActions } from './ProjectArchives';
 import type { GalleryTemplate } from '../../../shared/catalog';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import type { McpClient } from './mcpClients';
 import { creativeStudios, type CreativeStudio, type TechniqueStudio } from '../../../shared/studio-catalog';
 import type { Modality } from '../../../shared/gateway';
@@ -47,7 +48,7 @@ import { StudioToastViewport } from '../components/StudioToastViewport';
 import { clickMethod, searchStarted, trackStudioClick } from './editorTracking';
 import { reportCreativePageView } from './exploreTracking';
 import type { ScenarioId } from '../../../shared/scenarios';
-import { isWorkspacePageOpen, resolveNavTrackingPage, resolveRouteArrival } from '../router/routeRegistry';
+import { isWorkspacePageOpen, resolveNavTrackingPage, resolveRouteArrival, routeArrivalTarget } from '../router/routeRegistry';
 import { RouteViewport } from '../router/RouteViewport';
 import { OverlayLayer } from '../router/OverlayLayer';
 import { StudioRouterProvider } from '../router/createAppRouter';
@@ -422,8 +423,8 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
     if (!routeView) return;
     const hasProject = Boolean(projectId);
     if (routeView === 'explore') reportCreativePageView('explore', hasProject, { community: page.community, medium: page.medium ?? 'all' });
-    else if (routeView === 'motion' || routeView === 'design' || routeView === 'cinema') reportCreativePageView('creative_studio', hasProject, { studio: routeView, landing: true });
-    else reportCreativePageView('model_overview', hasProject, { model: page.modelOverview });
+    else if (routeView.startsWith('model:')) reportCreativePageView('model_overview', hasProject, { model: page.modelOverview });
+    else reportCreativePageView('creative_studio', hasProject, routeArrivalTarget(routeView, page));
     // Only an arrival counts; filter changes within Explore are reported as clicks.
   }, [routeView]);
   // Where the top navigation is shown, so its clicks segment by the page the user was on.
@@ -544,6 +545,18 @@ function WorkspaceFrameInner({ children, waitForSaves, projectId, sessionId, blo
         scenarioActive={!navTemplatesPage && !navSettings ? (navPage.scenario ?? (navPage.scenarioHub ? 'hub' : null)) : null}
         onOpenScenario={(id, runId) => openScenario(id, runId)}
         onOpenScenarioHub={() => openScenarioHub()}
+        onNewAgentChat={() => navigatePage({ superAgent: true, superAgentChat: null, superAgentMode: null, settings: null, assets: false, skills: false, templates: false, template: null })}
+        onAgentChat={chatId => navigatePage({ superAgent: true, superAgentChat: chatId, superAgentMode: null, settings: null, assets: false, skills: false, templates: false, template: null })}
+        onOpenDesignScene={designScene => navigatePage({ designScene, designProject: null, templates: false, ...lastExplore.current })}
+        onOpenDesignProject={(id, designScene = 'projects') => navigatePage({ designScene, designProject: id, templates: false, ...lastExplore.current })}
+        onOpenMotionProject={id => { void workspace.open('projects', id); }}
+        onOpenGame={gameId => {
+          const gameStudio = creativeStudios.find((entry): entry is TechniqueStudio => entry.id === 'game' && entry.surface === 'techniques');
+          if (gameStudio) navigatePage({ specialty: gameStudio, skill: null, gameId, templates: false, ...lastExplore.current });
+        }}
+        onOpenBrandKit={kitId => navigatePage({ settings: 'brand-kit', brandKit: kitId ?? null, assets: false, skills: false, templates: false })}
+        onOpenMcp={() => openMcp(undefined, undefined, false)}
+        onNotify={(msg, tone = 'info') => navigationToast.showToast(msg, tone, 'feedback')}
         onNavigate={openStudio} onNavigateSound={openAudioNav} />
       <div className="motion-workspace">
       {isRoutePending && <div className="motion-route-progress" role="progressbar" aria-hidden="true" />}
@@ -619,7 +632,7 @@ function WorkspaceSidebar({ archives, currentId, close, expand, query, setQuery,
   const { t } = useI18n();
   const { workspace, switchingDisabled } = useWorkspaceChrome();
   const projects = workspace.projects;
-  const filtered = projects.filter(project => project.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const filtered = rankSearchResults(projects, query, project => ({ id: project.id, title: project.title })).map(r => r.item);
   const loadingProjects = !workspace.status && !workspace.error && projects.length === 0;
   return <aside className="motion-sidebar" aria-label={t('Workspace navigation')}>
     <div className="motion-sidebar-brand">

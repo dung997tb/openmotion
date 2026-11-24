@@ -768,7 +768,7 @@ export async function distributionFiles(profile: string, include: (file: string)
     'scripts/diagnostics.mjs', 'scripts/diagnostic-redaction.mjs', 'scripts/zip.mjs',
     'scripts/verify-export.ts', 'scripts/export-adapters.ts', 'scripts/package.ts', 'scripts/distribution.ts', 'scripts/build-template-guide.mjs',
     'scripts/repository-media.ts', 'scripts/prepare-font.ts', 'scripts/font-specimen.ts', 'scripts/build-template-cards.mjs',
-    'shared/install-attribution.ts', 'shared/asset-name-ui.json', 'shared/workflow-entry.js', 'shared/inline-video-result.js', 'shared/provider-registry-LICENSE.txt', 'shared/provider-registry-NOTICE.md', 'studio/LICENSE', 'studio/README.md', 'studio/skill-cover-attribution.md', 'template-library/LICENSE', 'shared/editor-launch.pl',
+    'shared/install-attribution.ts', 'shared/asset-name-ui.json', 'shared/design-mention-titles.zh-CN.json', 'shared/workflow-entry.js', 'shared/inline-video-result.js', 'shared/provider-registry-LICENSE.txt', 'shared/provider-registry-NOTICE.md', 'studio/LICENSE', 'studio/README.md', 'studio/skill-cover-attribution.md', 'template-library/LICENSE', 'shared/editor-launch.pl',
     'gateway/brand-capture/LICENSE', 'gateway/brand-capture/NOTICE.md',
     'tracking/core.ts', 'tracking/node.ts', 'tracking/browser.ts', 'tracking/events.ts', 'tracking/tool-fields.ts', 'tracking/studio-events.ts', 'tracking/studio-properties.ts', 'tracking/host.ts', 'tracking/device.ts', 'tracking/task-ledger.ts',
     // Required, reviewed native MCP presentation assets; do not widen media globs.

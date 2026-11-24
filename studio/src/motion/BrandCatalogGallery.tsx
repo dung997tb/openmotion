@@ -7,10 +7,11 @@ import { templateContributionUrl } from './templateContribution';
 import { Skeleton } from '../components/ui/Skeleton';
 import { brandCatalogFile, type BrandCatalog, type BrandCatalogEntry } from '../../../shared/brand-catalog';
 import type { GalleryTemplate } from '../../../shared/catalog';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import { brandKitShowcase, brandRequest } from './brandKitClient';
 import { TemplateGalleryCard } from './TemplateGalleryCard';
 import { useTemplatePlayback } from './useTemplatePlayback';
-import { GalleryFilterPopover, GallerySortMenu, matchesGalleryFilters, matchesGallerySearch, toggleGalleryFilter, type GalleryFilters } from './GalleryFilters';
+import { GalleryFilterPopover, GallerySortMenu, matchesGalleryFilters, toggleGalleryFilter, type GalleryFilters } from './GalleryFilters';
 
 const sortOptions = [['catalog', 'Collection order'], ['name', 'Name A–Z'], ['reverse', 'Name Z–A']] as const;
 const PAGE_SIZE = 48;
@@ -41,10 +42,24 @@ export const BrandCatalogGallery = memo(function BrandCatalogGallery({ onImport,
     { key: 'appearance', label: 'Appearance', values: ['Light', 'Dark'] },
     { key: 'colors', label: 'Colors', values: [...new Set(entries.flatMap(entry => entry.colors))].sort() },
   ], [catalog]);
-  const searchable = useMemo(() => entries.filter(entry => matchesGallerySearch(query, [entry.name, entry.description, entry.category, t(entry.category), t(entry.appearance), ...entry.tags, ...entry.colors.map(color => t(color))].join(' '))), [entries, query, t]);
-  const visible = useMemo(() => searchable.filter(entry => matchesGalleryFilters(filters, key => entryValues(entry, key))).sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'reverse' ? b.name.localeCompare(a.name) : 0), [searchable, filters, sort]);
+  const searchable = useMemo(() => rankSearchResults(entries, query, entry => ({
+    id: entry.id,
+    title: entry.name,
+    subtitle: entry.category,
+    description: entry.description,
+    tags: entry.tags,
+    aliases: [t(entry.category), entry.appearance, t(entry.appearance), ...entry.colors, ...entry.colors.map(color => t(color))],
+  })), [entries, query, t]);
+  const visible = useMemo(() => {
+    const scoreById = new Map(searchable.map(r => [r.item.id, r.score]));
+    const list = searchable.map(r => r.item).filter(entry => matchesGalleryFilters(filters, key => entryValues(entry, key)));
+    if (sort === 'name') return [...list].sort((a, b) => a.name.localeCompare(b.name));
+    if (sort === 'reverse') return [...list].sort((a, b) => b.name.localeCompare(a.name));
+    if (query.trim()) return [...list].sort((a, b) => (scoreById.get(b.id) ?? 0) - (scoreById.get(a.id) ?? 0));
+    return list;
+  }, [searchable, filters, sort, query]);
   const visibleIds = useMemo(() => visible.map(entry => entry.id), [visible]);
-  const draftCount = useMemo(() => searchable.filter(entry => matchesGalleryFilters(draft, key => entryValues(entry, key))).length, [searchable, draft]);
+  const draftCount = useMemo(() => searchable.filter(({ item: entry }) => matchesGalleryFilters(draft, key => entryValues(entry, key))).length, [searchable, draft]);
   const hasFilters = Object.values(filters).some(values => values?.length), hasDraft = Object.values(draft).some(values => values?.length);
   const rendered = visible.slice(0, renderLimit);
   const playback = useTemplatePlayback(scrollRoot, visibleIds.slice(0, renderLimit).join('|'), previewsEnabled, true, priority, true);

@@ -1,0 +1,100 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { TemplateCatalog } from '../prism-templates.ts';
+import { designCatalog } from '../shared/design-catalog.ts';
+import {
+  extractHighlightTerms,
+  matchesSearchDocument,
+  normalizeSearchText,
+  parseSearchQuery,
+  rankSearchResults,
+  scoreSearchDocument,
+} from '../shared/fuzzy-search.ts';
+import { clearWorkspaceResourceCache, collectWorkspaceResources } from '../gateway/super-agent-resources.ts';
+import { fixture } from './fixtures.ts';
+
+test('fuzzy search supports Chinese natural-language queries, Traditional folding, and English typos', () => {
+  const nlDoc = {
+    id: 'science-data-card',
+    title: '数据故事与科学原理',
+    subtitle: '数据叙事 · 流程动画',
+    description: '用于知识科普、信息图解与课程讲解的短视频模板',
+    tags: ['科普', '数据叙事', '讲解', '短视频'],
+  };
+  const unrelatedDoc = {
+    id: 'unrelated-brand',
+    title: 'Minimal Luxury Logo Intro',
+    subtitle: 'Motion',
+    description: 'Clean logo emblem reveal for fashion house',
+    tags: ['Brand promotion'],
+  };
+
+  assert.ok(scoreSearchDocument(nlDoc, '我想找一个科技科普讲解的视频模板') > 0);
+  assert.ok(matchesSearchDocument({ title: '产品演示与功能介绍', tags: ['产品演示'] }, '產品演示'));
+  assert.ok(scoreSearchDocument({ title: 'Smooth Text Animation' }, 'animaton') > 0);
+  assert.ok(scoreSearchDocument({ title: 'Template Showcase' }, 'tempalte') > 0);
+  assert.equal(normalizeSearchText('  產品演示—V2  '), '产品演示 v2');
+
+  const ranked = rankSearchResults([unrelatedDoc, nlDoc], '科普讲解', doc => doc);
+  assert.equal(ranked[0]?.item.id, 'science-data-card');
+});
+
+test('fuzzy search enforces short-token boundaries, identifier coordination, and brand disjointness', () => {
+  assert.equal(scoreSearchDocument({ title: 'Anything goes' }, 'NYT'), 0);
+  assert.ok(scoreSearchDocument({ title: 'NYT Graph' }, 'NYT') > 0);
+  assert.ok(scoreSearchDocument({ title: '3D动效标题' }, '3D') > 0);
+
+  assert.equal(scoreSearchDocument({ title: 'Studio Brand', tags: ['Brand promotion'] }, '产品演示'), 0);
+  assert.equal(scoreSearchDocument({ title: 'Studio promo', tags: ['Brand promotion'] }, 'product promo'), 0);
+  assert.ok(scoreSearchDocument({ title: 'Product reveal', tags: ['Product launch'] }, 'product promo') > 0);
+
+  const partial = {
+    id: 'hf-moment-M1165',
+    title: 'Interactive components in a frame',
+    tags: ['cursor_trail'],
+    description: 'Agents workflow',
+  };
+  assert.equal(scoreSearchDocument(partial, 'hf-component-agent-cursor'), 0);
+  assert.ok(scoreSearchDocument({ id: 'hf-component-agent-cursor', title: 'Cursor agent' }, 'hf-component-agent-cursor') > 0);
+
+  const parsed = parseSearchQuery('Seedance 2.0');
+  assert.ok(parsed.isIdentifier === false);
+  assert.ok(extractHighlightTerms('Seedance 2.0').includes('2.0'));
+});
+
+test('all six PostHog zero-result queries return hits across the real template catalog in both zh-CN and en', () =>
+  fixture(async store => {
+    const hotQueries = ['口播', '科普', '电商', '讲解', 'vlog', 'logo'];
+    for (const locale of ['zh-CN', 'en'] as const) {
+      const catalog = new TemplateCatalog(store.directory, { locale });
+      for (const query of hotQueries) {
+        const page = await catalog.page({ category: 'all', query, limit: 20 });
+        assert.ok(page.total > 0, `Expected hits for "${query}" in locale ${locale}, got 0`);
+        assert.ok(page.items.length > 0);
+      }
+      // Cross-locale English typo search also finds matches even in zh-CN via searchAliases.
+      const typoPage = await catalog.page({ category: 'all', query: 'animaton', limit: 20 });
+      assert.ok(typoPage.total > 0, `Expected cross-locale typo hits for "animaton" in ${locale}`);
+    }
+  }, false));
+
+test('designCatalog supports Chinese, alias, and fuzzy search queries', () => {
+  const catalog = designCatalog();
+  const zhTemplates = catalog.templates({ q: '小红书' });
+  assert.ok(zhTemplates.items.length > 0);
+  const fuzzySystems = catalog.systems({ q: 'minimalst' });
+  assert.ok(fuzzySystems.length >= 0);
+  const fuzzySkills = catalog.skills({ q: '设计' });
+  assert.ok(fuzzySkills.length > 0);
+});
+
+test('collectWorkspaceResources returns full motion templates without hitting page limit<=60 and matches bilingual queries', () =>
+  fixture(async store => {
+    clearWorkspaceResourceCache();
+    const res = await collectWorkspaceResources(store, { kind: 'motion-template', query: '口播', limit: 20, locale: 'zh-CN' });
+    assert.ok(res.counts.motionTemplates > 60, `Expected >60 motion templates, got ${res.counts.motionTemplates}`);
+    assert.ok(res.items.length > 0, 'Expected motion-template matches for 口播');
+
+    const enLogo = await collectWorkspaceResources(store, { kind: 'motion-template', query: 'logo', limit: 20, locale: 'zh-CN' });
+    assert.ok(enLogo.items.length > 0, 'Expected motion-template matches for logo in zh-CN');
+  }, false));

@@ -41,7 +41,8 @@ export async function mediaUse(store: WorkspaceStore, args: any, tracking?: OmTr
     const pages = await Promise.all(providers.map(provider => gateway.listModels({ provider: provider.id, modality: args.modality, refresh: args.refresh, query: args.query, offset: args.offset, limit: args.limit })));
     return { providers: providers.map(p => p.id), catalogs: pages, setupRequired: !providers.length };
   }
-  if (!args.projectId || !store.projectCatalog().projects.some(p => p.id === args.projectId)) throw new Error('PROJECT_NOT_FOUND');
+  if (!args.projectId) throw new ToolInputError('projectId is required', 'projectId', 'missing');
+  if (!store.projectCatalog().projects.some(p => p.id === args.projectId)) throw new Error('PROJECT_NOT_FOUND');
   if (args.action === 'generate') {
     if (args.provider === 'codex') throw new ToolInputError('Generate Codex images with openmotion_assets_use (model codex:image-generation); project-direct generation does not accept Codex', 'provider', 'invalid_enum');
     const missing = ['provider', 'model', 'requestId', 'modality'].find(field => !args[field]);

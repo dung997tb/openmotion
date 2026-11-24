@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { blackFridayTemplates } from '../../../shared/black-friday-collection';
 import type { GalleryTemplate } from '../../../shared/catalog';
 import { designScenarios, isDesignScenario } from '../../../shared/design-project';
+import { rankSearchResults } from '../../../shared/fuzzy-search';
 import { gameGenres, type GameCard, type GameGenre } from '../../../shared/game-contract';
 import type { SuperAgentDesignModuleId, SuperAgentResourceAttachment } from '../../../shared/super-agent';
 import { Select } from '../components/ui/Select';
@@ -1313,7 +1314,7 @@ export function ModeResourceShowcase({
 
   const filteredGames = useMemo<GameCard[]>(() => {
     if (!showGameCards) return [];
-    const needle = gameQuery.trim().toLocaleLowerCase();
+    const needle = gameQuery.trim();
     const base = activeFilter === 'mine'
       ? myGames
       : activeFilter === 'portrait'
@@ -1321,20 +1322,25 @@ export function ModeResourceShowcase({
         : activeFilter.startsWith('genre:')
           ? publishedGameTemplates.filter(item => item.genre === (activeFilter.slice(6) as GameGenre))
           : publishedGameTemplates;
-    const matched = needle
-      ? base.filter(game =>
-          [
+    const ranked = needle
+      ? rankSearchResults(base, needle, game => ({
+          id: game.id,
+          title: game.i18n?.[locale]?.title ?? game.title,
+          subtitle: t(genreLabels[game.genre]),
+          description: game.i18n?.[locale]?.description ?? game.description,
+          tags: [game.genre, ...(game.style ? [game.style] : []), ...(game.setting ? [game.setting] : [])],
+          aliases: [
             game.title,
             game.description,
-            game.i18n?.[locale]?.title,
-            game.i18n?.[locale]?.description,
-            t(genreLabels[game.genre]),
-          ].some(text => text?.toLocaleLowerCase().includes(needle)),
-        )
-      : base;
+            ...Object.values(game.i18n ?? {}).flatMap(loc => [loc?.title ?? '', loc?.description ?? '']),
+          ],
+        }))
+      : base.map(item => ({ item, score: 1 }));
+    const matched = ranked.map(r => r.item);
     if (activeFilter === 'mine') return matched;
     if (gameSort === 'plays') return [...matched].sort((a, b) => b.plays - a.plays);
     if (gameSort === 'newest') return [...matched].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    if (needle) return matched;
     return interleavePortrait(matched);
   }, [showGameCards, activeFilter, publishedGameTemplates, myGames, gameQuery, gameSort, locale, t]);
 

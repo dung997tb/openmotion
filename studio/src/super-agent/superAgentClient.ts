@@ -35,8 +35,13 @@ let inflightChatList: Promise<{ conversations: SuperAgentChatSummary[] }> | null
 const resourcesCache = new Map<string, { value: SuperAgentResourceCatalog; expiresAt: number }>();
 const inflightResources = new Map<string, Promise<SuperAgentResourceCatalog>>();
 
-function resourcesCacheKey(params: { kind?: string; query?: string; limit?: number } = {}): string {
-  return JSON.stringify([params.kind && params.kind !== 'all' ? params.kind : 'all', params.query?.trim() ?? '', params.limit ?? null]);
+function resourcesCacheKey(params: { kind?: string; query?: string; limit?: number; locale?: string } = {}): string {
+  return JSON.stringify([
+    params.kind && params.kind !== 'all' ? params.kind : 'all',
+    params.query?.trim() ?? '',
+    params.limit ?? null,
+    params.locale?.trim() ?? '',
+  ]);
 }
 
 function invalidateChatListCache(): void {
@@ -90,7 +95,7 @@ export function peekCachedSuperAgentChatList(): SuperAgentChatSummary[] | undefi
   return chatListCache?.value;
 }
 
-export function peekCachedWorkspaceResources(params: { kind?: string; query?: string; limit?: number } = {}): SuperAgentResourceCatalog | undefined {
+export function peekCachedWorkspaceResources(params: { kind?: string; query?: string; limit?: number; locale?: string } = {}): SuperAgentResourceCatalog | undefined {
   if (!isClientCacheEnabled()) return undefined;
   return resourcesCache.get(resourcesCacheKey(params))?.value;
 }
@@ -107,9 +112,10 @@ export function prefetchSuperAgentWorkspace(): void {
   }
 }
 
-async function saRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function saRequest<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`${SUPER_AGENT_API}${path}`, {
     method,
+    ...(signal ? { signal } : {}),
     ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   });
   const text = await response.text();
@@ -125,27 +131,31 @@ async function saRequest<T>(path: string, method = 'GET', body?: unknown): Promi
   return data as T;
 }
 
-export async function fetchWorkspaceResources(params: { kind?: string; query?: string; limit?: number } = {}) {
+export async function fetchWorkspaceResources(params: { kind?: string; query?: string; limit?: number; locale?: string; signal?: AbortSignal } = {}) {
   const key = resourcesCacheKey(params);
   if (isClientCacheEnabled()) {
     const cached = resourcesCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
   }
-  const pending = inflightResources.get(key);
-  if (pending) return pending;
+  if (!params.signal) {
+    const pending = inflightResources.get(key);
+    if (pending) return pending;
+  }
 
   const search = new URLSearchParams();
   if (params.kind && params.kind !== 'all') search.set('kind', params.kind);
   if (params.query?.trim()) search.set('query', params.query.trim());
   if (params.limit) search.set('limit', String(params.limit));
+  if (params.locale?.trim()) search.set('locale', params.locale.trim());
   const qs = search.toString();
   const gen = resourcesCacheGeneration;
-  const run = saRequest<SuperAgentResourceCatalog>(`/resources${qs ? `?${qs}` : ''}`).then(res => {
+  const run = saRequest<SuperAgentResourceCatalog>(`/resources${qs ? `?${qs}` : ''}`, 'GET', undefined, params.signal).then(res => {
     if (isClientCacheEnabled() && gen === resourcesCacheGeneration) {
       resourcesCache.set(key, { value: res, expiresAt: Date.now() + RESOURCES_TTL_MS });
     }
     return res;
   });
+  if (params.signal) return run;
   inflightResources.set(key, run);
   return run.finally(() => {
     if (inflightResources.get(key) === run) inflightResources.delete(key);
