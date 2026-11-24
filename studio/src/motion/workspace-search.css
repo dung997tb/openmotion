@@ -162,16 +162,18 @@
 [data-motion-studio] .om-command-ai-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--motion-space-6);
   height: var(--motion-control-sm);
   min-height: var(--motion-control-sm);
-  padding: 0 var(--motion-space-10);
+  padding: 0 var(--motion-space-6) 0 var(--motion-space-10);
   border: 0;
   border-radius: var(--motion-radius-full);
   white-space: nowrap;
   flex-shrink: 0;
   font-size: var(--motion-text-xs);
   font-weight: var(--motion-weight-semibold);
+  line-height: 1;
   color: var(--motion-strong);
   background: linear-gradient(
     115deg,
@@ -207,6 +209,9 @@
 }
 
 [data-motion-studio] .om-command-ai-label {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
   background: linear-gradient(
     100deg,
     var(--motion-creative-agent),
@@ -222,14 +227,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: var(--motion-space-16);
-  padding-inline: var(--motion-space-4);
-  border-radius: var(--motion-radius-xs);
-  background: color-mix(in srgb, var(--motion-text) 9%, transparent);
+  flex: none;
+  height: var(--motion-space-20);
+  padding-inline: var(--motion-space-6);
+  border-radius: var(--motion-radius-full);
+  background: color-mix(in srgb, var(--motion-text) 10%, transparent);
   color: var(--motion-muted);
-  font-family: var(--motion-font-mono);
+  font-family: inherit;
   font-size: var(--motion-text-xs);
+  font-weight: var(--motion-weight-medium);
   line-height: 1;
+  letter-spacing: 0.02em;
 }
 
 [data-motion-studio] .om-command-kbd {
