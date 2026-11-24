@@ -379,7 +379,8 @@ test('real review workflow preserves element context, clipboard fallback and Age
     await reviewComments(store, { action: 'comments', operation: 'delete', projectId: 'project', commentId: annotated.id, expectedCommentRevision: 2, requestId: 'annotation-cleanup' });
     await page.locator('.motion-project-agent-trigger[aria-label="MCP"]').click();
     await button(page, 'Connection help');
-    await page.waitForSelector('#mcp-capabilities');
+    await page.locator('#dev-drawer > button[aria-expanded="false"]').click();
+    await page.waitForSelector('#mcp-capabilities', { visible: true });
     await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { document.documentElement.dataset.copiedReview = text; } } }); });
     const example = await page.evaluateHandle(() => [...document.querySelectorAll('#mcp-capabilities article')]
       .find(article => article.querySelector('h3')?.textContent === 'Review a video with comments')?.querySelector('button'));
@@ -392,7 +393,8 @@ test('real review workflow preserves element context, clipboard fallback and Age
     for (const theme of ['light', 'dark']) {
       await page.evaluate(theme => localStorage.setItem('hf-studio-ui-preferences', JSON.stringify({ theme })), theme);
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForSelector('[data-review-guide] summary');
+      await page.locator('#dev-drawer > button[aria-expanded="false"]').click();
+      await page.waitForSelector('[data-review-guide] summary', { visible: true });
       await page.locator('[data-review-guide] summary').click();
       await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('[data-review-guide]')?.open === true);
       for (const width of [1440, 480]) {

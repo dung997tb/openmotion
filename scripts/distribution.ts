@@ -785,6 +785,8 @@ export async function distributionFiles(profile: string, include: (file: string)
         if (/^studio\/build\/editor-assets\/(?:soundtrack|score|reveal-cues|flight-effects|sfx-(?:pad|chime|success|click|whoosh|impact|riser|typing))-[\w-]+\.m4a$/.test(file)) files.push(file);
         // Vite fingerprints bundled voice audition samples used by Sound Studio Speech (Kokoro-82M Apache-2.0 and BytePlus Vivi).
         if (/^studio\/build\/editor-assets\/(?:kokoro-(?:af|am)_[a-z]+|byteplus-[a-z0-9_]+)-[\w-]+\.m4a$/.test(file)) files.push(file);
+        // MCP setup plays these first-party workflow clips offline: writing a template brief and editing/exporting in Studio.
+        if (/^studio\/build\/editor-assets\/(?:template-brief|studio-editing)-[\w-]+\.mp4$/.test(file)) files.push(file);
         if (/^studio\/(?:build|public)\//.test(file) && /\.(?:gif|mp4|webm|mov|m4v|mp3|m4a|wav|ogg|flac|aac)$/i.test(file) && !files.includes(file)) {
           throw new Error(`Unregistered Studio media: ${file}. Host optional previews and load them on demand. Add required offline media to scripts/distribution.ts with its runtime purpose.`);
         }
