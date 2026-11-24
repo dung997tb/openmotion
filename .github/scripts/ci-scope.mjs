@@ -9,7 +9,7 @@ import { validateMediaManifest } from '../../shared/repository-media.ts';
 // Only presentation pages qualify; Skills, installation guides and examples are product inputs.
 const presentationDocs = new Set([
   'README.md', 'README.zh-CN.md', 'README.REVERSE-ENGINEERING.md',
-  'docs/README.md', 'docs/README.zh-CN.md', 'docs/README.ja.md',
+  'docs/README.md', 'docs/README.zh-CN.md', 'docs/README.ja.md', 'docs/README.vi.md',
 ]);
 
 export function classifyChanges(files) {

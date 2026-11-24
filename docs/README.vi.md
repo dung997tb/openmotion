@@ -325,7 +325,7 @@ Nếu media lịch sử không khả dụng, việc khôi phục bằng Agent s�
 
 <img src="readme/live-product/editor.en.jpg" width="100%" alt="Dự án mẫu trong Studio với các bố cục, bản xem trước video, dòng thời gian cảnh và dạng sóng âm thanh của nó.">
 
-Xem lại video của bạn, sắp xếp các clip và xuất bản từ cùng một không gian làm việc Studio.
+Xem lại video của bạn, sắp xếp các clip và xuất video từ cùng một không gian làm việc Studio.
 
 #### Những gì bạn có thể thay đổi trong Studio
 
@@ -336,7 +336,7 @@ Xem lại video của bạn, sắp xếp các clip và xuất bản từ cùng m
 | **Media và âm thanh** | Nhập tư liệu của bạn và tạo hình ảnh, video, âm nhạc và lời thuyết minh TTS thông qua các tích hợp mô hình có sẵn |
 | **Chỉnh sửa hình ảnh** | Tạo các ứng viên bằng một mô hình hình ảnh có khả năng dùng bản tham chiếu và áp dụng một bản thay thế trong khi vẫn giữ nhịp thời gian và chuyển động |
 | **Xem trước và các phiên bản** | Xem lại trong Studio, chỉnh sửa bằng tay hoặc bằng agent của bạn, và quay lại dự án cho lần chỉnh sửa tiếp theo |
-| **Xuất bản và mã nguồn** | Kết xuất một phiên bản cố định thành MP4 và giữ lại HTML, CSS, JavaScript cùng media |
+| **Xuất và mã nguồn** | Kết xuất một phiên bản cố định thành MP4 và giữ lại HTML, CSS, JavaScript cùng media |
 
 > “Giữ lại màn tiết lộ chúng ta đã duyệt. Thay cảnh giữa bằng bản ghi màn hình này, thắt chặt phần mở đầu bằng các mã thời gian này, và giữ CTA cuối cùng của chúng ta thêm hai giây nữa.”
 
@@ -349,7 +349,7 @@ Xem lại video của bạn, sắp xếp các clip và xuất bản từ cùng m
 1. **Phân tích bản tham chiếu.** Chọn một phân đoạn. Ghi lại thứ tự cảnh quay, hiệu ứng chuyển cảnh và các tín hiệu âm thanh của nó vào Motion.md, và đánh dấu những gì bạn muốn thay thế.
 2. **Dựng lại các cảnh quay.** Agent của bạn dựng lại các cảnh HTML bằng brand kit, nội dung và hình ảnh của bạn, rồi sắp xếp chúng trên một dòng thời gian có thể chỉnh sửa trong Studio.
 3. **So sánh các bản cắt.** Xem cùng một khoảnh khắc trong bản gốc và bản tái hiện. Điều chỉnh nhịp thời gian, chuyển động và âm thanh, rồi phát toàn bộ phân đoạn.
-4. **Xuất bản và chia sẻ.** Kết xuất MP4 và giữ lại mã nguồn HTML cùng media. Để chia sẻ một dự án mà người khác có thể điều chỉnh, hãy kèm theo Motion.md của nó, một bản xem trước và các tài nguyên bạn có thể phân phối lại. [Danh sách kiểm tra đóng góp dự án](../library/ENTRY_TEMPLATE.md)
+4. **Xuất và chia sẻ.** Kết xuất MP4 và giữ lại mã nguồn HTML cùng media. Để chia sẻ một dự án mà người khác có thể điều chỉnh, hãy kèm theo Motion.md của nó, một bản xem trước và các tài nguyên bạn có thể phân phối lại. [Danh sách kiểm tra đóng góp dự án](../library/ENTRY_TEMPLATE.md)
 
 <a id="bring-your-agent-and-keys"></a>
 
@@ -465,7 +465,7 @@ Trong quá trình tạo và chỉnh sửa video, cuộc trò chuyện không ch�
 
 Nếu các công cụ MCP bị thiếu hoặc không kết nối được, hãy dùng [hướng dẫn chẩn đoán và khôi phục kết nối](npm-installation.md#missing-mcp-tools-or-a-failed-connection) đã cài đặt để kiểm tra cấu hình máy chủ thực tế và xác minh không gian làm việc gốc trước khi tiếp tục.
 
-Sử dụng Git, npm và **Node.js 26.11.1**. Xem trước và xuất bản từ mã nguồn cũng cần Chrome/Chromium và FFmpeg/FFprobe. [Thiết lập môi trường chạy](usage.md)
+Sử dụng Git, npm và **Node.js 26.11.1**. Xem trước và xuất từ mã nguồn cũng cần Chrome/Chromium và FFmpeg/FFprobe. [Thiết lập môi trường chạy](usage.md)
 
 ```sh
 git -c filter.lfs.process= -c filter.lfs.smudge= -c filter.lfs.required=false clone --depth 1 --single-branch --branch main https://github.com/nexu-io/openmotion.git
@@ -535,7 +535,7 @@ Việc này sao chép các chỉ dẫn; nó không cài đặt môi trường ch
 | [openmotion-template-to-video](../skills/openmotion-template-to-video/SKILL.md) | Điều chỉnh một mẫu có thể chỉnh sửa hiện có |
 | [openmotion-director](../skills/openmotion-director/SKILL.md) | Phim gốc, kể chuyện, chuyển động, âm thanh và đánh giá sáng tạo |
 | [openmotion-video-to-template](../skills/openmotion-video-to-template/SKILL.md) | Tạo ra một mẫu di động có thể tái sử dụng |
-| [openmotion-production](../skills/openmotion-production/SKILL.md) | Các chỉnh sửa theo phạm vi, xem trước, kiểm tra, khắc phục sự cố và xuất bản |
+| [openmotion-production](../skills/openmotion-production/SKILL.md) | Các chỉnh sửa theo phạm vi, xem trước, kiểm tra, khắc phục sự cố và xuất |
 
 <a id="local-agent-connection"></a>
 
@@ -555,7 +555,7 @@ Việc này sao chép các chỉ dẫn; nó không cài đặt môi trường ch
 }
 ```
 
-**Hai mươi hai tên MCP công khai (bao gồm một bí danh tương thích cho tài nguyên và bốn công cụ HTML của Design Studio)** bao phủ việc khám phá và xem chi tiết mẫu, khám phá và đọc Skill, tạo và đọc dự án, chỉnh sửa, xem trước, nhập media và tạo nội dung BYOK, các phiên bản tài nguyên có thể tái sử dụng, quản lý dự án và chia sẻ ZIP, xuất bản, khôi phục phiên bản, hủy bỏ, cùng các dự án HTML của Design Studio, chú thích và vòng khứ hồi Open Design. Các hướng dẫn quy trình và engine dùng chung có sẵn thông qua các tài nguyên MCP. [Hợp đồng công cụ](mcp-phase1-tools.md)
+**Hai mươi hai tên MCP công khai (bao gồm một bí danh tương thích cho tài nguyên và bốn công cụ HTML của Design Studio)** bao phủ việc khám phá và xem chi tiết mẫu, khám phá và đọc Skill, tạo và đọc dự án, chỉnh sửa, xem trước, nhập media và tạo nội dung BYOK, các phiên bản tài nguyên có thể tái sử dụng, quản lý dự án và chia sẻ ZIP, xuất, khôi phục phiên bản, hủy bỏ, cùng các dự án HTML của Design Studio, chú thích và vòng khứ hồi Open Design. Các hướng dẫn quy trình và engine dùng chung có sẵn thông qua các tài nguyên MCP. [Hợp đồng công cụ](mcp-phase1-tools.md)
 
 Tìm một mẫu bằng `openmotion_list_templates`, kiểm tra nó bằng `openmotion_get_template`, rồi tạo một bản sao có thể chỉnh sửa bằng `openmotion_create_project`. [Danh mục mẫu](template-catalog.md)
 
@@ -599,7 +599,7 @@ export an MP4 and retain the source for the next edit.
 
 1. Xem video tham chiếu. Mở rộng **Visual style** hoặc **Production notes** để xem chi tiết, hoặc chọn **Download motion.md** để lưu hướng dẫn.
 2. Chọn **Show instruction** để đọc prompt, rồi **Recreate template** để sao chép nó. Dán nó vào agent của bạn cùng brand kit và bản tóm tắt sáng tạo của bạn.
-3. Mở dự án mà agent của bạn tạo trong Studio để chỉnh sửa và xuất bản.
+3. Mở dự án mà agent của bạn tạo trong Studio để chỉnh sửa và xuất.
 
 ![Bản xem trước mẫu bên cạnh chỉ dẫn đã mở rộng và nút Recreate template, kèm xác nhận rằng chỉ dẫn đã được sao chép.](readme/live-product/remix.en.jpg)
 
@@ -611,9 +611,9 @@ Việc chỉnh sửa dòng thời gian trong Studio và việc yêu cầu agent 
 
 #### Cách các mô-đun phối hợp với nhau
 
-![Agent cục bộ kết nối qua chín công cụ dự án MCP và Studio qua HTTP cục bộ. Ứng dụng quản lý các phiên bản, tài nguyên và công việc xuất bản; Model Gateway cung cấp media cho dự án có thể chỉnh sửa, và trình kết xuất xuất bản cùng kiểm tra phiên bản dự án đã chọn.](https://releases.open-design.ai/open-motion/media/sha256/3e93e9896c3dbb930ab5492c12fdca48db226eddf881601b75400ca4011e01f0.png)
+![Agent cục bộ kết nối qua chín công cụ dự án MCP và Studio qua HTTP cục bộ. Ứng dụng quản lý các phiên bản, tài nguyên và công việc xuất; Model Gateway cung cấp media cho dự án có thể chỉnh sửa, và trình kết xuất xuất cùng kiểm tra phiên bản dự án đã chọn.](https://releases.open-design.ai/open-motion/media/sha256/3e93e9896c3dbb930ab5492c12fdca48db226eddf881601b75400ca4011e01f0.png)
 
-Các chỉnh sửa thực hiện qua các công cụ dự án bao gồm một bước kiểm tra phiên bản để một yêu cầu lỗi thời không thể ghi đè công việc mới hơn. Media được tạo sẽ vào dự án khi bạn chọn nó. Mỗi lần xuất bản dùng phiên bản đã lưu khi công việc bắt đầu. Trình xuất bản kiểm tra các thông số tệp, và bạn có thể phát bản cắt để xem lại hình ảnh, âm thanh và nhịp thời gian.
+Các chỉnh sửa thực hiện qua các công cụ dự án bao gồm một bước kiểm tra phiên bản để một yêu cầu lỗi thời không thể ghi đè công việc mới hơn. Media được tạo sẽ vào dự án khi bạn chọn nó. Mỗi lần xuất dùng phiên bản đã lưu khi công việc bắt đầu. Trình xuất kiểm tra các thông số tệp, và bạn có thể phát bản cắt để xem lại hình ảnh, âm thanh và nhịp thời gian.
 
 <details>
 <summary>Đọc toàn bộ kiến trúc và lộ trình dưới dạng văn bản</summary>
@@ -684,7 +684,7 @@ BYOA kết nối máy khách Agent hiện có của bạn; không gian làm vi�
 | **Tích hợp Agent** | MCP stdio cục bộ, năm Skills cốt lõi và các bộ điều hợp máy chủ được tạo | [MCP HTTP](../src/mcp/http-transport.ts) · [Tool dispatcher](../src/mcp/tool-dispatcher.ts) · [Tạo bộ điều hợp](../scripts/export-adapters.ts) |
 | **Tạo nội dung đa phương thức** | Bộ điều hợp media Codex, dự đoán Atlas Cloud, tích hợp hàng đợi fal.ai và các công việc tạo nội dung được lưu bền | [Dịch vụ Gateway](../src/services/model-gateway.ts) · [Các bộ điều hợp nhà cung cấp](../src/services/opendesign-adapter.ts) · [Danh mục mô hình](../src/services/model-gateway.ts) |
 | **Bố cục và chuyển động** | HTML/CSS/JS, GSAP, một engine bố cục được ghim và dòng thời gian/lịch sử gốc | [Tích hợp engine](../hyperframes.ts) · [Mã nguồn mẫu](../template-library/) · [Lịch sử phiên bản](../src/services/version-history-service.ts) |
-| **Kết xuất và media** | Chromium, Puppeteer Core, FFmpeg và FFprobe | [Dịch vụ kết xuất](../server.ts) · [Trình kiểm chứng xuất bản](../scripts/verify-export.ts) · [Khóa môi trường chạy gốc](../scripts/runtime-lock.json) |
+| **Kết xuất và media** | Chromium, Puppeteer Core, FFmpeg và FFprobe | [Dịch vụ kết xuất](../server.ts) · [Trình kiểm chứng xuất](../scripts/verify-export.ts) · [Khóa môi trường chạy gốc](../scripts/runtime-lock.json) |
 | **Tri thức sáng tạo** | Markdown, các gói mã nguồn, preset và bằng chứng so sánh | [Motion.md](motion-md.md) · [Các Skills cốt lõi](../skills/) · [Thư viện cộng đồng](../library/README.md) |
 | **Lịch sử phát hành** | Mô tả phiên bản ổn định và hồ sơ phát hành đã công bố | [Changelog](https://github.com/nexu-io/openmotion/blob/main/CHANGELOG.md) · [GitHub Releases](https://github.com/nexu-io/openmotion/releases) |
 | **Kiểm chứng và đóng gói** | Node test runner, Vitest, các kiểm tra Studio, lockfile npm và danh sách phân phối rõ ràng | [Tests](../tests/) · [Studio tests](../studio/tests/) · [CI](../.github/workflows/ci.yml) · [Bản dựng container](../deploy/Dockerfile) |
@@ -700,7 +700,7 @@ Các ghim phụ thuộc nằm trong [package.json](../package.json), [package-lo
 | **AI và hạ tầng mô hình** | Thêm một bộ điều hợp nhà cung cấp hoặc preset mô hình bằng quy trình công việc và media dùng chung | [Thiết kế Gateway](product/media-generation-design.md) · [Các bộ điều hợp nhà cung cấp](../src/services/opendesign-adapter.ts) |
 | **Agent và công cụ phát triển** | Cải thiện một bộ điều hợp máy chủ, Skill, hướng dẫn tài nguyên hoặc quy trình công cụ dự án | [Các bộ điều hợp agent](agent-adapters.md) · [Hợp đồng MCP](mcp-phase1-tools.md) |
 | **Chuyển động và lập trình sáng tạo** | Chia sẻ một thành phần, mẫu gốc hoặc gói Motion.md kèm một bản remix thực tế | [Các thành phần](../library/components/README.md) · [Danh sách kiểm tra mục nhập](../library/ENTRY_TEMPLATE.md) |
-| **Video và kết xuất** | Cải thiện độ tin cậy của xuất bản, xử lý media hoặc kiểm chứng có thể tái lập | [Ghi chú engine](hyperframes.md) · [Trình kiểm chứng xuất bản](../scripts/verify-export.ts) |
+| **Video và kết xuất** | Cải thiện độ tin cậy của việc xuất, xử lý media hoặc kiểm chứng có thể tái lập | [Ghi chú engine](hyperframes.md) · [Trình kiểm chứng xuất](../scripts/verify-export.ts) |
 | **Phát hành lên mạng xã hội** | Giúp thiết kế lớp trình kết nối Sắp tới: truy cập tài khoản, duyệt phát hành, lên lịch và ánh xạ phiên bản | [Định hướng phát hành](product/studio-vision.md) · [Thảo luận một đề xuất](https://github.com/nexu-io/openmotion/issues) |
 
 Bắt đầu với [thiết lập cục bộ](#quick-start), chọn một lớp, và làm theo [CONTRIBUTING.md](../CONTRIBUTING.md) cùng [AGENTS.md](../AGENTS.md). Giữ các dự án và thông tin xác thực của người dùng ở ngoài bản sao và bảo toàn các ghim phụ thuộc cùng giấy phép thượng nguồn.
