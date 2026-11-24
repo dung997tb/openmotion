@@ -9,7 +9,7 @@ import { linkedMembersOf } from "../player/components/audioClipLink";
 import { isLinkedSelectionOn } from "../utils/linkedClipPreferences";
 import { buildAtomicCutIntents, runAtomicCutTransaction } from "../utils/razorSplitTransaction";
 import type { RecordEditInput } from "./timelineEditingHelpers";
-import { projectLocalTimelineEdit } from "../player/lib/peerTimeline";
+import { projectPendingStructure } from "../player/lib/peerTimeline";
 import { useFreezeFrame } from "./useFreezeFrame";
 import { useMvpEditor } from "../motion/StudioHost";
 import { isolatedStructureRefresh } from "./timelineTimingSync";
@@ -79,8 +79,7 @@ export function useRazorSplit({
         observeProjectFileVersion,
         projectPending: files => {
           const path = activeCompPath ?? "index.html";
-          const file = files[path];
-          if (file && pid === projectIdRef.current) return projectLocalTimelineEdit(pid, path, file, previewIframeRef?.current ?? null);
+          if (pid === projectIdRef.current) return projectPendingStructure(pid, path, previewIframeRef?.current ?? null, files);
         },
         onSaved: isolatedStructureRefresh(previewIframeRef?.current, activeCompPath ?? "index.html", pid, reloadPreview),
         synchronize: scheduled => synchronize(intents.length === 1 ? intents[0].path : undefined, scheduled),

@@ -1,5 +1,6 @@
 import { getCachedCloudDisklessMode } from "../utils/cloudRuntime";
 import { saveCloudTimeline } from "../utils/cloudTimelineEdit";
+import { projectPendingStructure } from "../player/lib/peerTimeline";
 import { scheduleCommittedTimelinePreview } from "../player/committedTimelinePreview";
 import { mainVisualTrack } from "../player/components/timelineLinkage";
 import { buildProjectApiPath } from "../utils/projectRouting";
@@ -143,7 +144,7 @@ export function useTimelineDeleteOps({
               if (!frame || targetPath !== (activeCompPath ?? "index.html")) return;
               scheduleCommittedTimelinePreview(frame, pid, targetPath, files, previous, reloadPreview);
               previewScheduled = true;
-            });
+            }, { projectPending: files => projectPendingStructure(pid, activeCompPath ?? "index.html", previewIframeRef.current, files) });
           } else await saveServerRewriteWithHistory({
             projectId: pid,
             path: targetPath,

@@ -66,7 +66,17 @@ export const PREVIEW_PEER_TIMING = `
   const isPositionEdit = ${isLivePositionEdit.toString()};
   const isMediaMove = ${isLiveMediaMove.toString()};
   const stageClipInsert = ${stageVisualClipInsert.toString()};
+  // A draft owns only its provisional DOM. Its source version stays unchanged until storage confirms it.
+  let structureDraft;
   function applyPeerTiming(m) {
+    if (m.discardDraftId) {
+      if (!structureDraft || m.discardDraftId !== structureDraft.id || m.path !== structureDraft.path ||
+          m.documentId !== timingDocumentId) return false;
+      const draft = structureDraft;
+      structureDraft = undefined;
+      draft.restore();
+      return true;
+    }
     const before = timingVersion(m.before), after = timingVersion(m.after), p = player();
     const temporary = m.type === 'peer-presentation' && m.temporary === true;
     const local = !temporary && m.type === 'peer-presentation' && m.localSave === true;
@@ -85,8 +95,23 @@ export const PREVIEW_PEER_TIMING = `
         (inlineText && !(local && inlineText.id === m.gestureId && inlineText.after !== undefined)) || !p || typeof p.seek !== 'function' ||
         typeof p.getTime !== 'function' || typeof window.__hfForceTimelineRebind !== 'function' ||
         !Array.isArray(m.changes) || m.changes.length > 32) return false;
-    if (!m.changes.length) {
-      if (m.sameContent !== true || m.type !== 'peer-timing' || !timingDocumentId) return false;
+    const sameContent = !m.changes.length && m.sameContent === true && m.type === 'peer-timing' && !!timingDocumentId;
+    if (!m.changes.length && !sameContent) return false;
+    const drafting = typeof m.structureDraftId === 'string';
+    if (drafting && (!timingDocumentId || m.type !== 'peer-timing' || before !== after ||
+        !m.structureDraftId.length || m.structureDraftId.length > 64 || !m.changes.some(c => c?.removeFromComposition || c?.insert))) return false;
+    if (structureDraft) {
+      if (drafting) return false;
+      const draft = structureDraft;
+      structureDraft = undefined;
+      if (m.type === 'peer-timing' && draft.path === m.path && draft.before === before &&
+          draft.changes === JSON.stringify(m.changes)) {
+        confirmCanvasVersion(m.path, after);
+        return true;
+      }
+      draft.restore();
+    }
+    if (sameContent) {
       confirmCanvasVersion(m.path, after);
       return true;
     }
@@ -132,21 +157,26 @@ export const PREVIEW_PEER_TIMING = `
     }
     const time = p.getTime(), playing = p.isPlaying?.() === true;
     if (!Number.isFinite(time) || Date.now() >= m.expiresAt) return false;
-    function update(key) {
+    function update(key, at = time, resume = playing) {
       for (const e of edits) {
         applyTimelineReceipt(e.node, e.attr, e[key]);
       }
       for (const effect of effects) effect(key === 'to');
       // Lock is an editor flag. Studio reapplies the local monitor preference on mute.
       if (!structureChanged && !edits.some(edit => edit.attr !== 'data-timeline-locked' && edit.attr !== 'muted')) return;
-      p.seek(time);
+      p.seek(at);
       window.__hfForceTimelineRebind();
       window.__hfStudioManualEditsApply?.();
-      if (playing) p.play?.();
+      if (resume) p.play?.();
     }
     const run = cb => window.__hfSuppressSceneMutations ? window.__hfSuppressSceneMutations(cb) : cb();
     try { run(() => update('to')); }
     catch (_) { try { run(() => update('old')); } catch (_) {} return false; }
+    if (drafting) {
+      structureDraft = { id: m.structureDraftId, path: m.path, before, changes: JSON.stringify(m.changes),
+        restore: () => run(() => update('old', p.getTime(), p.isPlaying?.() === true)) };
+      return true;
+    }
     // Only a complete rebind advances the revision used for future edits and selections.
     if (!temporary) {
       if (ownDrag) pending.verifiedVersion = after;

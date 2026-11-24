@@ -115,6 +115,48 @@ it('adds a direct visual leaf at its verified sibling and rolls it back if playi
 
 });
 
+it('projects a local structural draft, confirms without rebinding, and discards a rejected draft at the current playhead', () => {
+  const message = { changes: [{ id: 'copy', hfId: 'copy-hf', tag: 'div', attributes: [], insert: {
+    owner: 'root', next: null, whitespace: ['', '', ''], text: 'Copy',
+    attrs: [['class', 'clip'], ['data-start', '4'], ['data-duration', '2']],
+  } }] };
+  const write = { ...message, structureDraftId: 'first', after: etag(1) };
+  const frame = preview();
+  assert.equal(frame.send(write), true);
+  const painted = frame.document.getElementById('copy');
+  assert.ok(painted);
+  assert.deepEqual(frame.hooks, ['seek:4', 'rebind', 'play']);
+  assert.equal(frame.send({ ...message, before: etag(2), after: etag(3) }), false);
+  assert.equal(frame.send({ discardDraftId: 'other' }), false);
+  assert.equal(frame.send(message), true);
+  assert.equal(frame.document.getElementById('copy'), painted);
+  assert.deepEqual(frame.hooks, ['seek:4', 'rebind', 'play']);
+  assert.equal(frame.send({ discardDraftId: 'first' }), false);
+  assert.equal(frame.send({ changes: [root], before: etag(2), after: etag(3) }), true);
+
+  const rejected = preview();
+  assert.equal(rejected.send(write), true);
+  rejected.window.__player.getTime = () => 7;
+  assert.equal(rejected.send({ discardDraftId: 'first' }), true);
+  assert.equal(rejected.document.getElementById('copy'), null);
+  assert.deepEqual(rejected.hooks.slice(-3), ['seek:7', 'rebind', 'play']);
+  assert.equal(rejected.send(message), true);
+
+  const raced = preview();
+  assert.equal(raced.send(write), true);
+  assert.equal(raced.send({ changes: [root] }), true);
+  assert.equal(raced.document.getElementById('copy'), null);
+  assert.equal(raced.send({ discardDraftId: 'first' }), false);
+
+  const netZero = preview();
+  assert.equal(netZero.send(write), true);
+  assert.equal(netZero.send({ changes: [] }), false);
+  assert.ok(netZero.document.getElementById('copy'));
+  assert.equal(netZero.send({ changes: [], sameContent: true }), true);
+  assert.equal(netZero.document.getElementById('copy'), null);
+  assert.equal(netZero.send({ ...message, before: etag(2), after: etag(3) }), true);
+});
+
 it('updates text and placement on the same live nodes without seeking or replacing media', () => {
   const { send, document, hooks } = preview();
   const node = document.getElementById('title')!;

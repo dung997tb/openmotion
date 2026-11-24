@@ -4,6 +4,23 @@ import { saveProjectFilesWithHistory, saveServerRewriteWithHistory, type StudioW
 import { serializeStudioFileMutation } from "./studioFileMutationCoordinator";
 
 describe("saveProjectFilesWithHistory", () => {
+  it("projects a structural edit before its write and restores it once if that write fails", async () => {
+    const order: string[] = [];
+    const save = saveProjectFilesWithHistory({
+      projectId: "p", label: "Duplicate clip", files: { "index.html": before => before + "-copy" },
+      readFile: async () => "clip",
+      projectPending(files) {
+        expect(files["index.html"]).toEqual({ before: "clip", after: "clip-copy" });
+        order.push("show");
+        return () => { order.push("restore"); };
+      },
+      writeFile: async () => { order.push("write"); throw new Error("rejected"); },
+      recordEdit: async () => { order.push("history"); },
+    });
+    await expect(save).rejects.toThrow("rejected");
+    expect(order).toEqual(["show", "write", "restore"]);
+  });
+
   it("passes each cloud action label and reuses a window only for the same coalescible action", async () => {
     const writeFile = vi.fn();
     const save = (label: string, coalesceKey?: string) => saveProjectFilesWithHistory({

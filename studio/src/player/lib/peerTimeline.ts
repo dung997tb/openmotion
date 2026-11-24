@@ -4,6 +4,8 @@ import { notePeerPreviewChange, previewContentGeneration } from "../sceneSwap";
 import { usePlayerStore } from "../store/playerStore";
 import { holdHistoryTimelineUntilPreviewReplaced } from "../timelineRestorePending";
 import { parseAuthoredTimeline } from "./authoredTimeline";
+import { stageStructurePreview } from "../peerTimingPreview";
+import { confirmedSource } from "../../utils/confirmedTextSources";
 import { applyAuthoredTimeline } from "./timelineHistoryRestore";
 
 type Projection = NonNullable<ReturnType<typeof parseAuthoredTimeline>>;
@@ -79,6 +81,31 @@ export function projectLocalTimelineEdit(
       scope.baseline = { rows: before, generation: ++scope.generation, writeRevision: studioFileRevision() };
     }
     release?.();
+  };
+}
+
+/** Project a local structural edit without publishing it to other windows or advancing its confirmed source. */
+export function projectPendingStructure(projectId: string, path: string, frame: HTMLIFrameElement | null,
+  files: Record<string, { before: string; after: string }>, selection?: readonly string[]) {
+  const file = files[path];
+  if (!file || !timelineFor(projectId, path)) return;
+  const { selectedElementIds, selectedElementId } = usePlayerStore.getState();
+  const revertTimeline = projectLocalTimelineEdit(projectId, path, file, frame);
+  const previous = confirmedSource(projectId, path);
+  const revertPreview = frame && previous?.content === file.before && Object.keys(files).length === 1
+    ? stageStructurePreview(frame, path, previous, file.after) : undefined;
+  if (revertTimeline && selection?.length) usePlayerStore.getState().setSelection(selection);
+  const drawnSelection = usePlayerStore.getState().selectedElementIds;
+  return () => {
+    const restoreSelection = revertTimeline && timelineFor(projectId, path) && drawnSelection !== selectedElementIds &&
+      usePlayerStore.getState().selectedElementIds === drawnSelection;
+    revertPreview?.();
+    revertTimeline?.();
+    if (restoreSelection) {
+      const state = usePlayerStore.getState();
+      const keys = new Set(state.elements.map(element => element.key ?? element.id));
+      state.setSelection([...selectedElementIds].filter(key => keys.has(key)), selectedElementId);
+    }
   };
 }
 
