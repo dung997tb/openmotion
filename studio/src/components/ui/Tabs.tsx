@@ -36,6 +36,8 @@ export function TabsList({ className, ...props }: StyledProps<typeof BaseTabs.Li
   );
 }
 
+export const TabsIndicator = BaseTabs.Indicator;
+
 interface TabProps extends StyledProps<typeof BaseTabs.Tab> {
   value: string;
   "data-preview-state"?: PreviewState;

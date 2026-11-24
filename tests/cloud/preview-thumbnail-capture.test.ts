@@ -506,4 +506,93 @@ describe('preview-thumbnail-capture embedded bridge script', () => {
     assert.doesNotMatch(interactiveHtml, /snapdom\.js/);
     assert.doesNotMatch(interactiveHtml, /<img[^>]*crossorigin="anonymous"/);
   });
+
+  it('caps selector capture scale and output height and releases temporary canvas backings', async () => {
+    const snapdomCalls: Array<{ scale?: number }> = [];
+    const createdCanvases: Array<{ width: number; height: number }> = [];
+    const snapCanvases: Array<{ width: number; height: number }> = [];
+
+    const narrowTarget = {
+      nodeType: 1,
+      tagName: 'DIV',
+      clientWidth: 10,
+      clientHeight: 600,
+      textContent: 'Tall sliver',
+      querySelectorAll: () => [],
+      querySelector: () => null,
+      getBoundingClientRect: () => ({ width: 10, height: 600 }),
+    };
+    const fakeStage = {
+      nodeType: 1,
+      tagName: 'DIV',
+      clientWidth: 1920,
+      clientHeight: 1080,
+      textContent: 'Stage',
+      getAttribute: (name: string) => (name === 'data-width' ? '1920' : name === 'data-height' ? '1080' : null),
+      querySelectorAll: () => [],
+      querySelector: () => null,
+      getBoundingClientRect: () => ({ width: 1920, height: 1080 }),
+    };
+
+    const sandbox: Record<string, unknown> = {
+      URL,
+      Promise,
+      Array,
+      Object,
+      Number,
+      Math,
+      String,
+      Error,
+      setTimeout,
+      clearTimeout,
+      location: { origin: 'https://preview.example.test', href: 'https://preview.example.test/api/projects/p1/preview/comp/s1.html?capture=1&pt=tok' },
+      requestAnimationFrame: (fn: () => void) => setTimeout(fn, 0),
+      player: () => ({ pause: () => {}, seek: () => {} }),
+      document: {
+        body: fakeStage,
+        fonts: { ready: Promise.resolve() },
+        querySelector: () => fakeStage,
+        querySelectorAll: (sel: string) => (sel === '#sliver' ? [narrowTarget] : []),
+        createElement: (tag: string) => {
+          if (tag !== 'canvas') return {};
+          const cv = {
+            width: 0,
+            height: 0,
+            getContext: () => ({ drawImage: () => {} }),
+            toBlob: (cb: (blob: { arrayBuffer: () => Promise<ArrayBuffer> }) => void) => {
+              cb({ arrayBuffer: () => Promise.resolve(new Uint8Array([0xff, 0xd8]).buffer) });
+            },
+          };
+          createdCanvases.push(cv);
+          return cv;
+        },
+      },
+      window: {
+        innerWidth: 1920,
+        innerHeight: 1080,
+        fetch: () => Promise.resolve({ ok: true }),
+        snapdom: async (_target: unknown, opts: { scale?: number }) => {
+          snapdomCalls.push(opts);
+          const sc = { width: 240, height: 480 };
+          snapCanvases.push(sc);
+          return { toCanvas: async () => sc };
+        },
+      },
+    };
+
+    const capturePreviewFrames = vm.runInNewContext(
+      `(function(){${PREVIEW_THUMBNAIL_CAPTURE}; return capturePreviewFrames;})()`,
+      sandbox,
+    ) as (msg: Record<string, unknown>) => Promise<{ frames: ArrayBuffer[]; width: number; height: number }>;
+
+    const result = await capturePreviewFrames({ times: [1], width: 240, selector: '#sliver' });
+    assert.equal(result.frames.length, 1);
+    assert.ok(result.height <= 480, `expected bounded height <= 480, got ${result.height}`);
+    assert.ok(result.width >= 48 && result.width <= 240);
+    assert.ok((snapdomCalls[0]?.scale ?? 99) <= 2, `expected bounded scale <= 2, got ${snapdomCalls[0]?.scale}`);
+    assert.equal(createdCanvases[0]?.width, 0, 'output canvas backing should be released');
+    assert.equal(createdCanvases[0]?.height, 0, 'output canvas backing should be released');
+    assert.equal(snapCanvases[0]?.width, 0, 'snapdom canvas backing should be released');
+    assert.equal(snapCanvases[0]?.height, 0, 'snapdom canvas backing should be released');
+  });
 });

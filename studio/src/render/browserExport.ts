@@ -1,4 +1,4 @@
-import { CANVAS_DIMENSIONS, type CanvasResolution } from "@hyperframes/parsers";
+import { CANVAS_DIMENSIONS, type CanvasResolution } from "@hyperframes/parsers/composition";
 import type { KeyframeCacheEntry } from "../player/store/keyframeSlice";
 import type { TimelineElement } from "../player/store/timelineElement";
 import { mediaUrlSourceOptions } from "../player/lib/mediaFetch";
@@ -33,6 +33,11 @@ export interface BrowserExportStats {
   encodeTotalMs: number;
 }
 
+export interface BrowserExportPreviewTarget {
+  window: Window;
+  document: Document;
+}
+
 export interface BrowserExportOptions {
   projectId: string;
   format: "mp4" | "webm";
@@ -44,6 +49,8 @@ export interface BrowserExportOptions {
   elements: readonly TimelineElement[];
   keyframeCache: ReadonlyMap<string, KeyframeCacheEntry>;
   iframe?: HTMLIFrameElement | null;
+  /** Direct same-realm preview target used when executing inside an isolated preview iframe. */
+  previewTarget?: BrowserExportPreviewTarget | null;
   /** Create an isolated hidden iframe for live seek capture so the editor preview stays still. Defaults to true. */
   isolateIframe?: boolean;
   htmlCaptureMode?: BrowserHtmlCaptureMode;
@@ -61,6 +68,10 @@ export interface BrowserExportResult {
   width: number;
   height: number;
   stats?: BrowserExportStats;
+}
+
+export interface BrowserExportBufferResult extends Omit<BrowserExportResult, "blobUrl"> {
+  buffer: ArrayBuffer;
 }
 
 export function resolveBrowserExportDimensions(
@@ -223,11 +234,45 @@ async function loadImageSource(
 type SnapdomFn = typeof import("@zumer/snapdom").snapdom;
 
 async function tryLoadSnapdom(): Promise<SnapdomFn | null> {
+  const globalSnapdom = (globalThis as { snapdom?: SnapdomFn }).snapdom;
+  if (typeof globalSnapdom === "function") return globalSnapdom;
   try {
     const mod = await import("@zumer/snapdom");
     return typeof mod.snapdom === "function" ? mod.snapdom : null;
   } catch {
     return null;
+  }
+}
+
+async function withPreviewRedirectSafeFetch<T>(
+  targetWin: Window | null | undefined,
+  run: () => Promise<T>,
+): Promise<T> {
+  const host = (targetWin ?? globalThis) as {
+    fetch?: typeof fetch;
+    location?: { origin?: string; href?: string };
+  };
+  const origFetch = typeof host.fetch === "function" ? host.fetch : null;
+  const origin = host.location?.origin;
+  if (!origFetch || !origin) return run();
+  host.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    if (init && init.credentials === "include") {
+      try {
+        const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const parsed = new URL(raw, host.location?.href ?? origin);
+        if (parsed.origin === origin && parsed.pathname.includes("/preview/")) {
+          return origFetch.call(this, input, { ...init, credentials: "same-origin" });
+        }
+      } catch {
+        /* ignore URL parse error */
+      }
+    }
+    return origFetch.call(this, input, init);
+  };
+  try {
+    return await run();
+  } finally {
+    if (host.fetch !== origFetch) host.fetch = origFetch;
   }
 }
 
@@ -397,16 +442,10 @@ async function createIsolatedExportIframe(options: {
   }
 }
 
-async function seekIframeTimeline(
-  iframe: HTMLIFrameElement | null | undefined,
+async function seekWindowTimeline(
+  win: HfPreviewWindow | null | undefined,
   timeSec: number,
 ): Promise<void> {
-  let win: HfPreviewWindow | null = null;
-  try {
-    win = (iframe?.contentWindow ?? null) as HfPreviewWindow | null;
-  } catch {
-    return;
-  }
   if (!win) return;
   if (typeof win.__player?.seek === "function") {
     win.__player.seek(timeSec);
@@ -424,7 +463,7 @@ async function seekIframeTimeline(
           resolve();
         }
       };
-      win!.requestAnimationFrame(() => setTimeout(done, 0));
+      win.requestAnimationFrame(() => setTimeout(done, 0));
       setTimeout(done, 16);
     });
   } else {
@@ -432,15 +471,38 @@ async function seekIframeTimeline(
   }
 }
 
-function readAuthoredDimensionsFromIframe(
+async function seekIframeTimeline(
   iframe: HTMLIFrameElement | null | undefined,
+  timeSec: number,
+): Promise<void> {
+  let win: HfPreviewWindow | null = null;
+  try {
+    win = (iframe?.contentWindow ?? null) as HfPreviewWindow | null;
+  } catch {
+    return;
+  }
+  await seekWindowTimeline(win, timeSec);
+}
+
+function readAuthoredDimensionsFromDocument(
+  doc: Document | null | undefined,
 ): { width: number; height: number } | null {
   try {
-    const root = iframe?.contentDocument?.querySelector("[data-composition-id]");
+    const root = doc?.querySelector("[data-composition-id]");
     if (!root) return null;
     const w = Number(root.getAttribute("data-width"));
     const h = Number(root.getAttribute("data-height"));
     return Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0 ? { width: w, height: h } : null;
+  } catch {
+    return null;
+  }
+}
+
+function readAuthoredDimensionsFromIframe(
+  iframe: HTMLIFrameElement | null | undefined,
+): { width: number; height: number } | null {
+  try {
+    return readAuthoredDimensionsFromDocument(iframe?.contentDocument);
   } catch {
     return null;
   }
@@ -519,7 +581,9 @@ function shouldUseLiveHtmlCapture(
   });
 }
 
-export async function runBrowserExport(options: BrowserExportOptions): Promise<BrowserExportResult> {
+export async function runBrowserExportBuffer(
+  options: BrowserExportOptions,
+): Promise<BrowserExportBufferResult> {
   const {
     projectId,
     format,
@@ -531,6 +595,7 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
     elements,
     keyframeCache,
     iframe,
+    previewTarget,
     isolateIframe = true,
     htmlCaptureMode,
     snapdomEngine = "svg",
@@ -550,8 +615,8 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
   const mb = await import("mediabunny");
   throwIfAborted(signal);
 
-  const origin = globalThis.location?.origin;
-  if (isIsolatedPreviewIframe(iframe, origin)) {
+  const origin = previewTarget?.window?.location?.origin ?? globalThis.location?.origin;
+  if (!previewTarget && isIsolatedPreviewIframe(iframe, origin)) {
     throw new Error(ISOLATED_PREVIEW_EXPORT_REASON);
   }
   const inputsToDispose: Array<{ dispose: () => void }> = [];
@@ -568,17 +633,28 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
   const snapdomCache = new Map<string, HTMLCanvasElement | null>();
 
   let previewDoc: Document | null = null;
-  try {
-    previewDoc = iframe?.contentDocument ?? null;
-  } catch {
-    previewDoc = null;
+  if (previewTarget) {
+    previewDoc = previewTarget.document;
+    try {
+      (previewTarget.window as HfPreviewWindow).__player?.pause?.();
+    } catch {
+      /* ignore */
+    }
+    silenceIframeMedia(previewDoc);
+  } else {
+    try {
+      previewDoc = iframe?.contentDocument ?? null;
+    } catch {
+      previewDoc = null;
+    }
   }
   const hasHtmlElements = visible.some(({ el }) => isSnapdomHtmlLayer(el));
   const initialRequiresLiveSeek = shouldUseLiveHtmlCapture(visible, previewDoc, keyframeCache);
   const initialResolvedMode: BrowserHtmlCaptureMode =
     htmlCaptureMode ?? (initialRequiresLiveSeek ? "snapdom-live" : "snapdom-cached");
 
-  let captureIframe: HTMLIFrameElement | null | undefined = iframe;
+  let captureIframe: HTMLIFrameElement | null | undefined = previewTarget ? null : iframe;
+  let captureWin: HfPreviewWindow | null = (previewTarget?.window as HfPreviewWindow | undefined) ?? null;
   let isolatedIframe: HTMLIFrameElement | null = null;
   let snapdomCaptures = 0;
   let snapdomTotalMs = 0;
@@ -592,6 +668,7 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
 
   try {
     const needsIsolatedSameOriginFrame =
+      !previewTarget &&
       isolateIframe &&
       hasHtmlElements &&
       initialResolvedMode === "snapdom-live";
@@ -620,8 +697,19 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
       }
     }
 
+    if (!captureWin && captureIframe) {
+      try {
+        captureWin = (captureIframe.contentWindow ?? null) as HfPreviewWindow | null;
+      } catch {
+        captureWin = null;
+      }
+    }
+
     const effectiveCompDimensions =
-      compositionDimensions ?? readAuthoredDimensionsFromIframe(captureIframe) ?? readAuthoredDimensionsFromIframe(iframe);
+      compositionDimensions ??
+      readAuthoredDimensionsFromDocument(previewDoc) ??
+      readAuthoredDimensionsFromIframe(captureIframe) ??
+      readAuthoredDimensionsFromIframe(iframe);
     ({ width, height } = resolveBrowserExportDimensions(resolution, effectiveCompDimensions));
     const bitrate = resolveBrowserExportBitrate(quality, width, height, fps);
 
@@ -632,11 +720,13 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
       resolvedHtmlMode !== "canvas2d" && previewDoc && hasHtmlElements ? await tryLoadSnapdom() : null;
     const activeHtmlMode: BrowserHtmlCaptureMode = snapdomFn ? resolvedHtmlMode : "canvas2d";
 
-    const layoutSnapshot = capturePreviewLayoutSnapshot(captureIframe, elements, width, height);
+    const layoutSnapshot = capturePreviewLayoutSnapshot(previewDoc ?? captureIframe, elements, width, height);
+    const docBaseUri = previewDoc?.baseURI;
+    const locSearch = previewTarget?.window?.location?.search;
     for (const { el } of visible) {
       throwIfAborted(signal);
       if (!el.src) continue;
-      const url = resolveOriginalPreviewMediaUrl(el.src, projectId, origin);
+      const url = resolveOriginalPreviewMediaUrl(el.src, projectId, origin, docBaseUri, locSearch);
 
       if ((el.tag === "video" || el.kind === "video") && !videoDecoders.has(url)) {
         const { fetchFn, getRetryDelay, cancelReads, maxCacheSize } = mediaUrlSourceOptions("thumbnail");
@@ -673,7 +763,15 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
     onProgress?.({ progress: 8, stage: "Mixing audio" });
     const mixedAudio =
       typeof globalThis.AudioEncoder === "function"
-        ? await mixTimelineAudio({ projectId, elements, duration, signal })
+        ? await mixTimelineAudio({
+            projectId,
+            elements,
+            duration,
+            origin,
+            documentBaseUri: docBaseUri,
+            locationSearch: locSearch,
+            signal,
+          })
         : null;
     throwIfAborted(signal);
 
@@ -722,8 +820,12 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       throwIfAborted(signal);
       const t = frameIndex * frameDuration;
-      if (activeHtmlMode === "snapdom-live" && captureIframe) {
-        await seekIframeTimeline(captureIframe, t);
+      if (activeHtmlMode === "snapdom-live") {
+        if (captureWin) {
+          await seekWindowTimeline(captureWin, t);
+        } else if (captureIframe) {
+          await seekIframeTimeline(captureIframe, t);
+        }
       }
 
       ctx.fillStyle = layoutSnapshot.backgroundColor;
@@ -799,7 +901,7 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
         }
 
         if ((el.tag === "video" || el.kind === "video") && el.src) {
-          const url = resolveOriginalPreviewMediaUrl(el.src, projectId, origin);
+          const url = resolveOriginalPreviewMediaUrl(el.src, projectId, origin, docBaseUri, locSearch);
           const decoder = videoDecoders.get(url);
           if (decoder) {
             const sourceTime = Math.max(0, (el.playbackStart ?? 0) + (t - el.start) * (el.playbackRate ?? 1));
@@ -813,7 +915,7 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
             }
           }
         } else if ((el.tag === "img" || el.kind === "image") && el.src) {
-          const url = resolveOriginalPreviewMediaUrl(el.src, projectId, origin);
+          const url = resolveOriginalPreviewMediaUrl(el.src, projectId, origin, docBaseUri, locSearch);
           const asset = imageAssets.get(url);
           if (asset) {
             drawFitted(ctx, asset.source, asset.width, asset.height, box, box.objectFit);
@@ -830,13 +932,15 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
                 if (captured === undefined) {
                   const tSnap0 = performance.now();
                   try {
-                    const snapResult = await snapdomFn(domEl, {
-                      backgroundColor: null,
-                      embedFonts: "auto",
-                      fast: true,
-                      engine: snapdomEngine,
-                      exclude: "video",
-                    });
+                    const snapResult = await withPreviewRedirectSafeFetch(captureWin, () =>
+                      snapdomFn(domEl, {
+                        backgroundColor: null,
+                        embedFonts: "auto",
+                        fast: true,
+                        engine: snapdomEngine,
+                        exclude: "video",
+                      }),
+                    );
                     const snapCanvas = await snapResult.toCanvas();
                     captured = snapCanvas.width > 0 && snapCanvas.height > 0 ? snapCanvas : null;
                     snapdomCaptures += 1;
@@ -895,16 +999,14 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
     if (!buffer) throw new Error("Browser export produced an empty output buffer.");
 
     const mimeType = await output.getMimeType();
-    const blob = new Blob([buffer], { type: mimeType });
-    const blobUrl = URL.createObjectURL(blob);
     completed = true;
     onProgress?.({ progress: 100, stage: "Completed" });
 
     const totalDurationMs = Math.max(1, Date.now() - startedAt);
     return {
-      blobUrl,
+      buffer,
       mimeType,
-      bytes: blob.size,
+      bytes: buffer.byteLength,
       durationMs: totalDurationMs,
       frameCount: totalFrames,
       width,
@@ -945,4 +1047,15 @@ export async function runBrowserExport(options: BrowserExportOptions): Promise<B
       isolatedIframe.remove();
     }
   }
+}
+
+export async function runBrowserExport(options: BrowserExportOptions): Promise<BrowserExportResult> {
+  const { buffer, ...rest } = await runBrowserExportBuffer(options);
+  const blob = new Blob([buffer], { type: rest.mimeType });
+  const blobUrl = URL.createObjectURL(blob);
+  return {
+    ...rest,
+    bytes: blob.size,
+    blobUrl,
+  };
 }

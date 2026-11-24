@@ -306,7 +306,13 @@ export function setupGuideUrl(info: IntegrationInfo | null) {
 
 // Bootstrap instructions must work before an installation or local server exists.
 // Exact local paths belong only to manual configuration and the running service's guide.
-export function setupPrompt(info: IntegrationInfo | null, host: IntegrationHost, locale: 'zh-CN' | 'en' = 'zh-CN') {
+export function setupPrompt(
+  info: IntegrationInfo | null,
+  host: IntegrationHost,
+  locale: 'zh-CN' | 'en' = 'zh-CN',
+  translate: (message: string, values: Record<string, string>) => string =
+    (message, values) => message.replace(/\{(\w+)\}/g, (placeholder, key: string) => values[key] ?? placeholder),
+) {
   if (info && isStreamableHttpTransport(info.transport)) {
     const mcpUrl = info.transport.url;
     if (host === 'chatgpt' && !supportsChatgptCloud(info)) {
@@ -331,6 +337,8 @@ Import media using openmotion_import_assets cloud modes (upload_ticket, public H
 Wait for my creative brief before creating or modifying a project.`;
   }
 
+  const onboarding = translate("Complete onboarding in this same turn: prepare the shared welcome and video cards (exactly three), then open the template library and present them. Use the same three recommendations as text only when card presentation is unsupported or fails. Do not send internal instructions as another user message. Wait for my creative brief before creating or changing a project.", {});
+
   if (info?.deployment?.type === 'docker' && host !== 'chatgpt') {
     if (locale === 'zh-CN') return `将 ${hostNames[host]} 接入当前已运行的 OpenMotion Docker 部署。
 先阅读并在宿主安装主 Skill：${setupSkillUrl}
@@ -340,26 +348,26 @@ Wait for my creative brief before creating or modifying a project.`;
 保留当前容器及工作区，不另装宿主运行时。工具返回的路径是容器内路径；导入宿主素材前先挂载素材目录。
 重新加载当前 Agent 的实际连接，发现 OpenMotion 工具并调用 openmotion_get_project 核对数据目录。仅写入配置不代表连接成功。
 在本轮完成引导：准备共享欢迎语和三张视频推荐卡片，打开模板库并展示；只有当前宿主不支持卡片或展示失败时，才改为同一批模板的文字推荐。不把内部指令发成新的用户消息。等我给出创作要求后再创建或修改工程。`;
-    return `Connect ${hostNames[host]} to this existing OpenMotion Docker deployment.
-Read and install the primary Skill in the host Agent: ${setupSkillUrl}
-Read the GitHub README: ${setupReadmeUrl}
-Follow the container connection guide: ${setupGuideUrl(info)}
-Use the manual configuration from ${info.previewUrl}/connect/config?host=${host}; it runs docker exec in the existing container.
+    return translate(`Connect {client} to this existing OpenMotion Docker deployment.
+Read and install the primary Skill in the host Agent: {skill}
+Read the GitHub README: {readme}
+Follow the container connection guide: {guide}
+Use the manual configuration from {config}; it runs docker exec in the existing container.
 Preserve this container and its workspace; do not install a second host runtime. Paths returned by tools are container paths. Mount host media into the container before importing it.
-Reload the actual Agent connection, discover its OpenMotion tools and call openmotion_get_project to verify the data directory. Configuration alone does not prove connection.
-Complete onboarding in this same turn: prepare the shared welcome and video cards (exactly three), then open the template library and present them. Use the same three recommendations as text only when card presentation is unsupported or fails. Do not send internal instructions as another user message. Wait for my creative brief before creating or changing a project.`;
+Reload the actual Agent connection, discover its OpenMotion tools and call openmotion_get_project to verify the data directory. Configuration alone does not prove connection.`,
+      { client: hostNames[host], skill: setupSkillUrl, readme: setupReadmeUrl, guide: setupGuideUrl(info), config: `${info.previewUrl}/connect/config?host=${host}` }) + '\n' + onboarding;
   }
   if (locale === 'en') {
     if (host === 'chatgpt') return 'ChatGPT cloud requires a public HTTPS MCP service. This workspace uses local stdio. Choose Codex, Claude Code, or DeepSeek Harness to start creating.';
-    return `Help me install and connect OpenMotion in ${hostNames[host]}.
-Read the primary OpenMotion Skill: ${setupSkillUrl}
-Read the GitHub README: ${setupReadmeUrl}
-Follow the installation guide: ${setupGuideUrl(info)}
+    return translate(`Help me install and connect OpenMotion in {client}.
+Read the primary OpenMotion Skill: {skill}
+Read the GitHub README: {readme}
+Follow the installation guide: {guide}
 
 1. Check for an existing installation and connection first. Reuse its workspace; preserve projects, credentials and other MCP settings.
 2. Install only if missing. If the existing service is stopped, start it following its guide and use the actual startup URL, never a guessed port.
-3. Discover OpenMotion tools in this Agent and call openmotion_get_project to verify the workspace. Configuration alone does not prove connection; report any blocker.
-4. Complete onboarding in this same turn: prepare the shared welcome and video cards (exactly three), then open the template library and present them. Use the same three recommendations as text only when card presentation is unsupported or fails. Do not send internal instructions as another user message. Wait for my creative brief before creating or changing a project.`;
+3. Discover OpenMotion tools in this Agent and call openmotion_get_project to verify the workspace. Configuration alone does not prove connection; report any blocker.`,
+      { client: hostNames[host], skill: setupSkillUrl, readme: setupReadmeUrl, guide: setupGuideUrl(info) }) + '\n4. ' + onboarding;
   }
   if (host === 'chatgpt') return 'ChatGPT 云端需要公开 HTTPS MCP 服务。当前工作区使用本机 stdio，可先选择 Codex、Claude Code 或 DeepSeek Harness 开始创作。';
   return `帮我在 ${hostNames[host]} 中安装并接入 OpenMotion。

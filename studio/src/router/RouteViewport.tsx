@@ -162,7 +162,7 @@ export function RouteViewport({
       hasProject={Boolean(projectId)}
       previewsEnabled={!connectionsOpen}
       openLibrary={openLibrary}
-      openProviders={openModelSettings}
+      openProviders={provider => provider && openProviderSettings ? openProviderSettings(provider) : openModelSettings()}
       route={page}
       onRouteChange={navigatePage}
       inSettings={page.mcpInSettings}

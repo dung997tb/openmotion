@@ -71,6 +71,7 @@ import {
   verifyPreviewToken,
 } from '../auth/preview-token.ts';
 import { PREVIEW_BRIDGE_ASSET_RE, PREVIEW_BRIDGE_PATH } from '../studio/engine/preview-bridge.ts';
+import { BROWSER_EXPORT_VENDOR_PATH } from '../studio/routes/preview.ts';
 import { isAssetLease, renewAssetLease, resolveAssetWorkspace } from '../auth/preview-asset-lease.ts';
 import { hasMinRole, hasScope, type AuthContext } from '../contracts/auth.ts';
 import { CloudError, featureDeferredP2, isCloudError } from '../contracts/errors.ts';
@@ -189,6 +190,7 @@ function applyIsolatedPreviewHeaders(
     headers.set('Content-Security-Policy', `frame-ancestors 'self' ${appOrigin};`);
     headers.set('Referrer-Policy', 'no-referrer');
     headers.set('X-Content-Type-Options', 'nosniff');
+    headers.set('Origin-Agent-Cluster', '?1');
     headers.delete('Set-Cookie');
     if (requestOrigin && allowedCorsOrigins.has(requestOrigin)) {
       headers.set('Access-Control-Allow-Origin', requestOrigin);
@@ -2125,6 +2127,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
       pathname === '/api/runtime.js' ||
       pathname === PREVIEW_BRIDGE_PATH || PREVIEW_BRIDGE_ASSET_RE.test(pathname) ||
       pathname === '/api/vendor/snapdom.js' ||
+      pathname === BROWSER_EXPORT_VENDOR_PATH ||
       pathname.startsWith('/api/vendor/gsap/');
     const isReadOnlyFontAsset = pathname === '/api/fonts' || pathname.startsWith('/api/fonts/');
     const projectPreviewMatch = PREVIEW_PROJECT_PATH_RE.exec(pathname);
@@ -2876,6 +2879,9 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
         `${preconnectHints}<meta name="openmotion-runtime" content="cloud-diskless" data-editor-open="1">${previewOriginMeta}</head>`);
       const bytes = Buffer.from(studioHtml, 'utf8');
       const etag = `"sha256:${createHash('sha256').update(bytes).digest('hex')}"`;
+      const originAgentClusterHeaders: Record<string, string> = previewHostIsolationEnabled
+        ? { 'Origin-Agent-Cluster': '?1' }
+        : {};
       if (c.req.header('if-none-match')?.trim() === etag) {
         return new Response(null, {
           status: 304,
@@ -2883,6 +2889,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
             ETag: etag,
             'Cache-Control': 'no-cache',
             'X-Content-Type-Options': 'nosniff',
+            ...originAgentClusterHeaders,
           },
         });
       }
@@ -2894,6 +2901,7 @@ export function createApiApp(deps: CreateApiAppDeps): { app: Hono<AuthEnv>; serv
           ETag: etag,
           'Cache-Control': 'no-cache',
           'X-Content-Type-Options': 'nosniff',
+          ...originAgentClusterHeaders,
         },
       });
     } catch (error) {

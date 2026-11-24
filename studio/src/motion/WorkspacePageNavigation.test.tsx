@@ -115,7 +115,7 @@ it('cold-loads whitelisted semantic SPA path URLs directly into the requested su
 
   history.replaceState(null, '', '/mcp-setup/claude');
   await mount(3);
-  expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude Code');
+  expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude');
 
   history.replaceState(null, '', `/editor/${second}`);
   await mount(4);
@@ -162,7 +162,7 @@ it.each(settingsSections)('restores a copied %s page on a fresh mount', async se
     expect(container.querySelector<HTMLElement>('.motion-workspace-content')?.hidden).toBe(true);
     if (section === 'mcp') {
       expect(breadcrumb()).toBeNull();
-      expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude Code');
+      expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude');
       expect(container.querySelector('[role=tab][data-state=active]') || container.querySelector('a[download]')).toBeTruthy();
       expect(container.querySelector('a[download]')?.getAttribute('href')).toBe('/connect/config?host=claude');
     } else if (section === 'brand-kit') expect(document.querySelector('.om-gallery-collection-tabs [aria-current=page]')?.textContent).toContain('Official collection');
@@ -197,6 +197,10 @@ it('navigates settings, MCP tabs and history without remounting or flushing the 
   await openMcp(); expect(page().settings).toBe('mcp');
   expect(breadcrumb()).toBeNull();
   await click('Claude Code'); await click('Manual setup');
+  expect(page()).toMatchObject({ client: 'claude', setup: 'manual' });
+  await click('Cursor');
+  expect(page()).toMatchObject({ client: 'cursor', setup: 'agent' });
+  await traverse(-1);
   expect(page()).toMatchObject({ client: 'claude', setup: 'manual' });
   await traverse(-1); expect(page().setup).toBe('agent');
   expect(container.querySelector('[role=tab][aria-selected=true]')?.textContent).toBe('Claude Code');
@@ -272,14 +276,67 @@ it('uses browser history across settings, reloads and new navigation branches', 
   await accountAction('Help'); await traverse(1); expect(page().settings).toBe('help');
 });
 
+it('offers one MCP entitlement action that opens account settings', async () => {
+  await mount();
+  await openMcp();
+  expect(container.querySelectorAll('.om-mcp-entitlement-strip button')).toHaveLength(1);
+  await click('Claim now');
+  expect(page()).toMatchObject({ settings: 'account', provider: null });
+});
+
+it.each([
+  ['3D motion', 'three-js'],
+  ['Viral recreation', 'openmotion-talking-head-recreation'],
+  ['Talking-head & editing', 'openmotion-talking-head-recreation'],
+  ['E-commerce marketing', 'openmotion-splash-float-product'],
+  ['Creative styles', 'openmotion-design-styles'],
+])('opens the matching skill from the MCP footer entry %s', async (label, skill) => {
+  await mount();
+  await openMcp();
+  const footerButtons = container.querySelectorAll<HTMLButtonElement>('.om-mcp-site-footer button');
+  const link = [...footerButtons].find(item => item.textContent?.trim() === label);
+  expect(link).toBeDefined();
+  await act(async () => link!.click());
+  expect(page()).toMatchObject({ skills: true, skill });
+});
+
+it.each([
+  ['Top Skills (3)', 'talking-head-recreation', 'Open Skill', '/skills/openmotion-talking-head-recreation'],
+  ['Official Brand Kits (2)', 'brandkit-clean', 'Browse Brand Kits', '/brand-kit/official'],
+])('restores the MCP showcase category and card after returning from %s', async (category, cardId, action, destination) => {
+  await mount();
+  await openMcp();
+  const tabs = () => [...container.querySelectorAll<HTMLButtonElement>('.om-mcp-category-tabs [role=tab]')];
+  const cover = () => container.querySelector<HTMLButtonElement>(`[data-mcp-gallery-card="${cardId}"] .om-mcp-demo-cover`)!;
+  await act(async () => tabs().find(tab => tab.textContent?.trim() === category)!.click());
+  await act(async () => cover().click());
+  await click(action);
+  expect(location.pathname).toBe(destination);
+  await traverse(-1);
+  expect(page().settings).toBe('mcp');
+  expect(tabs().find(tab => tab.getAttribute('aria-selected') === 'true')?.textContent?.trim()).toBe(category);
+  expect(document.activeElement).toBe(cover());
+});
+
+it('moves focus to the destination when following an MCP footer section shortcut', async () => {
+  await mount();
+  await openMcp();
+  const footerButtons = [...container.querySelectorAll<HTMLButtonElement>('.om-mcp-site-footer button')];
+  const link = footerButtons.find(item => item.textContent?.trim() === 'Explore more scene templates')!;
+  link.focus();
+  await act(async () => link.click());
+  expect(document.activeElement).toBe(container.querySelector('#mcp-templates'));
+});
+
 it('uses browser history between the template gallery, its preview and the originating page', async () => {
   const detail = 'dialog[aria-label="Template preview"]';
-  await mount(); await openMcp(); await click('Explore templates');
+  await mount(); await openMcp(); await click('All 30+ templates');
   const header = container.querySelector('dialog[aria-label="Template library"] header')!;
   expect(header.querySelector('button[aria-label="Back"], button[aria-label="Forward"]')).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
   expect(container.querySelector(`${detail} > header`)).toBeNull();
   expect(container.querySelector(`${detail} button[aria-label="Close template preview"]`)).not.toBeNull();
+  expect([...container.querySelectorAll(`${detail} button`)].some(button => button.textContent === 'Open and edit')).toBe(true);
   expect(container.querySelector(`${detail} button[aria-label="Previous template"]`)).not.toBeNull();
   expect(container.querySelector(`${detail} button[aria-label="Next template"]`)).not.toBeNull();
   await traverse(-1); expect(page().template).toBeNull();
@@ -289,7 +346,7 @@ it('uses browser history between the template gallery, its preview and the origi
 });
 
 it('restores template details from a copied link and closes back to the originating MCP page', async () => {
-  await mount(); await openMcp(); await click('Claude Code'); await click('Explore templates');
+  await mount(); await openMcp(); await click('Claude Code'); await click('All 30+ templates');
   expect(page()).toMatchObject({ templates: true, settings: 'mcp' });
   await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
   expect(page().template).toBe('product-promo');
@@ -300,25 +357,25 @@ it('restores template details from a copied link and closes back to the originat
   await traverse(1); expect(container.querySelector<HTMLDialogElement>('dialog[aria-label="Template preview"]')?.open).toBe(true);
   await click('Close template preview'); await click('Close template library');
   expect(page()).toMatchObject({ templates: false, template: null, settings: 'mcp', client: 'claude' });
-  expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude Code');
+  expect(container.querySelector('#mcp-title')?.textContent).toContain('Claude');
 });
 
 it('keeps an MCP showcase selection in the URL through history and reloads', async () => {
   await mount(); await openMcp(); await click('Claude Code');
   const draft = container.querySelector<HTMLInputElement>('[aria-label="Editor draft"]');
-  await click('Preview template Product Promo');
-  expect(page()).toMatchObject({ templates: false, template: 'product-promo', settings: 'mcp', client: 'claude' });
+  await click('All 30+ templates');
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-template-id="product-promo"] button')!.click());
+  expect(page()).toMatchObject({ templates: true, template: 'product-promo', settings: 'mcp', client: 'claude' });
   expect(container.querySelector('dialog[aria-label="Template preview"] h2')?.textContent).toBe('Product Promo');
   await traverse(-1);
-  expect(page()).toMatchObject({ templates: false, template: null, settings: 'mcp', client: 'claude' });
-  expect(container.querySelector('dialog[aria-label="Template library"]')).toBeNull();
+  expect(page()).toMatchObject({ templates: true, template: null, settings: 'mcp', client: 'claude' });
   expect(container.querySelector('[aria-label="Editor draft"]')).toBe(draft);
   expect(editor.mounts).toBe(1);
   await traverse(1);
   expect(container.querySelector('dialog[aria-label="Template preview"] h2')?.textContent).toBe('Product Promo');
   await mount(1);
   expect(container.querySelector('dialog[aria-label="Template preview"] h2')?.textContent).toBe('Product Promo');
-  await click('Close template preview');
+  await click('Close template preview'); await click('Close template library');
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
   expect(container.querySelector('[data-motion-template-library]')).toBeNull();
   expect(page()).toMatchObject({ templates: false, template: null, settings: 'mcp', client: 'claude' });
@@ -1612,7 +1669,7 @@ it('returns from MCP client and setup tabs to Explore, and clears the source on 
   expect(button('Close settings')).toBeUndefined();
   await click('Claude Code'); await click('Manual setup');
   expect(breadcrumb()?.href).toBe(exploreUrl);
-  expect(container.querySelector('.om-mcp-page > .om-workspace-breadcrumb + .om-mcp-client-row')).not.toBeNull();
+  expect(container.querySelector('.om-mcp-page > .om-workspace-breadcrumb')).not.toBeNull();
   await mount(1);
   await returnThroughBreadcrumb('Explore');
   expect(location.href).toBe(exploreUrl);

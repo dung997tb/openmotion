@@ -1,39 +1,219 @@
-import { Button } from "open-design-ui/button";
-import { IconButton } from "open-design-ui/icon-button";
-import { Tooltip } from "../components/ui/Tooltip";
-import { useMemo, useState, type RefObject } from 'react';
-import { isEditableTemplate, type GalleryTemplate } from '../../../shared/catalog';
+import { Dialog } from '@base-ui/react/dialog';
+import { Button } from 'open-design-ui/button';
+import { IconButton } from 'open-design-ui/icon-button';
+import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18n';
 import { Tabs, TabsList, Tab, TabPanel } from '../components/ui/Tabs';
-import { Skeleton } from '../components/ui/Skeleton';
 import { RemixIcon } from '../icons/RemixIcons';
-import { TemplateGalleryCard } from './TemplateGalleryCard';
-import { purposeOrder, discoveryPurposes } from './templateDiscoveryTaxonomy';
-import { useTemplatePlayback } from './useTemplatePlayback';
-import { useCoveredTemplates } from './useCoveredTemplates';
+import { McpCopyFallback } from './McpCopyFallback';
+import { mcpGalleryCards, mcpGalleryCategories, recordMcpGalleryPosition, type McpGalleryCard, type McpGalleryCategory } from './mcpGallery';
+import { formatMcpAgentPrompt, localizedMcpExample, type McpCaseTarget } from './mcpShowcaseData';
 
-export function McpTemplateShowcase({ scroller, enabled, canCopy, onCopy, openLibrary, onCategory }: {
-  scroller: RefObject<HTMLElement | null>; enabled: boolean; canCopy: boolean;
-  onCategory?: (category: string) => void;
-  onCopy: (template: GalleryTemplate) => void;
-  openLibrary: (trigger?: HTMLElement, template?: GalleryTemplate) => void;
+function cardTarget(card: McpGalleryCard, title: string): McpCaseTarget | null {
+  if (card.kind === 'template' && card.templateId) {
+    return { kind: 'template', templateId: card.templateId, title, posterUrl: card.image, previewUrl: card.video ?? '' };
+  }
+  if (card.kind === 'skill' && card.skillId) {
+    return { kind: 'skill', skillId: card.skillId };
+  }
+  if (card.kind === 'brand-kit' && card.brandKitId && card.showcaseIframe) {
+    return { kind: 'brand-kit', brandKitId: card.brandKitId, showcaseUrl: card.showcaseIframe };
+  }
+  return null;
+}
+
+export function McpTemplateShowcase({ enabled, brandKitEnabled, initialCategory, onCopy, openLibrary, onOpenTarget, onCategory, onPreview }: {
+  enabled: boolean;
+  brandKitEnabled: boolean;
+  initialCategory: McpGalleryCategory;
+  onCopy: (id: string, prompt: string) => Promise<boolean>;
+  openLibrary: (trigger: HTMLElement) => void;
+  onOpenTarget: (target: Exclude<McpCaseTarget, { kind: 'template' }>) => void;
+  onCategory: (category: McpGalleryCategory) => void;
+  onPreview: (id: string) => void;
 }) {
   const { t, locale } = useI18n();
-  const { catalog, failed, retry } = useCoveredTemplates(locale);
-  const [category, setCategory] = useState('all');
-  const [priority, setPriority] = useState<string | null>(null);
-  const categories = useMemo(() => ['all', ...purposeOrder.filter(purpose => catalog?.some(item => discoveryPurposes(item).includes(purpose)))], [catalog]);
-  const selected = categories.includes(category) ? category : 'all';
-  const visible = useMemo(() => (catalog ?? []).filter(item => selected === 'all' || discoveryPurposes(item).includes(selected)).slice(0, 6), [catalog, selected]);
-  const active = useTemplatePlayback(scroller, `${selected}:${visible.map(item => item.id).join(',')}`, enabled, true, priority);
-  return <section className="om-mcp-section" aria-labelledby="mcp-templates" id="mcp-template-section">
-    <div className="om-mcp-section-heading"><div><p className="om-mcp-eyebrow">{t('Start with something you can build on')}</p><h2 id="mcp-templates">{t('Bring a template into your Agent')}</h2><p className="om-muted">{t('Use an editable template or ask your Agent to recreate a reference. Preview here, copy the instruction, or open the full library.')}</p></div><Button variant="ghost" className="om-button h-auto" onClick={event => openLibrary(event.currentTarget)}>{t('View all templates')}<RemixIcon name="arrow-right-line" size={16} /></Button></div>
-    <Tabs value={selected} onValueChange={value => { setCategory(String(value)); setPriority(null); onCategory?.(String(value)); }}>
-      <div className="om-mcp-template-toolbar"><TabsList className="om-mcp-category-tabs" aria-label={t('Template categories')}>{categories.map(value => <Tab key={value} value={value}>{t(value === 'all' ? 'Featured' : value)}</Tab>)}</TabsList></div>
-      <TabPanel value={selected}>
-        {failed ? <div className="om-card om-mcp-unavailable"><p>{t('Templates could not be loaded.')}</p><Button variant="ghost" className="om-button h-auto" onClick={retry}>{t('Retry')}</Button></div> : <div className="om-mcp-template-grid">{catalog === null ? [1, 2, 3, 4, 5, 6].map(key => <Skeleton key={key} className="om-mcp-template-skeleton" />) : visible.map(template => <TemplateGalleryCard key={template.id} template={template} active={active.has(template.id)} onPriority={setPriority} onSelect={(item, trigger) => openLibrary(trigger, item)} footer={<div className="om-mcp-template-caption"><div><h3>{template.title}</h3><span>{t(isEditableTemplate(template) ? 'Ready to edit' : 'Reference · Agent recreation')}</span></div><Tooltip label={t('Copy template prompt')} wrap><IconButton variant="plain" className="om-button" disabled={!canCopy} aria-label={t('Copy template prompt')} onClick={() => onCopy(template)} icon={<RemixIcon name="file-copy-line" size={16} />} /></Tooltip></div>} />)}</div>}
-        {catalog?.length === 0 && <div className="om-mcp-unavailable"><p className="om-muted">{t('No templates available. Open the library or try again later.')}</p><Button variant="ghost" className="om-button h-auto" onClick={event => openLibrary(event.currentTarget)}>{t('Explore templates')}</Button></div>}
+  const [selectedCategory, setCategory] = useState(initialCategory);
+  const category = !brandKitEnabled && selectedCategory === 'brandkit' ? 'all' : selectedCategory;
+  const [preview, setPreview] = useState<McpGalleryCard | null>(null);
+  const [hoveredCard, setHoveredCard] = useState<string | null>(null);
+  const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
+  const [copiedCardId, setCopiedCardId] = useState<string | null>(null);
+  const [manualCopy, setManualCopy] = useState<{ id: string; instruction: string } | null>(null);
+  const previewTrigger = useRef<HTMLButtonElement>(null);
+  const latestCopy = useRef(0);
+  const copyPromptLabel = t(locale === 'en' ? 'Copy prompt' : 'Copy example prompt');
+  const content = (card: McpGalleryCard) => localizedMcpExample(card.content, t);
+  const availableCards = brandKitEnabled ? mcpGalleryCards : mcpGalleryCards.filter(card => card.kind !== 'brand-kit');
+  const categories = brandKitEnabled ? mcpGalleryCategories : mcpGalleryCategories.filter(([id]) => id !== 'brandkit');
+  const visible = availableCards.filter(card => category === 'all' || card.category === category);
+  const reducedMotion = typeof window !== 'undefined' && (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+
+  const kindLabel = (kind: McpGalleryCard['kind']) => {
+    if (kind === 'skill') return t('Skill');
+    if (kind === 'brand-kit') return t('Brand Kit');
+    return t('Template');
+  };
+
+  useEffect(() => {
+    if (!copiedCardId) return;
+    const timer = setTimeout(() => setCopiedCardId(null), 1600);
+    return () => clearTimeout(timer);
+  }, [copiedCardId]);
+
+  useEffect(() => {
+    if (!enabled || (!brandKitEnabled && preview?.kind === 'brand-kit')) setPreview(null);
+  }, [enabled, brandKitEnabled, preview]);
+
+  async function copyPrompt(card: McpGalleryCard) {
+    const attempt = ++latestCopy.current;
+    setCopiedCardId(null);
+    setManualCopy(null);
+    const target = cardTarget(card, content(card).title);
+    const instruction = formatMcpAgentPrompt(content(card).prompt, target);
+    const copied = await onCopy(card.id, instruction);
+    if (attempt !== latestCopy.current) return;
+    if (copied) setCopiedCardId(card.id);
+    else setManualCopy({ id: card.id, instruction });
+  }
+
+  const copyFallback = (card: McpGalleryCard) => manualCopy?.id === card.id &&
+    <McpCopyFallback instruction={manualCopy.instruction} />;
+
+  return <section className="om-mcp-section om-mcp-demo-gallery" aria-labelledby="mcp-templates" id="gallery">
+    <h2 id="mcp-templates">{t('Explore more scene templates')}</h2>
+    <Tabs value={category} onValueChange={value => {
+      const selected = categories.find(([key]) => key === value)?.[0];
+      if (!selected) return;
+      setCategory(selected);
+      onCategory(selected);
+    }}>
+      <TabsList className="om-mcp-category-tabs" aria-label={t('Template categories')}>
+        {categories.map(([value, label]) => <Tab key={value} value={value}>
+          {t(label)}{' '}{value === 'all' ? availableCards.length : '(' + availableCards.filter(card => card.category === value).length + ')'}
+        </Tab>)}
+      </TabsList>
+      <TabPanel value={category}>
+        <div className="om-mcp-template-grid">
+          {visible.map(card => {
+            const copiedPrompt = copiedCardId === card.id;
+            const playHoverVideo = enabled && !reducedMotion && hoveredCard === card.id && Boolean(card.video) && !videoErrors[card.id];
+            return <article
+              key={card.id}
+              className="om-mcp-demo-card"
+              data-mcp-gallery-card={card.id}
+              onMouseEnter={() => setHoveredCard(card.id)}
+              onMouseLeave={() => setHoveredCard(prev => (prev === card.id ? null : prev))}
+            >
+              <Button variant="plain" className="om-mcp-demo-cover" aria-label={t('Preview {title}', { title: content(card).title })}
+                onClick={event => {
+                  previewTrigger.current = event.currentTarget;
+                  setPreview(card);
+                  onPreview(card.id);
+                }}>
+                {playHoverVideo ? (
+                  <video
+                    src={card.video}
+                    poster={card.image}
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    preload="metadata"
+                    onError={() => setVideoErrors(prev => ({ ...prev, [card.id]: true }))}
+                  />
+                ) : (
+                  <img src={card.image} alt="" loading="lazy" decoding="async" />
+                )}
+                <span className="om-mcp-demo-kind">{kindLabel(card.kind)}</span>
+                {card.duration && <span className="om-mcp-demo-duration">{card.duration}</span>}
+              </Button>
+              <div className="om-mcp-template-caption">
+                <h3>{content(card).title}</h3>
+                <p title={content(card).prompt}>{content(card).prompt}</p>
+                <div className="om-mcp-demo-actions">
+                  <Button variant="plain" className="om-mcp-demo-copy" data-copied={copiedPrompt || undefined} onClick={() => void copyPrompt(card)}>
+                    {copiedPrompt ? t('Copied') : copyPromptLabel}
+                  </Button>
+                </div>
+                {!preview && copyFallback(card)}
+              </div>
+            </article>;
+          })}
+        </div>
       </TabPanel>
     </Tabs>
+    <div className="om-mcp-gallery-more">
+      <Button variant="plain" className="om-mcp-demo-library" onClick={event => openLibrary(event.currentTarget)}>
+        <span>{t('All 30+ templates')}</span>
+        <RemixIcon name="arrow-right-line" size={16} />
+      </Button>
+    </div>
+    <Dialog.Root open={enabled && preview !== null} onOpenChange={open => { if (!open) setPreview(null); }}>
+      <Dialog.Portal>
+        <Dialog.Backdrop forceRender className="hf-overlay-backdrop om-settings-backdrop" />
+        <Dialog.Popup data-feedback-modal className="om-dialog om-mcp-demo-dialog" finalFocus={previewTrigger} onKeyDown={event => event.stopPropagation()}>
+          {preview && <>
+            <header>
+              <Dialog.Title>{content(preview).title}</Dialog.Title>
+              <Dialog.Close render={<IconButton
+                variant="plain"
+                className="om-mcp-demo-dismiss inline-grid shrink-0 place-items-center"
+                aria-label={t('Close')}
+                icon={<RemixIcon name="close-line" size={18} />}
+              />} />
+            </header>
+            <div className="om-mcp-demo-preview">
+              {preview.showcaseIframe ? (
+                <iframe
+                  src={preview.showcaseIframe}
+                  title={content(preview).title}
+                  sandbox="allow-scripts"
+                />
+              ) : preview.video && !videoErrors[preview.id] ? (
+                <video
+                  src={preview.video}
+                  poster={preview.image}
+                  controls
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  onError={() => setVideoErrors(prev => ({ ...prev, [preview.id]: true }))}
+                />
+              ) : (
+                <img src={preview.image} alt="" />
+              )}
+            </div>
+            <div className="om-mcp-demo-prompt">
+              <div><span>{t('Copy for Agent')}</span></div>
+              <Dialog.Description>{content(preview).prompt}</Dialog.Description>
+            </div>
+            {copyFallback(preview)}
+            <footer>
+              {(() => {
+                const target = cardTarget(preview, content(preview).title);
+                return target && target.kind !== 'template' ? (
+                  <Button
+                    variant="plain"
+                    className="om-mcp-demo-copy"
+                    onClick={() => {
+                      recordMcpGalleryPosition({ category, cardId: preview.id });
+                      setPreview(null);
+                      onOpenTarget(target);
+                    }}
+                  >
+                    {target.kind === 'skill' ? t('Open Skill') : t('Browse Brand Kits')}
+                  </Button>
+                ) : null;
+              })()}
+              <Button variant="plain" className="om-mcp-demo-copy om-mcp-demo-confirm" data-copied={copiedCardId === preview.id || undefined} onClick={() => void copyPrompt(preview)}>
+                {t(copiedCardId === preview.id ? 'Copied' : 'Copy Prompt')}
+              </Button>
+            </footer>
+          </>}
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   </section>;
 }

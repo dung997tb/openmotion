@@ -292,7 +292,7 @@ describe("useTimelineSelectionPreviewSync", () => {
       onSelectionNotFound,
     });
 
-    expect(applyDomSelection).toHaveBeenCalledWith(secondSelection);
+    expect(applyDomSelection).toHaveBeenCalledWith(secondSelection, { revealPanel: false });
     expect(onSelectionNotFound).not.toHaveBeenCalled();
     harness.cleanup();
   });
@@ -327,7 +327,7 @@ describe("useTimelineSelectionPreviewSync", () => {
     }
 
     expect(onSelectionNotFound).toHaveBeenCalledOnce();
-    expect(applyDomSelection).toHaveBeenCalledWith(firstSelection);
+    expect(applyDomSelection).toHaveBeenCalledWith(firstSelection, { revealPanel: false });
     expect(applyMarqueeSelection).not.toHaveBeenCalled();
     harness.cleanup();
   });

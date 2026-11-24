@@ -1,3 +1,4 @@
+import { setBlockParameter } from './composition-variable.ts';
 import { clipboardMarkupForFile } from './clipboard-paths.ts';
 import { parseSourceDocument, findTargetElement } from '@hyperframes/studio-server/source-mutation';
 import { encodeUrlPath } from '@hyperframes/parsers';
@@ -142,6 +143,8 @@ export function applyContentCommand(
   if (command.kind === 'pasteClips' || command.kind === 'pasteElement')
     return applyPasteCommand(source, command).content;
   if (command.kind === 'replaceAsset') return replaceAsset(source, command);
+  if (command.kind === 'setBlockParameter')
+    return setBlockParameter(source, command.key, command.value, command.compositionPath, command.previous);
   const { start, track, canvasPosition, compositionPath } = command;
   if (
     !Number.isFinite(start) ||

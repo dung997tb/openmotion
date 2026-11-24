@@ -1,11 +1,15 @@
 import { isLiveMediaMove } from '../../../shared/preview-live-media.ts';
-import { TIMING_ATTRIBUTES, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH, isLivePositionEdit } from '../../../shared/preview-timing.ts';
+import { STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR } from '../../../packages/edit-core/canvas-position.ts';
+import { PREVIEW_ATTRIBUTES, canPatchPreviewAttribute, PRESENTATION_TAGS, PRESENTATION_STYLES, MAX_PREVIEW_TEXT_LENGTH, isLivePositionEdit, canPatchPresentationValue } from '../../../shared/preview-timing.ts';
 
 // Runs inside the token-scoped iframe. Each change targets a verified live node and file revision.
 export const PREVIEW_PEER_TIMING = `
-  const timingAttributes = new Set(${JSON.stringify(TIMING_ATTRIBUTES)});
+  const canPatchPreviewAttribute = ${canPatchPreviewAttribute.toString()};
+  const previewAttributes = new Set(${JSON.stringify(PREVIEW_ATTRIBUTES)});
   const presentationTags = new Set(${JSON.stringify(PRESENTATION_TAGS)});
   const presentationStyles = new Set(${JSON.stringify(PRESENTATION_STYLES)});
+  const originalTranslateAttribute = ${JSON.stringify(STUDIO_ORIGINAL_INLINE_TRANSLATE_ATTR)};
+  const canPatchPresentationValue = ${canPatchPresentationValue.toString()};
   const styleDocumentId = globalThis.crypto?.randomUUID?.();
   const timingDocumentId = settings.canRebindTiming === true ? styleDocumentId : undefined;
   function timingVersion(tag) {
@@ -14,6 +18,19 @@ export const PREVIEW_PEER_TIMING = `
     return match ? (match[1] === 'patch' ? tag : match[2]) : null;
   }
   function stagePresentation(node, change, effects, local, pending) {
+    if (change.captureOriginalTranslate !== undefined) {
+      const move = Array.isArray(change.styles) && change.styles.find(style => Array.isArray(style) && style[0] === 'translate');
+      if (typeof change.captureOriginalTranslate !== 'boolean' || !timingDocumentId || !move) return false;
+      const from = change.captureOriginalTranslate ? null : move[2];
+      const to = change.captureOriginalTranslate ? move[1] : null;
+      const actual = node.getAttribute(originalTranslateAttribute);
+      if (actual !== from && !(local && actual === to)) return false;
+      effects.push(forward => {
+        const value = forward ? to : actual;
+        if (value === null) node.removeAttribute(originalTranslateAttribute);
+        else node.setAttribute(originalTranslateAttribute, value);
+      });
+    }
     if (!change.styles && !change.text) return true;
     if (!presentationTags.has(node.localName)) return false;
     if (change.styles) {
@@ -22,7 +39,7 @@ export const PREVIEW_PEER_TIMING = `
         const actual = node.style.getPropertyValue(name) || '';
         const applied = pending?.element === node ? pending.applied?.[name] : undefined;
         const newer = newerDragStyle(pending, node, name);
-        if (!presentationStyles.has(name) || typeof from !== 'string' || typeof to !== 'string' ||
+        if (!presentationStyles.has(name) || typeof from !== 'string' || typeof to !== 'string' || !canPatchPresentationValue(name, to) ||
             (newer !== undefined && actual !== newer) ||
             Math.max(from.length,to.length) > 256 || (actual !== from && !(local && (actual === to || actual === applied || actual === newer))) ||
             (typeof node.style.getPropertyPriority === 'function' && node.style.getPropertyPriority(name))) return false;
@@ -69,7 +86,7 @@ export const PREVIEW_PEER_TIMING = `
     const edits = [], effects = [];
     for (const change of m.changes) {
       if (!change || (!change.hfId && !change.id && !change.compositionId) || !Array.isArray(change.attributes) ||
-          (!change.attributes.length && !change.styles && !change.text) || change.attributes.length > timingAttributes.size) return false;
+          (!change.attributes.length && !change.styles && !change.text) || change.attributes.length > previewAttributes.size) return false;
       if ((temporary || ownDrag) && (!change.styles || change.text || change.attributes.length)) return false;
       const selector = change.hfId ? '[data-hf-id="'+CSS.escape(change.hfId)+'"]' :
         change.id ? '#'+CSS.escape(change.id) : '[data-composition-id="'+CSS.escape(change.compositionId)+'"]';
@@ -80,12 +97,11 @@ export const PREVIEW_PEER_TIMING = `
       if (media && change.tag !== 'audio' && node !== document.querySelector('[data-composition-id]')) return false;
       if (!stagePresentation(node, change, effects, local, pending)) return false;
       for (const [name, from, to] of change.attributes) {
-        if (!timingAttributes.has(name) || [from,to].some(value => value !== null &&
-            (typeof value !== 'string' || !/^\\d+(?:\\.\\d+)?$/.test(value) || !Number.isFinite(Number(value))))) return false;
+        if (!previewAttributes.has(name) || [from, to].some(value => !canPatchPreviewAttribute(name, value, node.localName))) return false;
         const preserved = name === 'data-duration' || name === 'data-end' ? name.replace('data-','data-hf-authored-') : null;
         const names = preserved && node.hasAttribute(preserved) ? [preserved,name] : [name];
         const actual = node.getAttribute(names[0]);
-        if (actual !== from && !(actual !== null && from !== null && Number(actual) === Number(from))) return false;
+        if (actual !== from && !(actual && from && Number(actual) === Number(from))) return false;
         for (const attr of names) edits.push({node,attr,old:node.getAttribute(attr),to});
       }
     }
@@ -97,7 +113,8 @@ export const PREVIEW_PEER_TIMING = `
         else e.node.setAttribute(e.attr,e[key]);
       }
       for (const effect of effects) effect(key === 'to');
-      if (!edits.length) return;
+      // Lock is an editor flag. Studio reapplies the local monitor preference on mute.
+      if (!edits.some(edit => edit.attr !== 'data-timeline-locked' && edit.attr !== 'muted')) return;
       p.seek(time);
       window.__hfForceTimelineRebind();
       window.__hfStudioManualEditsApply?.();

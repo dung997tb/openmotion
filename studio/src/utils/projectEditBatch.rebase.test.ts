@@ -2,7 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { commitStudioEditBatch, submitStudioCommands } from './projectEditBatch';
 import { studioFileContentVersion } from './studioFileVersion';
-import { onRebasedFileEdit } from './rebasedFileEdit';
+import { confirmedSource, rememberSource } from './confirmedTextSources';
+import { acceptFileEditReceipt, onRebasedFileEdit } from './rebasedFileEdit';
 import { isolatedEditVersion } from './isolatedEditVersions';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -42,4 +43,21 @@ it('refreshes a rebased isolated-frame command even when the desired change was 
     { compositionPath: file, kind: 'editElements', patches: [] },
   ], { [file]: await studioFileContentVersion('stale frame') });
   expect(result.divergent).toEqual([{ path: file, changed: false, version }]);
+});
+
+it('retires the old patch base after a paste, without discarding a newer read or a no-op base', async () => {
+  const project = 'clipboard-receipts', path = 'index.html';
+  const before = { content: '<div>old</div>', version: '"patch:old"' };
+  const version = '"patch:pasted"';
+  rememberSource(project, path, before);
+  await acceptFileEditReceipt(project, path, before.version, before.content, before.version, {});
+  expect(confirmedSource(project, path)).toEqual(before);
+
+  await acceptFileEditReceipt(project, path, before.version, '<div>predicted clone</div>', version, {});
+  expect(confirmedSource(project, path)).toBeUndefined();
+
+  const latest = { content: '<div>another edit</div>', version: '"patch:newer"' };
+  rememberSource(project, path, latest);
+  await acceptFileEditReceipt(project, path, before.version, '<div>predicted clone</div>', version, {});
+  expect(confirmedSource(project, path)).toEqual(latest);
 });

@@ -7,6 +7,19 @@ import { parseGsapAnimationsFromHtml } from "../../packages/edit-core/gsap-mutat
 const source =
   '<div data-composition-id="stage" data-duration="6"><div id="a" style="translate: 3px 4px">A</div><div id="b">B</div></div>';
 const target = { id: "a" };
+
+test("turning off a media loop removes the attribute and still rejects invalid layout values", () => {
+  const operations = [{ type: "html-attribute" as const, property: "loop", value: null }];
+  const media = '<audio id="a" loop="true" muted></audio>';
+  const result = applyCanvasCommand(media, { kind: "editElements", patches: [{ target, operations }] });
+  assert.doesNotMatch(result, /\bloop\b/);
+  assert.match(result, /\bmuted\b/);
+  assert.throws(() => applyCanvasCommand(media, {
+    kind: "editElements",
+    patches: [{ target, operations: [{ type: "inline-style", property: "width", value: "10px", childIndex: NaN }] }],
+  }), /Invalid layout value/);
+});
+
 const move = {
   kind: "moveCanvasElement",
   target,

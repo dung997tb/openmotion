@@ -74,6 +74,55 @@ it('updates text and placement on the same live nodes without seeking or replaci
   assert.equal(send(message), false);
 });
 
+it('rebinds declarative track flags and gain without replacing media or accepting unrelated attributes', () => {
+  const { document, send } = preview();
+  const audio = document.getElementById('clip')!;
+  const state = (attributes: unknown) => ({ changes: [{ id: 'clip', tag: 'audio', attributes }] });
+  for (const invalid of [[['muted', null, 'false']], [['data-volume', null, '2']], [['src', null, 'other.wav']]]) {
+    assert.equal(send(state(invalid)), false);
+  }
+  const message = state([['data-timeline-locked', null, ''], ['data-hidden', null, ''], ['muted', null, ''], ['data-volume', null, '0.5']]);
+  const locked = preview();
+  assert.equal(locked.send(state([['data-timeline-locked', null, ''], ['muted', null, '']])), true);
+  assert.deepEqual(locked.hooks, []);
+  assert.equal(preview(false, { mediaTiming: true }).send(message), false);
+  assert.equal(send(message), true);
+  assert.equal(document.getElementById('clip'), audio);
+  assert.ok(audio.hasAttribute('muted') && audio.hasAttribute('data-timeline-locked') && audio.hasAttribute('data-hidden'));
+  assert.equal(audio.getAttribute('data-volume'), '0.5');
+  assert.equal(send({ before: etag(2), after: etag(3), ...state([['data-volume', '0.9', '1']]) }), false);
+});
+
+it('applies a solid fill without installing a new image URL through the live bridge', () => {
+  const { document, send } = preview();
+  const tile = document.getElementById('title')!;
+  const fill = (image: string) => ({
+    type: 'peer-presentation',
+    changes: [{ id:'title', tag:'div', attributes:[], styles:[['background-color', '', 'red'], ['background-image', '', image]] }],
+  });
+  assert.equal(send(fill('url(asset.png)')), false);
+  assert.equal(tile.style.getPropertyValue('background-color') || '', '');
+  assert.equal(send(fill('none')), true);
+  assert.equal(tile.style.getPropertyValue('background-color'), 'red');
+  assert.equal(tile.style.getPropertyValue('background-image'), 'none');
+});
+
+it('updates a font and a pixel translation with text only on a declarative document', () => {
+  const message = (offset: string) => ({ type: 'peer-presentation', changes: [{ id: 'title', tag: 'div', attributes: [],
+    text: ['Hello', 'Changed'], styles: [['font-family', '', 'Sample'], ['translate', '', offset]], captureOriginalTranslate: true }] });
+  const { document, send, hooks } = preview();
+  assert.equal(send(message('50% 12px')), false);
+  assert.equal(send(message('30px 12px')), true);
+  assert.equal(document.getElementById('title')!.style.getPropertyValue('font-family'), 'Sample');
+  assert.equal(document.getElementById('title')!.style.getPropertyValue('translate'), '30px 12px');
+  assert.equal(document.getElementById('title')!.getAttribute('data-hf-studio-original-inline-translate'), '');
+  assert.equal(send({ type: 'peer-presentation', before: etag(2), after: etag(3), changes: [{ id: 'title', tag: 'div',
+    attributes: [], styles: [['translate', '30px 12px', '']], captureOriginalTranslate: false }] }), true);
+  assert.equal(document.getElementById('title')!.getAttribute('data-hf-studio-original-inline-translate'), null);
+  assert.deepEqual(hooks, []);
+  assert.equal(preview(false, { position: true }).send(message('30px 12px')), false);
+});
+
 it('shows a confirmed nested style on the old scripted document while keeping its loaded revision for rebuild', () => {
   const { send, document, hooks } = preview(false);
   const path = 'scenes/intro.html';
@@ -191,6 +240,9 @@ it('enables the fast path only for declarative documents with no user startup co
     assert.equal(title.textContent, String(start));
   }
   assert.equal((await build(2)).allowed, true);
+  assert.equal((await build(2, '<canvas id="decoration"></canvas>')).allowed, true);
+  assert.equal((await build(2, '<canvas id="decoration"></canvas>' + startup)).allowed, false);
+  assert.equal((await build(2, '<canvas onclick="paint()"></canvas>')).allowed, false);
   assert.equal((await build(2, '<img onload="paint()" src="p.png">')).allowed, false);
   assert.equal((await build(2, '<div data-composition-src="scene.html"></div>')).allowed, false);
   assert.equal((await build(2, '', { '.hyperframes/studio-manual-edits.json': '{}' })).allowed, false);

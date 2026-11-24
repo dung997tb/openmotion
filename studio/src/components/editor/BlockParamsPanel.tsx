@@ -12,6 +12,7 @@ import { useStudioPlaybackContext } from "../../contexts/StudioContext";
 import { trackBlockParamCommit } from "../../telemetry/events";
 import { createTypingSave } from "../../utils/typingSave";
 import { serializeStudioFileMutation } from "../../utils/studioFileMutationCoordinator";
+const loadParameterEditor = () => import("../../../../packages/edit-core/composition-variable");
 
 interface BlockParamsPanelProps {
   blockName: string;
@@ -48,54 +49,46 @@ export const BlockParamsPanel = memo(function BlockParamsPanel({
   const [commitState, setCommitState] = useState<CommitState>({ tone: "idle" });
   const queues = useRef(new Map<string, ReturnType<typeof createTypingSave>>());
 
+  const edited = useRef(new Set<string>());
+  const read = fileManager?.readProjectFile;
+  useEffect(() => {
+    if (!read) return;
+    let current = true;
+    void Promise.all([read(compositionPath), loadParameterEditor()]).then(([content, editor]) => {
+      const declared = editor.compositionVariableValues(content, params.map(param => param.key));
+      if (!current || !declared) return;
+      const saved: Record<string, string> = {};
+      for (const param of params) {
+        const id = editor.declaredParameterId(declared.keys(), param.key);
+        if (id && !edited.current.has(param.key)) saved[param.key] = declared.get(id)!;
+      }
+      Object.assign(appliedRef.current, saved);
+      setValues(existing => ({ ...existing, ...saved }));
+    }).catch(() => { /* A commit retries the versioned read and reports a failure. */ });
+    return () => { current = false; };
+  }, [compositionPath, params, read]);
+
   const commitParamNow = useCallback(
     async (key: string, nextValue: string) => {
       if (!fileManager) return;
       const previous = appliedRef.current[key];
-      if (previous === undefined || previous === nextValue || !nextValue.trim()) return;
+      if (previous === undefined) return;
       setCommitState({ tone: "saving" });
       try {
-        const content = await fileManager.readProjectFile(compositionPath);
-        // Token-boundary match so "#0c0c0c" never rewrites part of "#0c0c0cff".
-        const matcher = new RegExp(
-          `(?<![-\\w#])${previous.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![-\\w])`,
-          "g",
-        );
-        const matches = content.match(matcher)?.length ?? 0;
-        if (matches === 0) {
-          setCommitState({
-            tone: "error",
-            message: `Couldn't find the current value in ${compositionPath}. It may have been edited by hand.`,
+        const [content, editor] = await Promise.all([fileManager.readProjectFile(compositionPath), loadParameterEditor()]);
+        const after = editor.setBlockParameter(content, key, nextValue, compositionPath, previous);
+        if (after !== content) {
+          await fileManager.writeProjectFile(compositionPath, after, content, {
+            kind: "setBlockParameter", compositionPath, key, previous, value: nextValue,
           });
-          trackBlockParamCommit({ tone: "error", blockName, key });
-          return;
         }
-        // The panel maps a param to a bare literal, with no per-occurrence
-        // binding metadata. At the string level it cannot tell "both of these
-        // belong to this param" from "one is unrelated adjacent content" (a
-        // sibling block, a decoration, a comment). A blind replace of a literal
-        // that appears more than once could silently mutate that unrelated
-        // content — so refuse and tell the user to disambiguate by hand. Only a
-        // unique single occurrence is safe to rewrite automatically.
-        if (matches > 1) {
-          setCommitState({
-            tone: "error",
-            message: `"${previous}" appears ${matches}× in ${compositionPath}. The panel can't tell which one belongs to this parameter, so it won't risk changing unrelated content. Edit the file directly to disambiguate.`,
-          });
-          trackBlockParamCommit({ tone: "error", blockName, key });
-          return;
-        }
-        await fileManager.writeProjectFile(
-          compositionPath,
-          content.replace(matcher, () => nextValue),
-          content,
-        );
         appliedRef.current[key] = nextValue;
         setCommitState({ tone: "saved" });
         trackBlockParamCommit({ tone: "saved", blockName, key });
         setRefreshKey((k) => k + 1);
-      } catch {
-        setCommitState({ tone: "error", message: "Couldn't save the block file. Retry?" });
+      } catch (error) {
+        setValues(drafts => drafts[key] === nextValue ? { ...drafts, [key]: previous } : drafts);
+        setCommitState({ tone: "error", message: error instanceof Error ? error.message : "Couldn't save the block file. Retry?" });
         trackBlockParamCommit({ tone: "error", blockName, key });
       }
     },
@@ -114,6 +107,7 @@ export const BlockParamsPanel = memo(function BlockParamsPanel({
   );
 
   const handleChange = (key: string, value: string, composing = false) => {
+    edited.current.add(key);
     setValues(prev => ({ ...prev, [key]: value }));
     if (composing) return;
     let queue = queues.current.get(key);
@@ -176,6 +170,7 @@ export const BlockParamsPanel = memo(function BlockParamsPanel({
     </div>
   );
 });
+
 
 function ParamControl({
   param,

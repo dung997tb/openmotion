@@ -19,23 +19,30 @@ export function PreviewCanvasMenu() {
   let root: Element | null = null;
   try { root = iframe?.contentDocument?.querySelector('[data-composition-id]') ?? null; } catch { /* A new preview is still loading. */ }
   const path = shell.activeCompPath || 'index.html';
-  const [framing, setFraming] = useState<{ iframe: HTMLIFrameElement; path: string; fit: CanvasFit } | null>(null);
+  const [framing, setFraming] = useState<{ iframe: WeakRef<HTMLIFrameElement>; path: string; fit: CanvasFit } | null>(null);
   useEffect(() => {
-    if (!iframe || root) return;
+    if (!iframe || root) {
+      setFraming((current) => (current ? null : current));
+      return;
+    }
     const adapter = projectPreviewAdapter(iframe, shell.projectId);
-    if (!adapter) return;
+    if (!adapter) {
+      setFraming((current) => (current ? null : current));
+      return;
+    }
+    const frameRef = new WeakRef(iframe);
     let sequence = 0;
     const read = async () => {
       const id = ++sequence;
       const value = await adapter.request<{ sourceFile: string; fit: CanvasFit } | null>('canvas-framing').catch(() => null);
       if (id === sequence) setFraming(value?.sourceFile === path && ['contain', 'cover'].includes(value.fit) ?
-        { iframe, path, fit: value.fit } : null);
+        { iframe: frameRef, path, fit: value.fit } : null);
     };
     void read();
     const unsubscribe = onPreviewContentReplaced(iframe, read);
     return () => { ++sequence; unsubscribe(); };
   }, [iframe, root, path, shell.projectId]);
-  const remoteFit = framing?.iframe === iframe && framing?.path === path ? framing.fit : null;
+  const remoteFit = framing?.iframe.deref() === iframe && framing?.path === path ? framing.fit : null;
   const dimensions = shell.compositionDimensions;
   const ratio = dimensions ? canvasRatio(dimensions.width, dimensions.height) : '';
   const fit: CanvasFit = root?.getAttribute('data-canvas-fit') === 'cover' ? 'cover' : remoteFit || 'contain';

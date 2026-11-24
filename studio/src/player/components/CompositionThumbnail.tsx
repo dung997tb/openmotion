@@ -128,6 +128,17 @@ export function compositionThumbnailRequest(
 ): ThumbnailRequest {
   const cloud = getCachedCloudDisklessMode();
   const identity = new URL(url, window.location.origin);
+  const thumbMatch = /\/thumbnail\/([^?#]+)/.exec(identity.pathname);
+  let compositionPath: string | undefined;
+  if (thumbMatch?.[1]) {
+    try {
+      compositionPath = decodeURIComponent(thumbMatch[1]).replace(/^(\.\/|\/)+/, "");
+    } catch {
+      compositionPath = thumbMatch[1].replace(/^(\.\/|\/)+/, "");
+    }
+  }
+  const rawRevision = Number(identity.searchParams.get("revision") ?? 0);
+  const contentRevision = Number.isFinite(rawRevision) ? rawRevision : 0;
   if (cloud) {
     // A representative is shared by the card and every strip of this composition/selection.
     identity.searchParams.delete("t");
@@ -140,6 +151,8 @@ export function compositionThumbnailRequest(
     kind: "composition",
     priority,
     rich,
+    compositionPath,
+    contentRevision,
     load: (signal) => cloud
       ? loadCloudCompositionPoster(identity, projectId, sessionEpoch, signal)
       : loadCompositionImage(url, signal),

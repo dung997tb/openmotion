@@ -75,7 +75,7 @@ export function createStudioFileMutationsRoutes(
       });
     }
 
-    const unsafe = findUnsafeDomPatchValues(operations);
+    const unsafe = findUnsafeDomPatchValues({ operations });
     if (unsafe.length > 0) {
       return c.json({ error: 'Non-finite or unsafe DOM patch values', unsafe }, 400);
     }
@@ -235,7 +235,7 @@ export function createStudioFileMutationsRoutes(
       }
       for (const edit of edits) {
         if (!edit?.target || !Array.isArray(edit.ops)) return c.json({ error: 'Invalid patch', durable: false }, 400);
-        const unsafe = findUnsafeDomPatchValues(edit.ops);
+        const unsafe = findUnsafeDomPatchValues({ operations: edit.ops });
         if (unsafe.length > 0) {
           return c.json({ error: 'Non-finite or unsafe DOM patch values', unsafe, durable: false }, 400);
         }
@@ -325,7 +325,7 @@ export function createStudioFileMutationsRoutes(
     const elementIds: Array<string | null> = [];
 
     for (const edit of body.edits) {
-      const unsafe = findUnsafeDomPatchValues(edit.ops);
+      const unsafe = findUnsafeDomPatchValues({ operations: edit.ops });
       if (unsafe.length > 0) {
         return c.json({ error: 'Non-finite or unsafe DOM patch values', unsafe }, 400);
       }

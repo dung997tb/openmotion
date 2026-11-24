@@ -23,6 +23,7 @@ export type ReplaceAsset = {
 };
 export type ContentCommand =
   | PasteCommand
+  | { kind: 'setBlockParameter'; compositionPath: string; key: string; value: string; previous?: string }
   | ReplaceAsset
   | (Placement &
       (
@@ -52,6 +53,18 @@ const placement = {
   },
 };
 export const contentCommandSchemas = [
+  {
+    type: 'object',
+    properties: {
+      kind: { enum: ['setBlockParameter'] },
+      compositionPath: path,
+      key: { type: 'string', minLength: 1, maxLength: 240 },
+      previous: { type: 'string', maxLength: 524288 },
+      value: { type: 'string', maxLength: 524288 },
+    },
+    required: ['kind', 'compositionPath', 'key', 'value'],
+    additionalProperties: false,
+  },
   {
     type: 'object',
     description:
@@ -161,6 +174,7 @@ export const contentCommandSchemas = [
 
 export function isContentCommand(command: ProjectEditCommand): command is ContentCommand {
   return (
+    command.kind === 'setBlockParameter' ||
     command.kind === 'replaceAsset' ||
     command.kind === 'pasteClips' ||
     command.kind === 'pasteElement' ||
@@ -172,6 +186,7 @@ export function isContentCommand(command: ProjectEditCommand): command is Conten
 export function contentDependencies(
   command: ContentCommand,
 ): readonly { path: string; type: 'text' | 'asset' }[] {
+  if (command.kind === 'setBlockParameter') return [];
   if (command.kind === 'pasteClips' || command.kind === 'pasteElement') {
     const markup = command.kind === 'pasteClips' ? command.clips.map((clip) => clip.html) : [command.html];
     const paths = new Map<string, 'text' | 'asset'>();
@@ -198,6 +213,7 @@ export function contentDependencies(
 }
 
 export function contentCommandLabel(command: ContentCommand) {
+  if (command.kind === 'setBlockParameter') return 'Edit block parameter';
   if (command.kind === 'replaceAsset') return 'Replace clip media';
   if (command.kind === 'pasteElement') return 'Paste element';
   if (command.kind === 'pasteClips') return command.clips.length > 1 ? 'Paste clips' : 'Paste clip';

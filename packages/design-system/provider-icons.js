@@ -85,6 +85,9 @@ export const providerIcons = Object.freeze({
   "claude-code": {
     "file": "providers/claudecode-color.svg"
   },
+  "claude-desktop": {
+    "file": "providers/claude-color.svg"
+  },
   "openai-codex": {
     "file": "providers/codex-color.svg"
   },
@@ -231,6 +234,9 @@ export const providerIcons = Object.freeze({
   },
   "codex": {
     "file": "providers/codex-color.svg"
+  },
+  "codex-mark": {
+    "file": "providers/codex-mark.svg"
   },
   "opendesign": {
     "file": "providers/opendesign.svg"

@@ -330,6 +330,9 @@ export function useTimelineSyncCallbacks({
       const stopWaiting = () => {
         window.removeEventListener("message", onMessage);
         cancelAnimationFrame(retryFrame);
+        if (stopWaitingRef.current === stopWaiting) {
+          stopWaitingRef.current = null;
+        }
       };
 
       const trySettle = () => {

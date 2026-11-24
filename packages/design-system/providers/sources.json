@@ -4,6 +4,11 @@
     "revision": "55746b0b082258211121c70bd26e6878fd3bd292",
     "license": "lobe-icons-LICENSE.txt"
   },
+  "lobePackage": {
+    "package": "@lobehub/icons-static-svg",
+    "version": "1.102.0",
+    "license": "lobe-icons-LICENSE.txt"
+  },
   "cherry": {
     "repository": "https://github.com/CherryHQ/cherry-studio",
     "revision": "d7e53eaf196dc86343c20779f86a0f90f6f8d498",
@@ -114,9 +119,18 @@
       "source": "lobe",
       "path": "packages/static-svg/icons/claudecode-color.svg"
     },
+    "claude-color.svg": {
+      "source": "lobePackage",
+      "path": "icons/claude-color.svg"
+    },
     "codex-color.svg": {
       "source": "lobe",
       "path": "packages/static-svg/icons/codex-color.svg"
+    },
+    "codex-mark.svg": {
+      "source": "lobe",
+      "path": "packages/static-svg/icons/codex-color.svg",
+      "modifications": "Removed the tile and adjusted the viewBox for inline use."
     },
     "grok.svg": {
       "source": "lobe",

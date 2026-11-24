@@ -35,6 +35,9 @@ export type PreviewBridgeMessageType =
   | "pick-mode"
   | "runtime-error"
   | "preview-replaced"
+  | "browser-export-start"
+  | "browser-export-cancel"
+  | "browser-export-progress"
   | "handshake"
   | "response";
 
