@@ -2743,7 +2743,9 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     assert.ok(bridgeSrc);
     const bridgeUrl = new URL(bridgeSrc);
     assert.equal(bridgeUrl.origin, minted.previewOrigin);
-    assert.deepEqual([...bridgeUrl.searchParams.keys()], ['v']);
+    assert.equal(bridgeUrl.search, '');
+    const expectedSha = /^\/api\/preview-bridge\/([a-f0-9]{64})\.js$/.exec(bridgeUrl.pathname)?.[1];
+    assert.ok(expectedSha);
     const bridgeAsset = await app.request(bridgeSrc, { headers: previewHeaders });
     assert.equal(bridgeAsset.status, 200);
     assert.match(bridgeAsset.headers.get('cache-control') ?? '', /immutable/);
@@ -2753,10 +2755,30 @@ describe('Cloud API Entrypoint — Unified Config & Cookie-less Preview Subdomai
     assert.equal(snapdomAsset.headers.get('set-cookie'), null);
     assert.match(await snapdomAsset.text(), /window\.snapdom/);
     const script = await bridgeAsset.text();
-    assert.equal(createHash('sha256').update(script).digest('hex'), bridgeUrl.searchParams.get('v'));
+    assert.equal(createHash('sha256').update(script).digest('hex'), expectedSha);
+    assert.ok(previewHtml.includes('integrity="sha256-' + Buffer.from(expectedSha, 'hex').toString('base64') + '"'));
+    assert.equal((await fixture.storage.getObjectBuffer('system/preview-bridge/' + expectedSha + '.js')).toString(), script);
     assert.ok(!script.includes(minted.token) && !script.includes(projectA));
-    bridgeUrl.searchParams.set('v', 'retired');
-    assert.equal((await app.request(bridgeUrl.href, { headers: previewHeaders })).headers.get('cache-control'), 'no-store');
+    const legacy = await app.request('/api/preview-bridge.js?v=retired', { headers: previewHeaders });
+    assert.equal(legacy.headers.get('cache-control'), 'no-store');
+    assert.equal(await legacy.text(), script);
+
+    const foreignScript = Buffer.from('// another deployed bridge build');
+    const foreignHash = createHash('sha256').update(foreignScript).digest('hex');
+    const foreignUrl = '/api/preview-bridge/' + foreignHash + '.js';
+    const foreignKey = 'system/preview-bridge/' + foreignHash + '.js';
+    const missing = await app.request(foreignUrl, { headers: previewHeaders });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.headers.get('cdn-cache-control'), 'no-store');
+    await fixture.storage.putObject(foreignKey, 'different bytes', 'application/javascript');
+    const corrupt = await app.request(foreignUrl, { headers: previewHeaders });
+    assert.equal(corrupt.status, 503);
+    assert.equal(corrupt.headers.get('cache-control'), 'no-store');
+    await fixture.storage.putObject(foreignKey, foreignScript, 'application/javascript');
+    const archived = await app.request(foreignUrl, { headers: previewHeaders });
+    assert.equal(archived.status, 200);
+    assert.match(archived.headers.get('cache-control') ?? '', /immutable/);
+    assert.deepEqual(Buffer.from(await archived.arrayBuffer()), foreignScript);
 
     const assetResponse = await app.request(assetUrl.href, { headers: previewHeaders });
     assert.equal(assetResponse.status, 200);
