@@ -277,11 +277,12 @@ it("submits the isolated frame's position intent with its displayed source versi
     const target = { hfId: "hf-title", id: "title" };
     const box = { top: 25, left: 50, makeRelative: false };
     await act(async () => {
-      await rendered.hook.commitDomEditPatchBatches([{
+      const receipt = await rendered.hook.commitDomEditPatchBatches([{
         sourceFile: "intro.html", ifMatch: "displayed", box,
         position: { time: 0.967, delta: { x: 5, y: 8 } },
         patches: [{target, operations: [{ type: "inline-style", property: "top", value: "25px" }]}],
       }], { label: "Move title" });
+      expect(receipt).toMatchObject({ durable: true, changed: true, savedCanvasVersion: "new-version" });
     });
     expect(rendered.reloadPreview).toHaveBeenCalledWith(["intro.html"]);
     expect(seen).toHaveLength(1);
