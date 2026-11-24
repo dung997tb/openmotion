@@ -85,6 +85,23 @@ export type DesktopSentryReporterOptions = {
   sendTimeoutMs?: number;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  /** Called for every event captured while reporting is on, before it is sent. */
+  onCapture?: (level: 'info' | 'warning' | 'error' | 'fatal') => void;
+  /** Called when reporting is turned off, so callers can erase what they kept for it. */
+  onDisabled?: () => void;
+};
+
+/** One update of a release-health session; times are epoch milliseconds. */
+export type DesktopSentrySessionUpdate = {
+  sid: string;
+  did?: string;
+  init: boolean;
+  startedAt: number;
+  timestamp: number;
+  status: 'ok' | 'exited' | 'crashed' | 'abnormal';
+  errors: number;
+  durationSeconds?: number;
+  release: string;
 };
 
 export type DesktopSentryCaptureContext = {
@@ -106,6 +123,8 @@ export type DesktopSentryReporter = {
     level?: 'info' | 'warning' | 'error' | 'fatal',
     context?: DesktopSentryCaptureContext,
   ) => Promise<boolean>;
+  /** Sends a release-health session update; undeliverable updates wait in the outbox. */
+  sendSession: (update: DesktopSentrySessionUpdate) => Promise<boolean>;
 };
 
 function isOptedOutByEnv(env: NodeJS.ProcessEnv): boolean {
@@ -374,6 +393,29 @@ export function createDesktopSentryReporter(
     ...(context?.tags ?? {}),
   });
 
+  const sendSession = async (update: DesktopSentrySessionUpdate): Promise<boolean> => {
+    if (!endpoints || !isEnabled()) return false;
+    const envelopeHeader = JSON.stringify({
+      sent_at: new Date(now()).toISOString(),
+      dsn: endpoints.dsn,
+    });
+    const session = JSON.stringify({
+      sid: update.sid,
+      ...(update.did ? { did: update.did } : {}),
+      init: update.init,
+      started: new Date(update.startedAt).toISOString(),
+      timestamp: new Date(update.timestamp).toISOString(),
+      status: update.status,
+      errors: update.errors,
+      ...(update.durationSeconds !== undefined ? { duration: update.durationSeconds } : {}),
+      attrs: { release: update.release, environment },
+    });
+    const body = `${envelopeHeader}\n${JSON.stringify({ type: 'session' })}\n${session}\n`;
+    const result = await postEnvelope(body);
+    if (result === 'retry') enqueue(body);
+    return result === 'sent';
+  };
+
   const startCrashReporter = (crashReporter: ElectronCrashReporterLike): boolean => {
     crashReporterRef = crashReporter;
     if (!endpoints || !isEnabled() || crashReporterStarted) return false;
@@ -405,7 +447,10 @@ export function createDesktopSentryReporter(
     setEnabled(next: boolean) {
       runtimeEnabled = Boolean(next) && Boolean(endpoints);
       // Turning sharing off also discards what was waiting to be sent.
-      if (!isEnabled()) writeOutbox([]);
+      if (!isEnabled()) {
+        writeOutbox([]);
+        options.onDisabled?.();
+      }
       if (!crashReporterRef) return;
       if (!crashReporterStarted) {
         startCrashReporter(crashReporterRef);
@@ -421,9 +466,11 @@ export function createDesktopSentryReporter(
       return endpoints;
     },
     flushOutbox,
+    sendSession,
     startCrashReporter,
     async captureException(error, context) {
       if (!isEnabled()) return false;
+      options.onCapture?.('error');
       const errObj = error instanceof Error ? error : new Error(typeof error === 'string' ? error : String(error));
       const frames = parseStackFrames(errObj.stack, redactPaths);
       const event: SentryLikeEvent = {
@@ -446,6 +493,7 @@ export function createDesktopSentryReporter(
     },
     async captureMessage(message, level = 'error', context) {
       if (!isEnabled()) return false;
+      options.onCapture?.(level);
       const event: SentryLikeEvent = {
         level,
         message: scrubString(message, redactPaths),

@@ -43,6 +43,7 @@ import {
 import { createElectronSafeSecretStore } from './safe-secret-store.ts';
 import { createDesktopSentryReporter, resolveDesktopSentryDsn } from './sentry.ts';
 import { classifyLoadFailure, createIncidentId, probeConnectivity } from './startup-health.ts';
+import { createSessionTracker, hasCrashDumpSince } from './session-health.ts';
 import { DesktopTelemetryCollector } from './telemetry.ts';
 import {
   CapabilityRegistry,
@@ -203,10 +204,11 @@ const telemetry = new DesktopTelemetryCollector({
 });
 const appStartupStartedAt = Date.now();
 
+const desktopRelease = `openmotion-desktop@${app.getVersion()}`;
 const desktopSentry = createDesktopSentryReporter({
   dsn: resolveDesktopSentryDsn(),
   environment: process.env.SENTRY_ENVIRONMENT,
-  release: `openmotion-desktop@${app.getVersion()}`,
+  release: desktopRelease,
   channel: releaseChannel,
   platform,
   arch: process.arch,
@@ -216,12 +218,27 @@ const desktopSentry = createDesktopSentryReporter({
   // Chromium's network stack follows the system proxy; Node's fetch does not.
   fetchImpl: (input, init) =>
     app.isReady() ? net.fetch(input instanceof URL ? input.toString() : input, init) : fetch(input, init),
+  onCapture: level => {
+    if (level === 'error' || level === 'fatal') sessionTracker.noteError();
+  },
+  onDisabled: () => sessionTracker.forget(),
+});
+const sessionTracker = createSessionTracker({
+  dir: path.join(dataDir, 'telemetry'),
+  release: desktopRelease,
+  isEnabled: () => desktopSentry.isEnabled(),
+  send: update => void desktopSentry.sendSession(update),
+  hasCrashDumpSince: sinceMs => hasCrashDumpSince(app.getPath('crashDumps'), sinceMs),
 });
 // Honor the persisted sharing preference before Studio loads and syncs it.
 desktopSentry.setEnabled(telemetry.isEnabled());
 desktopSentry.startCrashReporter(crashReporter);
-// Deliver what an earlier launch could not send (it may have failed while offline).
-void app.whenReady().then(() => desktopSentry.flushOutbox());
+// Report this launch for release health, and deliver what an earlier launch could not
+// send (it may have failed while offline).
+void app.whenReady().then(() => {
+  sessionTracker.start();
+  return desktopSentry.flushOutbox();
+});
 
 const previousSession = logger.markSessionStarted({
   version: app.getVersion(),
@@ -983,6 +1000,7 @@ async function installDownloadedUpdate(): Promise<{ ok: boolean; error?: string 
     progressCoordinator.clearAll();
     authHandoff.cancelLogin();
     logger.markSessionEnded('install-update');
+    sessionTracker.end();
   });
   telemetry.record({
     category: 'updater.install',
@@ -1851,6 +1869,7 @@ function createMainWindow(): BrowserWindow {
       exitCode: details.exitCode,
     });
     logger.writeCrashMarker('renderer-gone', details);
+    if (details.reason !== 'clean-exit' && details.reason !== 'killed') sessionTracker.noteCrash();
     const incidentId = createIncidentId();
     void desktopSentry.captureMessage(`Renderer process gone: ${details.reason}`, 'fatal', {
       area: 'renderer',
@@ -2179,6 +2198,7 @@ app.on('before-quit', event => {
     signedConfigRefreshTimer = null;
   }
   logger.markSessionEnded('quit');
+  sessionTracker.end();
 });
 
 nativeTheme.on('updated', () => {
