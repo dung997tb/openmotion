@@ -1,8 +1,7 @@
 import type { LibraryGeneration } from './asset-library.ts';
 import type { GenerationOptions } from './generation-options.ts';
-import { openDesignImageReferenceCap } from './opendesign-models.ts';
-import type { ModelRoutingTier } from './provider-directory.ts';
-export { modelRoutingTiers, type ModelRoutingTier } from './provider-directory.ts';
+import { modelRoutingTiers, openDesignImageReferenceCap, type ModelRoutingTier } from './opendesign-models.ts';
+export { modelRoutingTiers, type ModelRoutingTier };
 /** Public contract shared by the model gateway, MCP and Studio. Never contains credentials. */
 export const modalities = ['image', 'video', 'audio'] as const;
 export type Modality = typeof modalities[number];

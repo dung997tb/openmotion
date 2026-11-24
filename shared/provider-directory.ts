@@ -1,3 +1,5 @@
+import type { ModelRoutingTier } from './opendesign-models.ts';
+export type { ModelRoutingTier };
 /** Settings contracts contain public metadata only. Credentials remain service-owned. */
 export const modelKinds = ['text', 'image', 'video', 'audio', 'transcription', 'embedding', 'reranker'] as const;
 export type ModelKind = typeof modelKinds[number];
@@ -22,8 +24,6 @@ export function publicProviderConnection(provider: ProviderConnection): Provider
   return { id, label, protocol, baseUrl, kinds, category, website, docs, setupRequired, baseUrlEditable,
     configured, enabled, available, custom, credentialSource, reason, ...(verification ? { verification } : {}) };
 }
-export const modelRoutingTiers = ['flagship', 'balanced', 'fast'] as const;
-export type ModelRoutingTier = typeof modelRoutingTiers[number];
 export const modelCapabilities = ['reasoning', 'tools'] as const;
 export const inputModalities = ['vision', 'audio', 'video'] as const;
 export type ModelMetadata = {

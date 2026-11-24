@@ -1,5 +1,7 @@
 import type { Modality, Model } from './gateway.ts';
-import { modelRoutingTiers, type ModelRoutingTier } from './provider-directory.ts';
+
+export const modelRoutingTiers = ['flagship', 'balanced', 'fast'] as const;
+export type ModelRoutingTier = typeof modelRoutingTiers[number];
 
 export type OpenDesignModelProfile = {
   modelId: string;
